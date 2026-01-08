@@ -3,8 +3,8 @@
   "description": "The /api/invoices/finalize endpoint authenticates the user but does NOT verify that the user belongs to the company that owns the invoice. An authenticated attacker could finalize any invoice by guessing/knowing invoice IDs, potentially generating PDFs and manipulating invoice data for invoices they don't own.",
   "created_at": "2026-01-08T18:18:34.293Z",
   "updated_at": "2026-01-08T18:30:00.000Z",
-  "status": "backlog",
-  "planStatus": "approved",
+  "status": "human_review",
+  "planStatus": "review",
   "workflow_type": "development",
   "services_involved": [
     "api"
@@ -85,5 +85,32 @@
     "TypeScript compilation succeeds"
   ],
   "spec_file": "spec.md",
-  "last_updated": "2026-01-08T18:27:04.848686+00:00"
+  "last_updated": "2026-01-08T18:31:20.514508+00:00",
+  "qa_signoff": {
+    "status": "approved",
+    "qa_session": 0,
+    "issues_found": [
+      {
+        "description": "None"
+      }
+    ],
+    "tests_passed": {},
+    "timestamp": "2026-01-08T18:31:20.514497+00:00",
+    "ready_for_qa_revalidation": false
+  },
+  "qa_iteration_history": [
+    {
+      "iteration": 1,
+      "status": "approved",
+      "timestamp": "2026-01-08T18:31:37.440315+00:00",
+      "issues": [],
+      "duration_seconds": 235.65
+    }
+  ],
+  "qa_stats": {
+    "total_iterations": 1,
+    "last_iteration": 1,
+    "last_status": "approved",
+    "issues_by_type": {}
+  }
 }

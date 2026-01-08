@@ -1,0 +1,10 @@
+{
+  "sourceType": "ideation",
+  "ideationType": "security_hardening",
+  "ideaId": "sec-001",
+  "rationale": "This is an IDOR (Insecure Direct Object Reference) vulnerability. While Supabase RLS policies provide a database-level safety net, the API route performs file generation and S3 uploads before the database operation, meaning an attacker could trigger resource consumption and potentially receive error messages that leak information about invoices they shouldn't access.",
+  "category": "security",
+  "securitySeverity": "high",
+  "impact": "high",
+  "priority": "high"
+}
