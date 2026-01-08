@@ -1,0 +1,103 @@
+# Build Progress: Add Authorization Check in Invoice Finalize API
+
+## Status: Phase 1 Complete (1.1 Done)
+
+## Summary
+Fix IDOR vulnerability in `/api/invoices/finalize` endpoint by adding authorization check to verify user belongs to the invoice's company before performing any resource-consuming operations.
+
+---
+
+## 2026-01-08: Implementation Plan Created
+
+### Analysis Complete
+- **Vulnerability**: The endpoint authenticates users but doesn't verify company membership
+- **Risk**: Attackers can trigger PDF generation, XML creation, and S3 uploads for invoices they don't own
+- **RLS Note**: Supabase RLS provides database-level protection, but resource consumption happens BEFORE database update
+
+### Key Findings
+1. **Vulnerable file**: `app/api/invoices/finalize/route.ts`
+   - Line 14-17: Authenticates user
+   - Line 27-32: Fetches invoice by ID (no company check)
+   - Line 62-87: PDF/XML generation and S3 upload happen BEFORE any authorization check
+
+2. **Existing pattern found**: `app/(app)/invoices/[id]/page.tsx` (lines 28-37)
+   ```typescript
+   const { data: companyUsers } = await supabase
+     .from('company_users')
+     .select('company_id')
+     .eq('user_id', user.id)
+     .eq('company_id', invoice.company_id)
+     .single()
+
+   if (!companyUsers) {
+     redirect('/invoices')  // For API: return 403 Forbidden
+   }
+   ```
+
+### Implementation Plan
+- **Phase 1**: Add authorization check (1 subtask)
+- **Phase 2**: Verification (2 subtasks)
+
+### Next Steps
+1. ~~Implement authorization check in route.ts (after invoice fetch, before PDF generation)~~ ✅
+2. ~~Return 403 Forbidden for unauthorized access~~ ✅
+3. Verify TypeScript compilation
+4. Review code placement
+
+---
+
+## 2026-01-08: Subtask 1.1 Completed
+
+### Implementation Complete
+Added authorization check to `app/api/invoices/finalize/route.ts`:
+
+```typescript
+// Verify user belongs to the invoice's company
+const { data: companyUser } = await supabase
+  .from('company_users')
+  .select('company_id')
+  .eq('user_id', user.id)
+  .eq('company_id', invoice.company_id)
+  .single()
+
+if (!companyUser) {
+  return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+}
+```
+
+### Acceptance Criteria Met
+- ✅ Authorization check added after invoice fetch (line 38-48)
+- ✅ Check placed BEFORE PDF generation (line 74+) and S3 operations (line 84+)
+- ✅ Uses `company_users` table to verify user belongs to `invoice.company_id`
+- ✅ Returns 403 Forbidden with generic error message
+- ✅ Does not leak invoice details in error response
+- ✅ Follows existing pattern from `app/(app)/invoices/[id]/page.tsx`
+
+### Commit
+`a7aee7f` - auto-claude: 1.1 - Add authorization check to invoice finalize endpoint
+
+---
+
+## 2026-01-08: Subtask 2.1 Completed
+
+### TypeScript Verification (Manual)
+Build commands (npm, pnpm, tsc) are restricted in this environment. Performed comprehensive manual TypeScript verification instead.
+
+### Manual Verification Checklist
+- ✅ **Pattern consistency**: Authorization check pattern in `route.ts` (lines 38-48) matches existing pattern in `app/(app)/invoices/[id]/page.tsx` (lines 28-37) exactly
+- ✅ **Database types verified**: `company_users` table has `user_id` and `company_id` fields (confirmed in `types/database.ts`)
+- ✅ **Type imports valid**: `Invoice`, `IssuerSnapshot`, `CustomerSnapshot` properly exported from `@/types`
+- ✅ **Supabase query types**: `.select('company_id').single()` returns correct type `{ company_id: string } | null`
+- ✅ **Null check correct**: `if (!companyUser)` properly handles unauthorized case
+- ✅ **NextResponse usage**: Follows existing API response patterns
+
+### Files Reviewed
+1. `app/api/invoices/finalize/route.ts` - Modified file with authorization check
+2. `app/(app)/invoices/[id]/page.tsx` - Reference pattern for authorization
+3. `types/index.ts` - Type definitions
+4. `types/database.ts` - Database schema types
+
+### Note
+Full TypeScript compilation (`npm run build`) could not be executed due to environment restrictions. Manual review confirms TypeScript correctness based on code analysis and pattern matching.
+
+---
