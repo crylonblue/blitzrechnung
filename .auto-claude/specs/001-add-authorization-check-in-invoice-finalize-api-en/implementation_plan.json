@@ -61,7 +61,7 @@
           "id": "2.2",
           "title": "Manual verification of authorization logic",
           "description": "Review the implementation to ensure the authorization check occurs before any resource-consuming operations (PDF generation, S3 upload)",
-          "status": "pending",
+          "status": "completed",
           "files": [
             "app/api/invoices/finalize/route.ts"
           ],
@@ -70,7 +70,9 @@
             "No operations (PDF, XML, S3) happen before authorization check",
             "Error message does not leak invoice details"
           ],
-          "implementation_notes": "Code review to verify the check placement"
+          "implementation_notes": "Code review to verify the check placement",
+          "notes": "Code review verified authorization check placement. The check at lines 38-48 occurs immediately after invoice fetch and BEFORE all resource-consuming operations: PDF generation (line 74), XML generation (line 77), and S3 uploads (lines 84-99). Error response returns only 'Forbidden' without leaking invoice details.",
+          "updated_at": "2026-01-08T18:27:04.848680+00:00"
         }
       ]
     }
@@ -83,5 +85,5 @@
     "TypeScript compilation succeeds"
   ],
   "spec_file": "spec.md",
-  "last_updated": "2026-01-08T18:25:43.737262+00:00"
+  "last_updated": "2026-01-08T18:27:04.848686+00:00"
 }

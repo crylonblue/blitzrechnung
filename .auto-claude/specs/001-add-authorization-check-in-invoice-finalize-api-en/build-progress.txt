@@ -101,3 +101,38 @@ Build commands (npm, pnpm, tsc) are restricted in this environment. Performed co
 Full TypeScript compilation (`npm run build`) could not be executed due to environment restrictions. Manual review confirms TypeScript correctness based on code analysis and pattern matching.
 
 ---
+
+## 2026-01-08: Subtask 2.2 Completed
+
+### Manual Authorization Logic Verification
+
+Performed detailed code review of `app/api/invoices/finalize/route.ts` to verify authorization check placement.
+
+### Code Flow Analysis
+
+| Line(s) | Operation | Position Relative to Auth Check |
+|---------|-----------|--------------------------------|
+| 14-17 | User authentication | Before (required) |
+| 27-36 | Fetch invoice | Before (needed to get company_id) |
+| **38-48** | **Authorization check** | **THE CHECK** |
+| 66-71 | Map invoice to PDF | After ✅ |
+| 74 | `generateInvoicePDF()` | After ✅ |
+| 77 | `generateXRechnungXML()` | After ✅ |
+| 84-99 | `uploadToS3()` calls | After ✅ |
+| 112-118 | Database update | After ✅ |
+
+### Acceptance Criteria Met
+- ✅ Authorization check occurs immediately after invoice fetch (lines 38-48 follow lines 27-36)
+- ✅ No resource-consuming operations happen before authorization:
+  - PDF generation at line 74 (after auth check)
+  - XML generation at line 77 (after auth check)
+  - S3 uploads at lines 84-99 (after auth check)
+- ✅ Error message does not leak invoice details - returns only `{ error: 'Forbidden' }` with status 403
+
+### Security Analysis
+The IDOR vulnerability is properly fixed:
+1. Attacker with valid auth token cannot trigger PDF/XML generation for invoices they don't own
+2. No information leakage - generic 403 response reveals nothing about the invoice
+3. Resource consumption only occurs for authorized users
+
+---
