@@ -35,6 +35,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invoice not found' }, { status: 404 })
     }
 
+    // Verify user belongs to the invoice's company
+    const { data: companyUser } = await supabase
+      .from('company_users')
+      .select('company_id')
+      .eq('user_id', user.id)
+      .eq('company_id', invoice.company_id)
+      .single()
+
+    if (!companyUser) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+
     const dbInvoice = invoice as DBInvoice
     const issuerSnapshot = (dbInvoice.issuer_snapshot as unknown as IssuerSnapshot) || null
     const customerSnapshot = (dbInvoice.customer_snapshot as unknown as CustomerSnapshot)!

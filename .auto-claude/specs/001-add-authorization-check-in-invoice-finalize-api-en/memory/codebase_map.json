@@ -1,0 +1,15 @@
+{
+  "discovered_files": {
+    "app/(app)/invoices/[id]/page.tsx": {
+      "description": "Contains existing authorization pattern for verifying user belongs to invoice's company - query company_users table with user_id and company_id",
+      "category": "authorization-pattern",
+      "discovered_at": "2026-01-08T18:21:37.008667+00:00"
+    },
+    "app/api/invoices/finalize/route.ts": {
+      "description": "IDOR vulnerability - authenticates user but doesn't check company membership before PDF generation, XML creation, and S3 upload",
+      "category": "security-vulnerability",
+      "discovered_at": "2026-01-08T18:21:37.027456+00:00"
+    }
+  },
+  "last_updated": "2026-01-08T18:21:37.027464+00:00"
+}
