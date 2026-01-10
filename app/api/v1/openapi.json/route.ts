@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server'
+import { APP_NAME } from '@/lib/config'
 
 const openApiSpec = {
   openapi: '3.1.0',
   info: {
-    title: 'Flixy API',
+    title: `${APP_NAME} API`,
     description: 'REST API für programmatischen Zugriff auf Rechnungen, Entwürfe und Kunden.',
     version: '1.0.0',
   },

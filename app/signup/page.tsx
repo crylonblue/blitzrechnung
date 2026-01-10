@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { APP_NAME } from '@/lib/config'
 
 export default function SignupPage() {
   const [email, setEmail] = useState('')
@@ -148,7 +149,7 @@ export default function SignupPage() {
     <div className="flex min-h-screen items-center justify-center" style={{ background: 'var(--background)' }}>
       <div className="w-full max-w-md space-y-8 rounded-lg border p-8" style={{ background: 'white', borderColor: 'var(--border-default)' }}>
         <div>
-          <h1 className="text-2xl font-medium" style={{ color: 'var(--text-primary)', letterSpacing: '-0.02em' }}>flixy</h1>
+          <h1 className="text-2xl font-medium" style={{ color: 'var(--text-primary)', letterSpacing: '-0.02em' }}>{APP_NAME}</h1>
           <p className="mt-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
             Einfache, sichere Rechnungserstellung
           </p>

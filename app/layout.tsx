@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { APP_NAME } from "@/lib/config";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -13,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "flixy - Einfache Rechnungserstellung",
+  title: `${APP_NAME} - Einfache Rechnungserstellung`,
   description: "Einfache, sichere und ruhige Rechnungserstellung für kleine bis mittelgroße Unternehmen",
 };
 

@@ -1,6 +1,8 @@
-# flixy
+# blitzrechnung
 
 Einfache, sichere und ruhige Rechnungserstellung für kleine bis mittelgroße Unternehmen.
+
+> **Note:** Der Brandname ist über die Umgebungsvariable `NEXT_PUBLIC_APP_NAME` konfigurierbar.
 
 ## Features (MVP)
 
@@ -65,12 +67,12 @@ Die App läuft dann auf [http://localhost:3000](http://localhost:3000)
 Die eigentliche PDF/ZUGFeRD-Generierung wird von einem separaten Service übernommen. Im MVP ist dies als TODO markiert in `components/drafts/draft-editor.tsx`.
 
 Beim Finalisieren einer Rechnung:
-1. flixy validiert die Daten
-2. flixy vergibt die Rechnungsnummer
-3. flixy friert die Daten ein (Snapshot)
-4. flixy sendet die Rechnungsdaten an den Invoice-Service (TODO)
+1. App validiert die Daten
+2. App vergibt die Rechnungsnummer
+3. App friert die Daten ein (Snapshot)
+4. App sendet die Rechnungsdaten an den Invoice-Service (TODO)
 5. Invoice-Service erzeugt PDF + ZUGFeRD
-6. flixy speichert die Referenz und setzt Status auf 'created'
+6. App speichert die Referenz und setzt Status auf 'created'
 
 ## UX-Prinzipien
 
@@ -83,7 +85,7 @@ Beim Finalisieren einer Rechnung:
 ## Projektstruktur
 
 ```
-flixy/
+blitzrechnung/
 ├── app/
 │   ├── (app)/          # Geschützte Routen (erfordern Auth)
 │   │   ├── drafts/     # Entwürfe

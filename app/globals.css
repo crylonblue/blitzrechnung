@@ -130,7 +130,7 @@
   --radius-4xl: calc(var(--radius) + 16px);
 }
 
-/* Dark mode deaktiviert - flixy verwendet nur Light Mode für ruhiges, klares Design */
+/* Dark mode deaktiviert - App verwendet nur Light Mode für ruhiges, klares Design */
 
 body {
   background: var(--background);
@@ -142,7 +142,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Branding: flixy Logo/Wordmark */
+/* Branding: Logo/Wordmark */
 .brand-logo {
   font-weight: 500;
   letter-spacing: -0.02em;
