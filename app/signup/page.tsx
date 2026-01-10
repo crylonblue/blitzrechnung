@@ -49,9 +49,11 @@ export default function SignupPage() {
     let company: any = null
 
     // Try function first (if it exists)
+    // Pass user_id explicitly since auth.uid() is NULL before email confirmation
     const { data: functionCompanyId, error: functionError } = await supabase.rpc(
       'create_company_with_owner',
       {
+        p_user_id: authData.user.id,
         p_name: companyName,
         p_address: {
           street: '',
