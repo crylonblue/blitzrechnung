@@ -26,9 +26,8 @@ CREATE POLICY "Users can view their companies"
   );
 
 -- Ensure INSERT policy allows creation for authenticated users
--- Drop all existing INSERT policies first
+-- Drop the old INSERT policy from migration 001
 DROP POLICY IF EXISTS "Users can insert companies they own" ON companies;
-DROP POLICY IF EXISTS "Authenticated users can insert companies" ON companies;
 
 -- Create INSERT policy that allows any authenticated user to create a company
 CREATE POLICY "Authenticated users can insert companies"
