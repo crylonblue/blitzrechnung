@@ -21,9 +21,10 @@ import {
 
 interface InvoicesTableProps {
   invoices: Invoice[]
+  companyNames?: Record<string, string>
 }
 
-export default function InvoicesTable({ invoices }: InvoicesTableProps) {
+export default function InvoicesTable({ invoices, companyNames = {} }: InvoicesTableProps) {
   const router = useRouter()
   const { openDrawer } = useInvoiceDrawer()
   const [sendModalInvoice, setSendModalInvoice] = useState<Invoice | null>(null)
@@ -44,7 +45,7 @@ export default function InvoicesTable({ invoices }: InvoicesTableProps) {
         <TableHeader>
           <TableRow>
             <TableHead>Rechnungsnummer</TableHead>
-            <TableHead>Kunde</TableHead>
+            <TableHead>Empfänger</TableHead>
             <TableHead className="text-right">Betrag</TableHead>
             <TableHead>Rechnungsdatum</TableHead>
             <TableHead>Status</TableHead>
@@ -53,7 +54,10 @@ export default function InvoicesTable({ invoices }: InvoicesTableProps) {
         </TableHeader>
         <TableBody>
           {invoices.map((invoice) => {
-            const customerSnapshot = invoice.customer_snapshot as any
+            const buyerSnapshot = invoice.buyer_snapshot as any
+            const buyerName = invoice.buyer_is_self 
+              ? (companyNames[invoice.company_id] || 'Eigene Firma')
+              : (buyerSnapshot?.name || 'Unbekannter Empfänger')
 
             return (
               <TableRow
@@ -70,7 +74,7 @@ export default function InvoicesTable({ invoices }: InvoicesTableProps) {
                   </span>
                 </TableCell>
                 <TableCell style={{ color: 'var(--text-secondary)' }}>
-                  {customerSnapshot?.name || 'Unbekannter Kunde'}
+                  {buyerName}
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="font-medium" style={{ color: 'var(--text-primary)' }}>

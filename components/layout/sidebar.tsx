@@ -37,9 +37,9 @@ const navigation: NavSection[] = [
     ],
   },
   {
-    title: 'Kunden',
+    title: 'Kontakte',
     items: [
-      { name: 'Kunden', href: '/customers', icon: Users },
+      { name: 'Kontakte', href: '/contacts', icon: Users },
     ],
   },
   {

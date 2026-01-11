@@ -1,4 +1,4 @@
-import type { Invoice, CustomerSnapshot } from '@/types'
+import type { Invoice, PartySnapshot } from '@/types'
 
 /**
  * Default email subject template
@@ -55,11 +55,11 @@ function formatDate(dateString: string | null): string {
 export function replaceEmailPlaceholders(
   template: string,
   invoice: Invoice,
-  customer: CustomerSnapshot
+  buyer: PartySnapshot | null
 ): string {
   return template
     .replace(/{invoice_number}/g, invoice.invoice_number || '')
-    .replace(/{customer_name}/g, customer.name)
+    .replace(/{customer_name}/g, buyer?.name || '')
     .replace(/{total_amount}/g, formatCurrency(invoice.total_amount))
     .replace(/{invoice_date}/g, formatDate(invoice.invoice_date))
 }
@@ -70,10 +70,10 @@ export function replaceEmailPlaceholders(
 export function generateEmailSubject(
   template: string | undefined,
   invoice: Invoice,
-  customer: CustomerSnapshot
+  buyer: PartySnapshot | null
 ): string {
   const subjectTemplate = template || DEFAULT_INVOICE_EMAIL_SUBJECT
-  return replaceEmailPlaceholders(subjectTemplate, invoice, customer)
+  return replaceEmailPlaceholders(subjectTemplate, invoice, buyer)
 }
 
 /**
@@ -82,10 +82,10 @@ export function generateEmailSubject(
 export function generateEmailBody(
   template: string | undefined,
   invoice: Invoice,
-  customer: CustomerSnapshot
+  buyer: PartySnapshot | null
 ): string {
   const bodyTemplate = template || DEFAULT_INVOICE_EMAIL_BODY
-  return replaceEmailPlaceholders(bodyTemplate, invoice, customer)
+  return replaceEmailPlaceholders(bodyTemplate, invoice, buyer)
 }
 
 /**

@@ -20,6 +20,14 @@ export default async function InvoicesPage() {
 
   const companyIds = companyUsers?.map((cu) => cu.company_id) || []
 
+  // Get company data for displaying names
+  const { data: companies } = await supabase
+    .from('companies')
+    .select('id, name')
+    .in('id', companyIds)
+
+  const companyMap = new Map(companies?.map(c => [c.id, c.name]) || [])
+
   const { data: invoices, error } = await supabase
     .from('invoices')
     .select('*')
@@ -58,7 +66,7 @@ export default async function InvoicesPage() {
           </Link>
         </div>
       ) : (
-        <InvoicesTable invoices={invoices || []} />
+        <InvoicesTable invoices={invoices || []} companyNames={Object.fromEntries(companyMap)} />
       )}
     </div>
   )

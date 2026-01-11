@@ -6,7 +6,13 @@ import { generateXRechnungXML } from '@/lib/zugferd-generator'
 import { uploadToS3 } from '@/lib/s3'
 import { mapDBInvoiceToPDFInvoice } from '@/lib/invoice-mapper'
 import { validateXRechnungInvoice } from '@/lib/schema'
-import type { Invoice as DBInvoice, IssuerSnapshot, CustomerSnapshot } from '@/types'
+import type { Invoice as DBInvoice, PartySnapshot } from '@/types'
+
+// Type for the atomic invoice number RPC result
+interface InvoiceNumberResult {
+  next_number: number
+  formatted_number: string
+}
 
 /**
  * POST /api/v1/drafts/:id/finalize
@@ -36,10 +42,11 @@ export async function POST(
   }
 
   const dbInvoice = invoice as DBInvoice
-  const customerSnapshot = (dbInvoice.customer_snapshot as unknown as CustomerSnapshot)
+  const buyerSnapshot = dbInvoice.buyer_snapshot as PartySnapshot | null
 
-  if (!customerSnapshot) {
-    return badRequest('Customer is required before finalizing')
+  // Validate buyer exists
+  if (!buyerSnapshot && !dbInvoice.buyer_is_self) {
+    return badRequest('Buyer (Empfänger) is required before finalizing')
   }
 
   // Get company for logo URL and invoice number generation
@@ -53,51 +60,92 @@ export async function POST(
     return serverError('Company not found')
   }
 
-  // Build issuer snapshot from company data
-  const issuerSnapshot: IssuerSnapshot | null = {
-    name: company.name,
-    address: company.address as any,
-    vat_id: company.vat_id || undefined,
-    tax_id: company.tax_id || undefined,
-    bank_details: company.bank_details ? {
-      bank_name: (company.bank_details as any).bank_name,
-      iban: (company.bank_details as any).iban,
-      bic: (company.bank_details as any).bic,
-      account_holder: (company.bank_details as any).account_holder,
-    } : undefined,
-    // XRechnung BR-DE-2: Seller Contact
-    contact: (company.contact_name || company.contact_phone || company.contact_email) ? {
-      name: company.contact_name || undefined,
-      phone: company.contact_phone || undefined,
-      email: company.contact_email || undefined,
-    } : undefined,
+  // Build seller snapshot based on seller_is_self flag
+  let sellerSnapshot: PartySnapshot
+  
+  if (dbInvoice.seller_is_self) {
+    // Build from company data
+    const bankDetails = company.bank_details as any
+    sellerSnapshot = {
+      name: company.name,
+      address: company.address as any,
+      vat_id: company.vat_id || undefined,
+      tax_id: company.tax_id || undefined,
+      bank_details: bankDetails ? {
+        bank_name: bankDetails.bank_name,
+        iban: bankDetails.iban,
+        bic: bankDetails.bic,
+        account_holder: bankDetails.account_holder,
+      } : undefined,
+      // XRechnung BR-DE-2: Seller Contact
+      contact: (company.contact_name || company.contact_phone || company.contact_email) ? {
+        name: company.contact_name || undefined,
+        phone: company.contact_phone || undefined,
+        email: company.contact_email || undefined,
+      } : undefined,
+    }
+  } else {
+    // Use the seller_snapshot from the invoice (external contact)
+    const existingSellerSnapshot = dbInvoice.seller_snapshot as PartySnapshot | null
+    if (!existingSellerSnapshot) {
+      return badRequest('Seller (Absender) is required before finalizing')
+    }
+    sellerSnapshot = existingSellerSnapshot
   }
 
-  // Generate invoice number if not set
+  // Build buyer snapshot for PDF (use company if buyer_is_self)
+  let finalBuyerSnapshot: PartySnapshot
+  if (dbInvoice.buyer_is_self) {
+    finalBuyerSnapshot = {
+      name: company.name,
+      address: company.address as any,
+      vat_id: company.vat_id || undefined,
+    }
+  } else {
+    finalBuyerSnapshot = buyerSnapshot!
+  }
+
+  // Generate invoice number if not set (using atomic function)
   let invoiceNumber = dbInvoice.invoice_number
   if (!invoiceNumber) {
-    // Get the next invoice number
-    const { data: lastInvoice } = await supabase
-      .from('invoices')
-      .select('invoice_number')
-      .eq('company_id', auth.companyId)
-      .neq('status', 'draft')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single()
+    if (dbInvoice.seller_is_self) {
+      // Use company's invoice number sequence (atomic)
+      const { data: numberResult, error: numberError } = await supabase
+        .rpc('get_next_invoice_number', {
+          p_seller_type: 'company',
+          p_seller_id: auth.companyId,
+          p_prefix: company.invoice_number_prefix || 'INV'
+        })
+        .single() as { data: InvoiceNumberResult | null, error: any }
 
-    const prefix = company.invoice_number_prefix || 'INV-'
-    const format = company.invoice_number_format || '0000'
-    
-    let nextNumber = 1
-    if (lastInvoice?.invoice_number) {
-      const match = lastInvoice.invoice_number.match(/(\d+)$/)
-      if (match) {
-        nextNumber = parseInt(match[1], 10) + 1
+      if (numberError || !numberResult) {
+        console.error('Error generating invoice number:', numberError)
+        return serverError('Failed to generate invoice number')
+      }
+
+      invoiceNumber = numberResult.formatted_number
+    } else {
+      // Use external seller's invoice number sequence (atomic)
+      const sellerContact = dbInvoice.seller_snapshot as PartySnapshot | null
+      if (sellerContact?.invoice_number_prefix && dbInvoice.seller_contact_id) {
+        const { data: numberResult, error: numberError } = await supabase
+          .rpc('get_next_invoice_number', {
+            p_seller_type: 'contact',
+            p_seller_id: dbInvoice.seller_contact_id,
+            p_prefix: sellerContact.invoice_number_prefix
+          })
+          .single() as { data: InvoiceNumberResult | null, error: any }
+
+        if (numberError || !numberResult) {
+          console.error('Error generating invoice number:', numberError)
+          return serverError('Failed to generate invoice number')
+        }
+
+        invoiceNumber = numberResult.formatted_number
+      } else {
+        return badRequest('Invoice number is required for external sellers without a number prefix')
       }
     }
-
-    invoiceNumber = `${prefix}${String(nextNumber).padStart(format.length, '0')}`
 
     // Update the invoice with the number
     await supabase
@@ -112,8 +160,8 @@ export async function POST(
   // Map database invoice to PDF invoice format
   const pdfInvoice = mapDBInvoiceToPDFInvoice(
     dbInvoice,
-    issuerSnapshot,
-    customerSnapshot,
+    sellerSnapshot,
+    finalBuyerSnapshot,
     company?.logo_url
   )
 
@@ -164,10 +212,13 @@ export async function POST(
   }
 
   // Update invoice status and file URLs
+  // Also save final snapshots
   const { data: updatedInvoice, error: updateError } = await supabase
     .from('invoices')
     .update({
       status: 'created',
+      seller_snapshot: sellerSnapshot,
+      buyer_snapshot: finalBuyerSnapshot,
       pdf_url: pdfUrl,
       xml_url: xmlUrl,
       finalized_at: new Date().toISOString(),

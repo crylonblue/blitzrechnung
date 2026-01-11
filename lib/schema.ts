@@ -154,10 +154,10 @@ export function validateXRechnungInvoice(invoice: Invoice): {
     }
   }
 
-  // BR-DE-2: Seller Contact required
+  // BR-DE-2: Seller Contact (optional, converted to warning)
   if (!invoice.seller.contact || 
       (!invoice.seller.contact.name && !invoice.seller.contact.phone && !invoice.seller.contact.email)) {
-    errors.push("BR-DE-2: Verkäufer-Kontakt (Name, Telefon oder E-Mail) ist für XRechnung erforderlich");
+    warnings.push("BR-DE-2: Verkäufer-Kontakt (Name, Telefon oder E-Mail) empfohlen für vollständige XRechnung-Konformität");
   }
 
   // BR-DE-4: Seller post code required

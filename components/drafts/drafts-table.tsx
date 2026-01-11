@@ -29,9 +29,10 @@ import {
 
 interface DraftsTableProps {
   drafts: Invoice[]
+  companyNames?: Record<string, string>
 }
 
-export default function DraftsTable({ drafts }: DraftsTableProps) {
+export default function DraftsTable({ drafts, companyNames = {} }: DraftsTableProps) {
   const { openDrawer } = useDraftDrawer()
   const router = useRouter()
   const supabase = createClient()
@@ -89,7 +90,7 @@ export default function DraftsTable({ drafts }: DraftsTableProps) {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Kunde</TableHead>
+            <TableHead>Empfänger</TableHead>
             <TableHead className="text-right">Betrag</TableHead>
             <TableHead>Erstellt am</TableHead>
             <TableHead>Status</TableHead>
@@ -98,8 +99,11 @@ export default function DraftsTable({ drafts }: DraftsTableProps) {
         </TableHeader>
         <TableBody>
           {drafts.map((draft) => {
-            const customerSnapshot = draft.customer_snapshot as any
+            const buyerSnapshot = draft.buyer_snapshot as any
             const total = draft.total_amount || 0
+            const buyerName = draft.buyer_is_self 
+              ? (companyNames[draft.company_id] || 'Eigene Firma')
+              : (buyerSnapshot?.name || 'Kein Empfänger')
 
             return (
               <TableRow
@@ -109,7 +113,7 @@ export default function DraftsTable({ drafts }: DraftsTableProps) {
               >
                 <TableCell>
                   <div className="font-medium" style={{ color: 'var(--text-primary)' }}>
-                    {customerSnapshot?.name || 'Unbenannter Kunde'}
+                    {buyerName}
                   </div>
                 </TableCell>
                 <TableCell className="text-right">

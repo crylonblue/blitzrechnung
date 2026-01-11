@@ -2,17 +2,17 @@
 
 import { Button } from '@/components/ui/button'
 import { Plus } from 'lucide-react'
-import { useCustomerEditDrawer } from '@/contexts/customer-edit-drawer-context'
+import { useContactEditDrawer } from '@/contexts/contact-edit-drawer-context'
 
-export default function CustomersPageHeader() {
-  const { openDrawer } = useCustomerEditDrawer()
+export default function ContactsPageHeader() {
+  const { openDrawer } = useContactEditDrawer()
 
   return (
     <div className="mb-12 flex items-center justify-between">
       <div>
-        <h1 className="text-headline">Kunden</h1>
+        <h1 className="text-headline">Kontakte</h1>
         <p className="mt-2 text-meta">
-          Verwaltung Ihrer Kunden
+          Verwaltung Ihrer Kontakte (Kunden, Lieferanten, Partner)
         </p>
       </div>
       <Button
@@ -20,7 +20,7 @@ export default function CustomersPageHeader() {
         className="text-sm"
       >
         <Plus className="h-4 w-4 mr-2" />
-        Neuer Kunde
+        Neuer Kontakt
       </Button>
     </div>
   )

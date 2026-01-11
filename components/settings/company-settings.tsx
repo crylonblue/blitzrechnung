@@ -26,7 +26,7 @@ export default function CompanySettings({ company: initialCompany }: CompanySett
   const router = useRouter()
   const supabase = createClient()
   const bankDetails = (initialCompany.bank_details as any) || {}
-  const initialEmailSettings = (initialCompany.email_settings as EmailSettings) || { mode: 'default' }
+  const initialEmailSettings = (initialCompany.email_settings as unknown as EmailSettings) || { mode: 'default' }
   const initialAddress = initialCompany.address as unknown as Address
   const [company, setCompany] = useState({
     name: initialCompany.name,

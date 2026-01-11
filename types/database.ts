@@ -20,6 +20,7 @@ export interface Database {
           logo_url: string | null
           invoice_number_prefix: string
           invoice_number_format: string
+          invoice_number_counter: number
           default_vat_rate: number
           bank_details: Json | null
           accounting_email: string | null
@@ -40,6 +41,7 @@ export interface Database {
           logo_url?: string | null
           invoice_number_prefix?: string
           invoice_number_format?: string
+          invoice_number_counter?: number
           default_vat_rate?: number
           bank_details?: Json | null
           accounting_email?: string | null
@@ -60,6 +62,7 @@ export interface Database {
           logo_url?: string | null
           invoice_number_prefix?: string
           invoice_number_format?: string
+          invoice_number_counter?: number
           default_vat_rate?: number
           bank_details?: Json | null
           accounting_email?: string | null
@@ -120,7 +123,7 @@ export interface Database {
           created_at?: string
         }
       }
-      customers: {
+      contacts: {
         Row: {
           id: string
           company_id: string
@@ -128,6 +131,10 @@ export interface Database {
           address: Json
           email: string | null
           vat_id: string | null
+          invoice_number_prefix: string | null
+          invoice_number_counter: number
+          tax_id: string | null
+          bank_details: Json | null
           created_at: string
           updated_at: string
         }
@@ -138,6 +145,10 @@ export interface Database {
           address: Json
           email?: string | null
           vat_id?: string | null
+          invoice_number_prefix?: string | null
+          invoice_number_counter?: number
+          tax_id?: string | null
+          bank_details?: Json | null
           created_at?: string
           updated_at?: string
         }
@@ -148,6 +159,10 @@ export interface Database {
           address?: Json
           email?: string | null
           vat_id?: string | null
+          invoice_number_prefix?: string | null
+          invoice_number_counter?: number
+          tax_id?: string | null
+          bank_details?: Json | null
           created_at?: string
           updated_at?: string
         }
@@ -160,7 +175,12 @@ export interface Database {
           invoice_number: string | null
           invoice_date: string | null
           due_date: string | null
-          customer_snapshot: Json | null
+          seller_is_self: boolean
+          seller_contact_id: string | null
+          seller_snapshot: Json | null
+          buyer_is_self: boolean
+          buyer_contact_id: string | null
+          buyer_snapshot: Json | null
           line_items: Json
           subtotal: number
           vat_amount: number
@@ -180,7 +200,12 @@ export interface Database {
           invoice_number?: string | null
           invoice_date?: string | null
           due_date?: string | null
-          customer_snapshot?: Json | null
+          seller_is_self?: boolean
+          seller_contact_id?: string | null
+          seller_snapshot?: Json | null
+          buyer_is_self?: boolean
+          buyer_contact_id?: string | null
+          buyer_snapshot?: Json | null
           line_items?: Json
           subtotal?: number
           vat_amount?: number
@@ -200,7 +225,12 @@ export interface Database {
           invoice_number?: string | null
           invoice_date?: string | null
           due_date?: string | null
-          customer_snapshot?: Json | null
+          seller_is_self?: boolean
+          seller_contact_id?: string | null
+          seller_snapshot?: Json | null
+          buyer_is_self?: boolean
+          buyer_contact_id?: string | null
+          buyer_snapshot?: Json | null
           line_items?: Json
           subtotal?: number
           vat_amount?: number
@@ -284,4 +314,3 @@ export interface Database {
     }
   }
 }
-

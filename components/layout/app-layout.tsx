@@ -2,12 +2,12 @@
 
 import Sidebar from './sidebar'
 import { DraftDrawerProvider } from '@/contexts/draft-drawer-context'
-import { CustomerDrawerProvider } from '@/contexts/customer-drawer-context'
-import { CustomerEditDrawerProvider } from '@/contexts/customer-edit-drawer-context'
+import { ContactDrawerProvider } from '@/contexts/contact-drawer-context'
+import { ContactEditDrawerProvider } from '@/contexts/contact-edit-drawer-context'
 import { IssuerDrawerProvider } from '@/contexts/issuer-drawer-context'
 import { InvoiceDrawerProvider } from '@/contexts/invoice-drawer-context'
 import DraftDrawer from '@/components/drafts/draft-drawer'
-import CustomerEditDrawer from '@/components/customers/customer-edit-drawer'
+import ContactEditDrawer from '@/components/contacts/contact-edit-drawer'
 import InvoiceDrawer from '@/components/invoices/invoice-drawer'
 import { Toaster } from '@/components/ui/sonner'
 
@@ -22,8 +22,8 @@ interface AppLayoutProps {
 export default function AppLayout({ children, companyName, userEmail, userName, companyId }: AppLayoutProps) {
   return (
     <DraftDrawerProvider>
-      <CustomerDrawerProvider>
-        <CustomerEditDrawerProvider>
+      <ContactDrawerProvider>
+        <ContactEditDrawerProvider>
           <IssuerDrawerProvider>
             <InvoiceDrawerProvider>
               <div className="flex min-h-screen" style={{ background: 'var(--background)' }}>
@@ -38,8 +38,8 @@ export default function AppLayout({ children, companyName, userEmail, userName, 
                 {/* Draft Drawer */}
                 <DraftDrawer />
                 
-                {/* Customer Edit Drawer */}
-                <CustomerEditDrawer />
+                {/* Contact Edit Drawer */}
+                <ContactEditDrawer />
 
                 {/* Invoice Drawer */}
                 <InvoiceDrawer />
@@ -47,9 +47,8 @@ export default function AppLayout({ children, companyName, userEmail, userName, 
               <Toaster />
             </InvoiceDrawerProvider>
           </IssuerDrawerProvider>
-        </CustomerEditDrawerProvider>
-      </CustomerDrawerProvider>
+        </ContactEditDrawerProvider>
+      </ContactDrawerProvider>
     </DraftDrawerProvider>
   )
 }
-

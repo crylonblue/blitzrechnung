@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Invoice, Company, CustomerSnapshot, LineItem } from '@/types'
+import { Invoice, Company, PartySnapshot, LineItem } from '@/types'
 import { format } from 'date-fns'
 import { de } from 'date-fns/locale'
 import { Button } from '@/components/ui/button'
@@ -16,9 +16,20 @@ export default function InvoiceView({ invoice, company }: InvoiceViewProps) {
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false)
   const [isDownloadingXml, setIsDownloadingXml] = useState(false)
   
-  const customerSnapshot = invoice.customer_snapshot as unknown as CustomerSnapshot
+  const sellerSnapshot = invoice.seller_snapshot as PartySnapshot | null
+  const buyerSnapshot = invoice.buyer_snapshot as PartySnapshot | null
   const lineItems = invoice.line_items as unknown as LineItem[]
   const companyAddress = company?.address as any
+  
+  // Determine seller info: use seller_snapshot if available, otherwise company data
+  const sellerName = invoice.seller_is_self ? company?.name : sellerSnapshot?.name
+  const sellerAddress = invoice.seller_is_self ? companyAddress : sellerSnapshot?.address
+  const sellerVatId = invoice.seller_is_self ? company?.vat_id : sellerSnapshot?.vat_id
+  
+  // Determine buyer info: use buyer_snapshot if available, otherwise company data (for incoming invoices)
+  const buyerName = invoice.buyer_is_self ? company?.name : buyerSnapshot?.name
+  const buyerAddress = invoice.buyer_is_self ? companyAddress : buyerSnapshot?.address
+  const buyerVatId = invoice.buyer_is_self ? company?.vat_id : buyerSnapshot?.vat_id
 
   const handleDownloadPdf = async () => {
     setIsDownloadingPdf(true)
@@ -63,47 +74,47 @@ export default function InvoiceView({ invoice, company }: InvoiceViewProps) {
       <div className="mb-8 grid grid-cols-2 gap-8">
         <div>
           <h3 className="text-sm font-medium text-zinc-500 dark:text-zinc-400">Von</h3>
-          <p className="mt-2 font-semibold text-black dark:text-zinc-50">{company?.name}</p>
-          {companyAddress && (
+          <p className="mt-2 font-semibold text-black dark:text-zinc-50">{sellerName}</p>
+          {sellerAddress && (
             <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-              {companyAddress.street}
+              {sellerAddress.street} {sellerAddress.streetnumber || ''}
               <br />
-              {companyAddress.zip} {companyAddress.city}
+              {sellerAddress.zip} {sellerAddress.city}
               <br />
-              {companyAddress.country}
+              {sellerAddress.country}
             </p>
           )}
-          {company?.vat_id && (
+          {sellerVatId && (
             <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-500">
-              USt-IdNr.: {company.vat_id}
+              USt-IdNr.: {sellerVatId}
             </p>
           )}
         </div>
 
         <div>
           <h3 className="text-sm font-medium text-zinc-500 dark:text-zinc-400">An</h3>
-          {customerSnapshot ? (
+          {buyerName ? (
             <>
               <p className="mt-2 font-semibold text-black dark:text-zinc-50">
-                {customerSnapshot.name}
+                {buyerName}
               </p>
-              {customerSnapshot.address && (
+              {buyerAddress && (
                 <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-                  {customerSnapshot.address.street} {customerSnapshot.address.streetnumber || ''}
+                  {buyerAddress.street} {buyerAddress.streetnumber || ''}
                   <br />
-                  {customerSnapshot.address.zip} {customerSnapshot.address.city}
+                  {buyerAddress.zip} {buyerAddress.city}
                   <br />
-                  {customerSnapshot.address.country}
+                  {buyerAddress.country}
                 </p>
               )}
-              {customerSnapshot.vat_id && (
+              {buyerVatId && (
                 <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-500">
-                  USt-IdNr.: {customerSnapshot.vat_id}
+                  USt-IdNr.: {buyerVatId}
                 </p>
               )}
             </>
           ) : (
-            <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">Kein Kunde angegeben</p>
+            <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">Kein Empfänger angegeben</p>
           )}
         </div>
       </div>

@@ -1,13 +1,18 @@
 import type { Invoice as PDFInvoice } from './schema'
-import type { Invoice as DBInvoice, IssuerSnapshot, CustomerSnapshot, LineItem } from '@/types'
+import type { Invoice as DBInvoice, PartySnapshot, LineItem } from '@/types'
 
 /**
  * Maps database invoice format to PDF invoice schema format
+ * 
+ * @param dbInvoice - The database invoice record
+ * @param sellerSnapshot - The seller/issuer snapshot (company or external contact)
+ * @param buyerSnapshot - The buyer snapshot (external contact or company)
+ * @param companyLogoUrl - Optional company logo URL
  */
 export function mapDBInvoiceToPDFInvoice(
   dbInvoice: DBInvoice,
-  issuerSnapshot: IssuerSnapshot | null,
-  customerSnapshot: CustomerSnapshot,
+  sellerSnapshot: PartySnapshot | null,
+  buyerSnapshot: PartySnapshot,
   companyLogoUrl?: string | null
 ): PDFInvoice {
   const lineItems = (dbInvoice.line_items as unknown as LineItem[]) || []
@@ -27,26 +32,26 @@ export function mapDBInvoiceToPDFInvoice(
     vatRate: item.vat_rate !== undefined && item.vat_rate !== null ? item.vat_rate : defaultTaxRate,
   }))
 
-  // Map issuer/seller including contact for XRechnung BR-DE-2
-  const seller = issuerSnapshot
+  // Map seller including contact for XRechnung BR-DE-2
+  const seller = sellerSnapshot
     ? {
-        name: issuerSnapshot.name,
+        name: sellerSnapshot.name,
         subHeadline: undefined,
         address: {
-          street: issuerSnapshot.address.street,
-          streetNumber: issuerSnapshot.address.streetnumber,
-          postalCode: issuerSnapshot.address.zip,
-          city: issuerSnapshot.address.city,
-          country: issuerSnapshot.address.country,
+          street: sellerSnapshot.address.street,
+          streetNumber: sellerSnapshot.address.streetnumber,
+          postalCode: sellerSnapshot.address.zip,
+          city: sellerSnapshot.address.city,
+          country: sellerSnapshot.address.country,
         },
         phoneNumber: undefined,
-        taxNumber: issuerSnapshot.tax_id,
-        vatId: issuerSnapshot.vat_id,
+        taxNumber: sellerSnapshot.tax_id,
+        vatId: sellerSnapshot.vat_id,
         // XRechnung BR-DE-2: Seller Contact (required)
-        contact: issuerSnapshot.contact ? {
-          name: issuerSnapshot.contact.name,
-          phone: issuerSnapshot.contact.phone,
-          email: issuerSnapshot.contact.email,
+        contact: sellerSnapshot.contact ? {
+          name: sellerSnapshot.contact.name,
+          phone: sellerSnapshot.contact.phone,
+          email: sellerSnapshot.contact.email,
         } : undefined,
       }
     : {
@@ -65,25 +70,25 @@ export function mapDBInvoiceToPDFInvoice(
         contact: undefined,
       }
 
-  // Map customer
+  // Map buyer
   const customer = {
-    name: customerSnapshot.name,
+    name: buyerSnapshot.name,
     address: {
-      street: customerSnapshot.address.street,
-      streetNumber: customerSnapshot.address.streetnumber,
-      postalCode: customerSnapshot.address.zip,
-      city: customerSnapshot.address.city,
-      country: customerSnapshot.address.country,
+      street: buyerSnapshot.address.street,
+      streetNumber: buyerSnapshot.address.streetnumber,
+      postalCode: buyerSnapshot.address.zip,
+      city: buyerSnapshot.address.city,
+      country: buyerSnapshot.address.country,
     },
     phoneNumber: undefined,
-    additionalInfo: customerSnapshot.email ? [customerSnapshot.email] : undefined,
+    additionalInfo: buyerSnapshot.email ? [buyerSnapshot.email] : undefined,
   }
 
-  // Map bank details
-  const bankDetails = issuerSnapshot?.bank_details?.iban
+  // Map bank details from seller
+  const bankDetails = sellerSnapshot?.bank_details?.iban
     ? {
-        iban: issuerSnapshot.bank_details.iban,
-        bankName: issuerSnapshot.bank_details.bank_name || '',
+        iban: sellerSnapshot.bank_details.iban,
+        bankName: sellerSnapshot.bank_details.bank_name || '',
       }
     : undefined
 

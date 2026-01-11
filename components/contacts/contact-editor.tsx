@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Customer, Address } from '@/types'
+import { Contact, Address } from '@/types'
 import { createClient } from '@/lib/supabase/client'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -13,22 +13,22 @@ import { Check, ChevronsUpDown, LoaderCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { COUNTRIES } from '@/lib/countries'
 
-interface CustomerEditorProps {
-  customer: Customer
+interface ContactEditorProps {
+  contact: Contact
 }
 
-export default function CustomerEditor({ customer: initialCustomer }: CustomerEditorProps) {
+export default function ContactEditor({ contact: initialContact }: ContactEditorProps) {
   const router = useRouter()
   const supabase = createClient()
-  const initialAddress = initialCustomer.address as unknown as Address
-  const [customer, setCustomer] = useState({
-    name: initialCustomer.name,
+  const initialAddress = initialContact.address as unknown as Address
+  const [contact, setContact] = useState({
+    name: initialContact.name,
     street: initialAddress?.street || '',
     city: initialAddress?.city || '',
     zip: initialAddress?.zip || '',
     country: initialAddress?.country || 'DE',
-    email: initialCustomer.email || '',
-    vat_id: initialCustomer.vat_id || '',
+    email: initialContact.email || '',
+    vat_id: initialContact.vat_id || '',
   })
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -40,19 +40,19 @@ export default function CustomerEditor({ customer: initialCustomer }: CustomerEd
     setError(null)
 
     const { error: updateError } = await supabase
-      .from('customers')
+      .from('contacts')
       .update({
-        name: customer.name,
+        name: contact.name,
         address: {
-          street: customer.street,
-          city: customer.city,
-          zip: customer.zip,
-          country: customer.country,
+          street: contact.street,
+          city: contact.city,
+          zip: contact.zip,
+          country: contact.country,
         },
-        email: customer.email || null,
-        vat_id: customer.vat_id || null,
+        email: contact.email || null,
+        vat_id: contact.vat_id || null,
       })
-      .eq('id', initialCustomer.id)
+      .eq('id', initialContact.id)
 
     if (updateError) {
       setError(updateError.message)
@@ -66,13 +66,13 @@ export default function CustomerEditor({ customer: initialCustomer }: CustomerEd
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">Kunde bearbeiten</h1>
+          <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">Kontakt bearbeiten</h1>
           <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
             Änderungen gelten nur für zukünftige Rechnungen
           </p>
         </div>
         <Link
-          href="/customers"
+          href="/contacts"
           className="text-sm font-medium text-zinc-600 hover:text-black dark:text-zinc-400 dark:hover:text-zinc-50"
         >
           ← Zurück
@@ -93,8 +93,8 @@ export default function CustomerEditor({ customer: initialCustomer }: CustomerEd
             </label>
             <Input
               type="text"
-              value={customer.name}
-              onChange={(e) => setCustomer({ ...customer, name: e.target.value })}
+              value={contact.name}
+              onChange={(e) => setContact({ ...contact, name: e.target.value })}
               required
               className="mt-1"
             />
@@ -106,8 +106,8 @@ export default function CustomerEditor({ customer: initialCustomer }: CustomerEd
             </label>
             <Input
               type="text"
-              value={customer.street}
-              onChange={(e) => setCustomer({ ...customer, street: e.target.value })}
+              value={contact.street}
+              onChange={(e) => setContact({ ...contact, street: e.target.value })}
               className="mt-1"
             />
           </div>
@@ -119,8 +119,8 @@ export default function CustomerEditor({ customer: initialCustomer }: CustomerEd
               </label>
               <Input
                 type="text"
-                value={customer.zip}
-                onChange={(e) => setCustomer({ ...customer, zip: e.target.value })}
+                value={contact.zip}
+                onChange={(e) => setContact({ ...contact, zip: e.target.value })}
                 className="mt-1"
               />
             </div>
@@ -130,8 +130,8 @@ export default function CustomerEditor({ customer: initialCustomer }: CustomerEd
               </label>
               <Input
                 type="text"
-                value={customer.city}
-                onChange={(e) => setCustomer({ ...customer, city: e.target.value })}
+                value={contact.city}
+                onChange={(e) => setContact({ ...contact, city: e.target.value })}
                 className="mt-1"
               />
             </div>
@@ -150,8 +150,8 @@ export default function CustomerEditor({ customer: initialCustomer }: CustomerEd
                   className="mt-1 w-full justify-between"
                   style={{ height: 'auto', minHeight: '2.25rem' }}
                 >
-                  {customer.country
-                    ? COUNTRIES.find((country) => country.code === customer.country)?.name || customer.country
+                  {contact.country
+                    ? COUNTRIES.find((country) => country.code === contact.country)?.name || contact.country
                     : 'Land auswählen...'}
                   <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </Button>
@@ -170,13 +170,13 @@ export default function CustomerEditor({ customer: initialCustomer }: CustomerEd
                         country.name.toLowerCase().includes(countrySearchQuery.toLowerCase()) ||
                         country.code.toLowerCase().includes(countrySearchQuery.toLowerCase())
                       ).map((country) => {
-                        const isSelected = customer.country === country.code
+                        const isSelected = contact.country === country.code
                         return (
                           <CommandItem
                             key={country.code}
                             value={country.name}
                             onSelect={() => {
-                              setCustomer({ ...customer, country: country.code })
+                              setContact({ ...contact, country: country.code })
                               setCountryOpen(false)
                               setCountrySearchQuery('')
                             }}
@@ -220,8 +220,8 @@ export default function CustomerEditor({ customer: initialCustomer }: CustomerEd
             </label>
             <Input
               type="email"
-              value={customer.email}
-              onChange={(e) => setCustomer({ ...customer, email: e.target.value })}
+              value={contact.email}
+              onChange={(e) => setContact({ ...contact, email: e.target.value })}
               className="mt-1"
             />
           </div>
@@ -232,22 +232,22 @@ export default function CustomerEditor({ customer: initialCustomer }: CustomerEd
             </label>
             <Input
               type="text"
-              value={customer.vat_id}
-              onChange={(e) => setCustomer({ ...customer, vat_id: e.target.value })}
+              value={contact.vat_id}
+              onChange={(e) => setContact({ ...contact, vat_id: e.target.value })}
               className="mt-1"
             />
           </div>
 
           <div className="flex justify-end gap-2 pt-4">
             <Link
-              href="/customers"
+              href="/contacts"
               className="rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
             >
               Abbrechen
             </Link>
             <button
               onClick={handleSave}
-              disabled={isSaving || !customer.name}
+              disabled={isSaving || !contact.name}
               className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-50 dark:text-black dark:hover:bg-zinc-200"
             >
               {isSaving && <LoaderCircle className="h-4 w-4 mr-2 animate-spin" />}
@@ -259,4 +259,3 @@ export default function CustomerEditor({ customer: initialCustomer }: CustomerEd
     </div>
   )
 }
-

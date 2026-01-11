@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { useInvoiceDrawer } from '@/contexts/invoice-drawer-context'
-import { Invoice, CustomerSnapshot, LineItem } from '@/types'
+import { Invoice, PartySnapshot, LineItem } from '@/types'
 import { createClient } from '@/lib/supabase/client'
 import { format } from 'date-fns'
 import { de } from 'date-fns/locale'
@@ -78,7 +78,10 @@ export default function InvoiceDrawer() {
     setIsLoading(false)
   }
 
-  const customerSnapshot = invoice?.customer_snapshot as unknown as CustomerSnapshot | null
+  const buyerSnapshot = invoice?.buyer_snapshot as PartySnapshot | null
+  const buyerName = invoice?.buyer_is_self 
+    ? (companyName || 'Eigene Firma')
+    : (buyerSnapshot?.name || 'Unbekannter Empfänger')
   const lineItems = (invoice?.line_items as unknown as LineItem[]) || []
 
   const formatCurrency = (amount: number) => {
@@ -205,9 +208,9 @@ const handleDownloadPdf = async () => {
                 )}
               </div>
 
-              {/* Recipient (Customer) */}
+              {/* Recipient (Buyer) */}
               <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
-                {customerSnapshot?.name || 'Unbekannter Kunde'}
+                {buyerName}
               </h2>
               
               {/* Invoice Number */}

@@ -1,6 +1,7 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import type { Invoice, InvoiceItem, Address } from "./schema";
 import { embedZugferdIntoPDF } from "./zugferd-generator";
+import { getUnitLabel } from "./units";
 
 function formatAddress(address: Address): { streetLine: string; cityLine: string } {
   return {
@@ -218,7 +219,7 @@ export async function generateInvoicePDF(invoice: Invoice): Promise<Uint8Array> 
 
     drawText(description, colPositions.description, y);
     drawText(item.quantity.toString(), colPositions.quantity, y);
-    drawText(item.unit, colPositions.unit, y);
+    drawText(getUnitLabel(item.unit), colPositions.unit, y);
     // Right-align unitPrice
     const unitPriceText = formatCurrency(item.unitPrice);
     const sanitizedUnitPriceText = sanitizeText(unitPriceText);

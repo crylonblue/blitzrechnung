@@ -1,8 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import CustomerEditor from '@/components/customers/customer-editor'
+import ContactEditor from '@/components/contacts/contact-editor'
 
-export default async function CustomerPage({ params }: { params: { id: string } }) {
+export default async function ContactPage({ params }: { params: { id: string } }) {
   const supabase = await createClient()
   
   const {
@@ -13,14 +13,14 @@ export default async function CustomerPage({ params }: { params: { id: string } 
     redirect('/login')
   }
 
-  const { data: customer, error } = await supabase
-    .from('customers')
+  const { data: contact, error } = await supabase
+    .from('contacts')
     .select('*')
     .eq('id', params.id)
     .single()
 
-  if (error || !customer) {
-    redirect('/customers')
+  if (error || !contact) {
+    redirect('/contacts')
   }
 
   // Check if user has access
@@ -28,17 +28,16 @@ export default async function CustomerPage({ params }: { params: { id: string } 
     .from('company_users')
     .select('company_id')
     .eq('user_id', user.id)
-    .eq('company_id', customer.company_id)
+    .eq('company_id', contact.company_id)
     .single()
 
   if (!companyUsers) {
-    redirect('/customers')
+    redirect('/contacts')
   }
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-12">
-      <CustomerEditor customer={customer} />
+      <ContactEditor contact={contact} />
     </div>
   )
 }
-

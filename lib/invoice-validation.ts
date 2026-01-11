@@ -1,4 +1,4 @@
-import type { LineItem, CustomerSnapshot, IssuerSnapshot, Address, Company } from '@/types'
+import type { LineItem, PartySnapshot, Address, Company } from '@/types'
 
 export interface ValidationError {
   field: string
@@ -15,8 +15,8 @@ export interface ValidationResult {
  */
 export function validateInvoiceForFinalization(params: {
   company: Company | null
-  issuerSnapshot: IssuerSnapshot | null
-  customerSnapshot: CustomerSnapshot | null
+  issuerSnapshot: PartySnapshot | null
+  customerSnapshot: PartySnapshot | null
   lineItems: LineItem[]
   invoiceDate: string | null
   useDefaultIssuer: boolean
@@ -101,16 +101,7 @@ export function validateInvoiceForFinalization(params: {
         })
       }
 
-      // XRechnung BR-DE-2: Seller Contact (required for XRechnung compliance)
-      const hasSellerContact = company.contact_name?.trim() || 
-                               company.contact_phone?.trim() || 
-                               company.contact_email?.trim()
-      if (!hasSellerContact) {
-        errors.push({
-          field: 'issuer.contact',
-          message: 'Ansprechpartner fehlt. Für XRechnung-konforme Rechnungen bitte Name, Telefon oder E-Mail in den Einstellungen hinterlegen.',
-        })
-      }
+      // Note: Seller Contact (XRechnung BR-DE-2) is optional
     }
   } else {
     // Validate custom issuer snapshot
@@ -181,16 +172,7 @@ export function validateInvoiceForFinalization(params: {
         })
       }
 
-      // XRechnung BR-DE-2: Seller Contact (required for XRechnung compliance)
-      const hasSellerContact = issuerSnapshot.contact?.name?.trim() || 
-                               issuerSnapshot.contact?.phone?.trim() || 
-                               issuerSnapshot.contact?.email?.trim()
-      if (!hasSellerContact) {
-        errors.push({
-          field: 'issuer.contact',
-          message: 'Ansprechpartner des Absenders fehlt. Für XRechnung-konforme Rechnungen erforderlich.',
-        })
-      }
+      // Note: Seller Contact (XRechnung BR-DE-2) is optional
     }
   }
 

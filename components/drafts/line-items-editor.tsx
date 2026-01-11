@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { LineItem, Product } from '@/types'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -12,6 +12,64 @@ import ProductDrawer from './product-drawer'
 import { UNITS, getUnitLabel } from '@/lib/units'
 import { Check, ChevronsUpDown, FileText } from 'lucide-react'
 import { cn } from '@/lib/utils'
+
+// NumberInput that allows empty state during editing and only commits on blur
+interface NumberInputProps {
+  value: number
+  onChange: (value: number) => void
+  min?: number
+  max?: number
+  className?: string
+  placeholder?: string
+}
+
+function NumberInput({ value, onChange, min, max, className, placeholder }: NumberInputProps) {
+  const [localValue, setLocalValue] = useState(value.toString())
+  
+  // Sync with external value changes (e.g. from template selection)
+  useEffect(() => {
+    setLocalValue(value.toString())
+  }, [value])
+  
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.target.value
+    // Allow empty, numbers, and decimal point/comma
+    if (input === '' || /^-?\d*[.,]?\d*$/.test(input)) {
+      setLocalValue(input)
+    }
+  }
+  
+  const handleBlur = () => {
+    // Convert comma to dot for parsing
+    const normalized = localValue.replace(',', '.')
+    let numValue = parseFloat(normalized)
+    
+    // Handle invalid or empty input
+    if (isNaN(numValue)) {
+      numValue = 0
+    }
+    
+    // Apply min/max constraints
+    if (min !== undefined && numValue < min) numValue = min
+    if (max !== undefined && numValue > max) numValue = max
+    
+    setLocalValue(numValue.toString())
+    onChange(numValue)
+  }
+  
+  return (
+    <Input
+      type="text"
+      inputMode="decimal"
+      value={localValue}
+      onChange={handleChange}
+      onBlur={handleBlur}
+      onFocus={(e) => e.target.select()}
+      className={className}
+      placeholder={placeholder}
+    />
+  )
+}
 
 interface LineItemsEditorProps {
   companyId: string
@@ -28,7 +86,7 @@ export default function LineItemsEditor({ companyId, lineItems, onChange }: Line
       product_id: undefined,
       description: '',
       quantity: 1,
-      unit: 'hour',
+      unit: 'piece',
       unit_price: 0,
       vat_rate: 19,
       total: 0,
@@ -184,12 +242,10 @@ function LineItemCard({ item, index, companyId, onUpdate, onTemplateSelect, onRe
             <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
               Menge
             </label>
-            <Input
-              type="number"
-              min="0"
-              step="0.01"
+            <NumberInput
               value={item.quantity}
-              onChange={(e) => onUpdate({ quantity: parseFloat(e.target.value) || 0 })}
+              onChange={(quantity) => onUpdate({ quantity })}
+              min={0}
               className="mt-1"
             />
           </div>
@@ -250,12 +306,10 @@ function LineItemCard({ item, index, companyId, onUpdate, onTemplateSelect, onRe
             <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
               Einzelpreis (€)
             </label>
-            <Input
-              type="number"
-              min="0"
-              step="0.01"
+            <NumberInput
               value={item.unit_price}
-              onChange={(e) => onUpdate({ unit_price: parseFloat(e.target.value) || 0 })}
+              onChange={(unit_price) => onUpdate({ unit_price })}
+              min={0}
               className="mt-1"
             />
           </div>
@@ -263,13 +317,11 @@ function LineItemCard({ item, index, companyId, onUpdate, onTemplateSelect, onRe
             <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
               MwSt. %
             </label>
-            <Input
-              type="number"
-              min="0"
-              max="100"
-              step="0.01"
+            <NumberInput
               value={item.vat_rate}
-              onChange={(e) => onUpdate({ vat_rate: parseFloat(e.target.value) || 0 })}
+              onChange={(vat_rate) => onUpdate({ vat_rate })}
+              min={0}
+              max={100}
               className="mt-1"
             />
           </div>

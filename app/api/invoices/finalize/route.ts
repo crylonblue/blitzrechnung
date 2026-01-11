@@ -5,7 +5,7 @@ import { generateXRechnungXML } from '@/lib/zugferd-generator'
 import { uploadToS3 } from '@/lib/s3'
 import { mapDBInvoiceToPDFInvoice } from '@/lib/invoice-mapper'
 import { validateXRechnungInvoice } from '@/lib/schema'
-import type { Invoice as DBInvoice, IssuerSnapshot, CustomerSnapshot } from '@/types'
+import type { Invoice as DBInvoice, PartySnapshot } from '@/types'
 
 export async function POST(request: NextRequest) {
   try {
@@ -49,10 +49,11 @@ export async function POST(request: NextRequest) {
     }
 
     const dbInvoice = invoice as DBInvoice
-    const customerSnapshot = (dbInvoice.customer_snapshot as unknown as CustomerSnapshot)!
+    const buyerSnapshot = dbInvoice.buyer_snapshot as PartySnapshot | null
 
-    if (!customerSnapshot) {
-      return NextResponse.json({ error: 'Customer snapshot is missing' }, { status: 400 })
+    // Validate buyer exists (unless buyer_is_self)
+    if (!buyerSnapshot && !dbInvoice.buyer_is_self) {
+      return NextResponse.json({ error: 'Buyer snapshot is missing' }, { status: 400 })
     }
 
     // Get company for issuer data and logo
@@ -62,31 +63,60 @@ export async function POST(request: NextRequest) {
       .eq('id', dbInvoice.company_id)
       .single()
 
-    // Build issuer snapshot from company data
-    const issuerSnapshot: IssuerSnapshot | null = company ? {
-      name: company.name,
-      address: company.address as any,
-      vat_id: company.vat_id || undefined,
-      tax_id: company.tax_id || undefined,
-      bank_details: company.bank_details ? {
-        bank_name: (company.bank_details as any).bank_name,
-        iban: (company.bank_details as any).iban,
-        bic: (company.bank_details as any).bic,
-        account_holder: (company.bank_details as any).account_holder,
-      } : undefined,
-      // XRechnung BR-DE-2: Seller Contact
-      contact: (company.contact_name || company.contact_phone || company.contact_email) ? {
-        name: company.contact_name || undefined,
-        phone: company.contact_phone || undefined,
-        email: company.contact_email || undefined,
-      } : undefined,
-    } : null
+    if (!company) {
+      return NextResponse.json({ error: 'Company not found' }, { status: 404 })
+    }
+
+    // Build seller snapshot based on seller_is_self flag
+    let sellerSnapshot: PartySnapshot
+    
+    if (dbInvoice.seller_is_self) {
+      // Build from company data
+      const bankDetails = company.bank_details as any
+      sellerSnapshot = {
+        name: company.name,
+        address: company.address as any,
+        vat_id: company.vat_id || undefined,
+        tax_id: company.tax_id || undefined,
+        bank_details: bankDetails ? {
+          bank_name: bankDetails.bank_name,
+          iban: bankDetails.iban,
+          bic: bankDetails.bic,
+          account_holder: bankDetails.account_holder,
+        } : undefined,
+        // XRechnung BR-DE-2: Seller Contact
+        contact: (company.contact_name || company.contact_phone || company.contact_email) ? {
+          name: company.contact_name || undefined,
+          phone: company.contact_phone || undefined,
+          email: company.contact_email || undefined,
+        } : undefined,
+      }
+    } else {
+      // Use the seller_snapshot from the invoice (external contact)
+      const existingSellerSnapshot = dbInvoice.seller_snapshot as PartySnapshot | null
+      if (!existingSellerSnapshot) {
+        return NextResponse.json({ error: 'Seller snapshot is missing' }, { status: 400 })
+      }
+      sellerSnapshot = existingSellerSnapshot
+    }
+
+    // Build final buyer snapshot (use company if buyer_is_self)
+    let finalBuyerSnapshot: PartySnapshot
+    if (dbInvoice.buyer_is_self) {
+      finalBuyerSnapshot = {
+        name: company.name,
+        address: company.address as any,
+        vat_id: company.vat_id || undefined,
+      }
+    } else {
+      finalBuyerSnapshot = buyerSnapshot!
+    }
 
     // Map database invoice to PDF invoice format
     const pdfInvoice = mapDBInvoiceToPDFInvoice(
       dbInvoice,
-      issuerSnapshot,
-      customerSnapshot,
+      sellerSnapshot,
+      finalBuyerSnapshot,
       company?.logo_url
     )
 
@@ -146,16 +176,18 @@ export async function POST(request: NextRequest) {
     }
 
     // Update invoice with file URLs and set status to 'created' after successful upload
-    // Also set recipient_email from customer if available and not already set
+    // Also save final snapshots and set recipient_email from buyer if available
     const updateData: Record<string, unknown> = {
       status: 'created', // Set to created only after successful upload
+      seller_snapshot: sellerSnapshot,
+      buyer_snapshot: finalBuyerSnapshot,
       pdf_url: pdfUrl,
       xml_url: xmlUrl,
     }
     
-    // Set recipient email from customer snapshot if not already set
-    if (!dbInvoice.recipient_email && customerSnapshot?.email) {
-      updateData.recipient_email = customerSnapshot.email
+    // Set recipient email from buyer snapshot if not already set
+    if (!dbInvoice.recipient_email && finalBuyerSnapshot?.email) {
+      updateData.recipient_email = finalBuyerSnapshot.email
     }
 
     const { error: updateError } = await supabase
@@ -180,4 +212,3 @@ export async function POST(request: NextRequest) {
     )
   }
 }
-

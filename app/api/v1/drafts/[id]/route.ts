@@ -66,33 +66,83 @@ export async function PATCH(
     return notFound('Draft')
   }
 
-  const { customer_id, line_items, invoice_date, due_date } = body
+  const { 
+    seller_contact_id,
+    buyer_contact_id,
+    customer_id, // Legacy support
+    line_items, 
+    invoice_date, 
+    due_date,
+    invoice_number,
+  } = body
 
   // Build update object
   const updates: Record<string, any> = {}
 
-  // Handle customer update
-  if (customer_id !== undefined) {
-    if (customer_id === null) {
-      updates.customer_snapshot = null
+  // Handle seller update
+  if (seller_contact_id !== undefined) {
+    if (seller_contact_id === null || seller_contact_id === 'self') {
+      updates.seller_is_self = true
+      updates.seller_contact_id = null
+      updates.seller_snapshot = null
     } else {
-      const { data: customer, error: customerError } = await supabase
-        .from('customers')
+      const { data: sellerContact, error: sellerError } = await supabase
+        .from('contacts')
         .select('*')
-        .eq('id', customer_id)
+        .eq('id', seller_contact_id)
         .eq('company_id', auth.companyId)
         .single()
 
-      if (customerError || !customer) {
-        return badRequest('Customer not found')
+      if (sellerError || !sellerContact) {
+        return badRequest('Seller contact not found')
       }
 
-      updates.customer_snapshot = {
-        id: customer.id,
-        name: customer.name,
-        address: customer.address,
-        email: customer.email,
-        vat_id: customer.vat_id,
+      updates.seller_is_self = false
+      updates.seller_contact_id = seller_contact_id
+      updates.seller_snapshot = {
+        id: sellerContact.id,
+        name: sellerContact.name,
+        address: sellerContact.address,
+        email: sellerContact.email,
+        vat_id: sellerContact.vat_id,
+        invoice_number_prefix: sellerContact.invoice_number_prefix,
+        tax_id: sellerContact.tax_id,
+        bank_details: sellerContact.bank_details,
+      }
+    }
+  }
+
+  // Handle buyer update (support legacy customer_id)
+  const effectiveBuyerContactId = buyer_contact_id !== undefined ? buyer_contact_id : customer_id
+  if (effectiveBuyerContactId !== undefined) {
+    if (effectiveBuyerContactId === null) {
+      updates.buyer_is_self = false
+      updates.buyer_contact_id = null
+      updates.buyer_snapshot = null
+    } else if (effectiveBuyerContactId === 'self') {
+      updates.buyer_is_self = true
+      updates.buyer_contact_id = null
+      updates.buyer_snapshot = null
+    } else {
+      const { data: buyerContact, error: buyerError } = await supabase
+        .from('contacts')
+        .select('*')
+        .eq('id', effectiveBuyerContactId)
+        .eq('company_id', auth.companyId)
+        .single()
+
+      if (buyerError || !buyerContact) {
+        return badRequest('Buyer contact not found')
+      }
+
+      updates.buyer_is_self = false
+      updates.buyer_contact_id = effectiveBuyerContactId
+      updates.buyer_snapshot = {
+        id: buyerContact.id,
+        name: buyerContact.name,
+        address: buyerContact.address,
+        email: buyerContact.email,
+        vat_id: buyerContact.vat_id,
       }
     }
   }
@@ -122,6 +172,7 @@ export async function PATCH(
 
   if (invoice_date !== undefined) updates.invoice_date = invoice_date
   if (due_date !== undefined) updates.due_date = due_date
+  if (invoice_number !== undefined) updates.invoice_number = invoice_number
 
   if (Object.keys(updates).length === 0) {
     return badRequest('No fields to update')

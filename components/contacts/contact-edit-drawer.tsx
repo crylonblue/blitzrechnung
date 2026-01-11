@@ -3,53 +3,53 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
-import { useCustomerEditDrawer } from '@/contexts/customer-edit-drawer-context'
-import CustomerEditForm from './customer-edit-form'
-import { Customer } from '@/types'
+import { useContactEditDrawer } from '@/contexts/contact-edit-drawer-context'
+import ContactEditForm from './contact-edit-form'
+import { Contact } from '@/types'
 import { createClient } from '@/lib/supabase/client'
 
-export default function CustomerEditDrawer() {
-  const { isOpen, customerId, closeDrawer } = useCustomerEditDrawer()
+export default function ContactEditDrawer() {
+  const { isOpen, contactId, closeDrawer } = useContactEditDrawer()
   const router = useRouter()
   const supabase = createClient()
-  const [customer, setCustomer] = useState<Customer | null>(null)
+  const [contact, setContact] = useState<Contact | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Load customer when drawer opens
+  // Load contact when drawer opens
   useEffect(() => {
-    if (isOpen && customerId) {
-      loadCustomer(customerId)
-    } else if (isOpen && !customerId) {
-      // For creating new customer, set customer to null
-      setCustomer(null)
+    if (isOpen && contactId) {
+      loadContact(contactId)
+    } else if (isOpen && !contactId) {
+      // For creating new contact, set contact to null
+      setContact(null)
       setError(null)
     }
-  }, [isOpen, customerId])
+  }, [isOpen, contactId])
 
-  const loadCustomer = async (id: string) => {
+  const loadContact = async (id: string) => {
     setIsLoading(true)
     setError(null)
 
     const { data, error: fetchError } = await supabase
-      .from('customers')
+      .from('contacts')
       .select('*')
       .eq('id', id)
       .single()
 
     if (fetchError || !data) {
-      setError(fetchError?.message || 'Fehler beim Laden des Kunden')
+      setError(fetchError?.message || 'Fehler beim Laden des Kontakts')
       setIsLoading(false)
       return
     }
 
-    setCustomer(data)
+    setContact(data)
     setIsLoading(false)
   }
 
   const handleClose = () => {
     closeDrawer()
-    setCustomer(null)
+    setContact(null)
     setError(null)
     // Delay refresh to ensure state updates are processed
     setTimeout(() => {
@@ -74,7 +74,7 @@ export default function CustomerEditDrawer() {
             <div className="message-error">{error}</div>
           </div>
         ) : (
-          <CustomerEditForm customer={customer} onClose={handleClose} />
+          <ContactEditForm contact={contact} onClose={handleClose} />
         )}
       </SheetContent>
     </Sheet>

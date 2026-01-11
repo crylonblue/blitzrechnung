@@ -2,16 +2,16 @@
 
 import { Button } from '@/components/ui/button'
 import { Plus } from 'lucide-react'
-import { useCustomerEditDrawer } from '@/contexts/customer-edit-drawer-context'
+import { useContactEditDrawer } from '@/contexts/contact-edit-drawer-context'
 
-export default function CustomersEmptyState() {
-  const { openDrawer } = useCustomerEditDrawer()
+export default function ContactsEmptyState() {
+  const { openDrawer } = useContactEditDrawer()
 
   return (
     <div className="card card-subtle p-12 text-center">
-      <p className="text-secondary">Noch keine Kunden vorhanden.</p>
+      <p className="text-secondary">Noch keine Kontakte vorhanden.</p>
       <p className="mt-2 text-sm text-meta">
-        Kunden können auch beim Erstellen einer Rechnung angelegt werden.
+        Kontakte können auch beim Erstellen einer Rechnung angelegt werden.
       </p>
       <div className="mt-6">
         <Button
@@ -19,7 +19,7 @@ export default function CustomersEmptyState() {
           className="text-sm"
         >
           <Plus className="h-4 w-4 mr-2" />
-          Ersten Kunden erstellen
+          Ersten Kontakt erstellen
         </Button>
       </div>
     </div>

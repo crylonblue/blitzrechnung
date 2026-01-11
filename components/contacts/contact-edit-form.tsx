@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Customer, Address } from '@/types'
+import { Contact, Address } from '@/types'
 import { createClient } from '@/lib/supabase/client'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Check, ChevronsUpDown, LoaderCircle, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { COUNTRIES } from '@/lib/countries'
+import { Switch } from '@/components/ui/switch'
 import {
   Dialog,
   DialogContent,
@@ -21,25 +22,33 @@ import {
 } from '@/components/ui/dialog'
 import { toast } from 'sonner'
 
-interface CustomerEditFormProps {
-  customer: Customer | null
+interface ContactEditFormProps {
+  contact: Contact | null
   onClose: () => void
 }
 
-export default function CustomerEditForm({ customer: initialCustomer, onClose }: CustomerEditFormProps) {
+export default function ContactEditForm({ contact: initialContact, onClose }: ContactEditFormProps) {
   const supabase = createClient()
-  const isEditing = !!initialCustomer
-  const address = (initialCustomer?.address as unknown as Address) || null
+  const isEditing = !!initialContact
+  const address = (initialContact?.address as unknown as Address) || null
+  const bankDetails = (initialContact?.bank_details as any) || null
 
-  const [customer, setCustomer] = useState({
-    name: initialCustomer?.name || '',
+  const [contact, setContact] = useState({
+    name: initialContact?.name || '',
     street: address?.street || '',
     streetnumber: address?.streetnumber || '',
     city: address?.city || '',
     zip: address?.zip || '',
     country: address?.country || 'DE',
-    email: initialCustomer?.email || '',
-    vat_id: initialCustomer?.vat_id || '',
+    email: initialContact?.email || '',
+    vat_id: initialContact?.vat_id || '',
+    // Seller fields
+    canBeSeller: !!initialContact?.invoice_number_prefix,
+    invoice_number_prefix: initialContact?.invoice_number_prefix || '',
+    tax_id: initialContact?.tax_id || '',
+    bank_iban: bankDetails?.iban || '',
+    bank_name: bankDetails?.bank_name || '',
+    bank_bic: bankDetails?.bic || '',
   })
   const [isSaving, setIsSaving] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -49,22 +58,29 @@ export default function CustomerEditForm({ customer: initialCustomer, onClose }:
   const [countrySearchQuery, setCountrySearchQuery] = useState('')
   const [shouldClose, setShouldClose] = useState(false)
 
-  // Reset form when customer changes
+  // Reset form when contact changes
   useEffect(() => {
-    if (initialCustomer) {
-      const addr = (initialCustomer.address as unknown as Address) || null
-      setCustomer({
-        name: initialCustomer.name || '',
+    if (initialContact) {
+      const addr = (initialContact.address as unknown as Address) || null
+      const bank = (initialContact.bank_details as any) || null
+      setContact({
+        name: initialContact.name || '',
         street: addr?.street || '',
         streetnumber: addr?.streetnumber || '',
         city: addr?.city || '',
         zip: addr?.zip || '',
         country: addr?.country || 'DE',
-        email: initialCustomer.email || '',
-        vat_id: initialCustomer.vat_id || '',
+        email: initialContact.email || '',
+        vat_id: initialContact.vat_id || '',
+        canBeSeller: !!initialContact.invoice_number_prefix,
+        invoice_number_prefix: initialContact.invoice_number_prefix || '',
+        tax_id: initialContact.tax_id || '',
+        bank_iban: bank?.iban || '',
+        bank_name: bank?.bank_name || '',
+        bank_bic: bank?.bic || '',
       })
     } else {
-      setCustomer({
+      setContact({
         name: '',
         street: '',
         streetnumber: '',
@@ -73,11 +89,17 @@ export default function CustomerEditForm({ customer: initialCustomer, onClose }:
         country: 'DE',
         email: '',
         vat_id: '',
+        canBeSeller: false,
+        invoice_number_prefix: '',
+        tax_id: '',
+        bank_iban: '',
+        bank_name: '',
+        bank_bic: '',
       })
     }
     setError(null)
     setShouldClose(false)
-  }, [initialCustomer])
+  }, [initialContact])
 
   // Handle closing after save
   useEffect(() => {
@@ -89,7 +111,7 @@ export default function CustomerEditForm({ customer: initialCustomer, onClose }:
   }, [shouldClose, isSaving])
 
   const handleSave = async () => {
-    if (!customer.name || !customer.street || !customer.streetnumber || !customer.zip || !customer.city || !customer.country) {
+    if (!contact.name || !contact.street || !contact.streetnumber || !contact.zip || !contact.city || !contact.country) {
       setError('Bitte füllen Sie alle Pflichtfelder aus.')
       return
     }
@@ -97,24 +119,34 @@ export default function CustomerEditForm({ customer: initialCustomer, onClose }:
     setIsSaving(true)
     setError(null)
 
+    // Build bank details object if any field is filled
+    const bankDetails = (contact.bank_iban || contact.bank_name || contact.bank_bic) ? {
+      iban: contact.bank_iban || null,
+      bank_name: contact.bank_name || null,
+      bic: contact.bank_bic || null,
+    } : null
+
     try {
-      if (isEditing && initialCustomer) {
-        // Update existing customer
+      if (isEditing && initialContact) {
+        // Update existing contact
         const { error: updateError } = await supabase
-          .from('customers')
+          .from('contacts')
           .update({
-            name: customer.name,
+            name: contact.name,
             address: {
-              street: customer.street,
-              streetnumber: customer.streetnumber,
-              city: customer.city,
-              zip: customer.zip,
-              country: customer.country,
+              street: contact.street,
+              streetnumber: contact.streetnumber,
+              city: contact.city,
+              zip: contact.zip,
+              country: contact.country,
             },
-            email: customer.email || null,
-            vat_id: customer.vat_id || null,
+            email: contact.email || null,
+            vat_id: contact.vat_id || null,
+            invoice_number_prefix: contact.canBeSeller ? contact.invoice_number_prefix || null : null,
+            tax_id: contact.canBeSeller ? contact.tax_id || null : null,
+            bank_details: contact.canBeSeller ? bankDetails : null,
           })
-          .eq('id', initialCustomer.id)
+          .eq('id', initialContact.id)
 
         if (updateError) {
           setError(updateError.message)
@@ -122,11 +154,11 @@ export default function CustomerEditForm({ customer: initialCustomer, onClose }:
           return
         }
 
-        toast.success('Kunde aktualisiert', {
-          description: `${customer.name} wurde erfolgreich aktualisiert.`,
+        toast.success('Kontakt aktualisiert', {
+          description: `${contact.name} wurde erfolgreich aktualisiert.`,
         })
       } else {
-        // Create new customer - we need company_id
+        // Create new contact - we need company_id
         // Get user's company_id
         const { data: { user } } = await supabase.auth.getUser()
         if (!user) {
@@ -149,19 +181,22 @@ export default function CustomerEditForm({ customer: initialCustomer, onClose }:
         }
 
         const { data, error: insertError } = await supabase
-          .from('customers')
+          .from('contacts')
           .insert({
             company_id: companyUsers.company_id,
-            name: customer.name,
+            name: contact.name,
             address: {
-              street: customer.street,
-              streetnumber: customer.streetnumber,
-              city: customer.city,
-              zip: customer.zip,
-              country: customer.country,
+              street: contact.street,
+              streetnumber: contact.streetnumber,
+              city: contact.city,
+              zip: contact.zip,
+              country: contact.country,
             },
-            email: customer.email || null,
-            vat_id: customer.vat_id || null,
+            email: contact.email || null,
+            vat_id: contact.vat_id || null,
+            invoice_number_prefix: contact.canBeSeller ? contact.invoice_number_prefix || null : null,
+            tax_id: contact.canBeSeller ? contact.tax_id || null : null,
+            bank_details: contact.canBeSeller ? bankDetails : null,
           })
           .select()
           .single()
@@ -172,8 +207,8 @@ export default function CustomerEditForm({ customer: initialCustomer, onClose }:
           return
         }
 
-        toast.success('Kunde erstellt', {
-          description: `${customer.name} wurde erfolgreich erstellt.`,
+        toast.success('Kontakt erstellt', {
+          description: `${contact.name} wurde erfolgreich erstellt.`,
         })
       }
 
@@ -187,26 +222,31 @@ export default function CustomerEditForm({ customer: initialCustomer, onClose }:
   }
 
   const handleDelete = async () => {
-    if (!initialCustomer?.id) return
+    if (!initialContact?.id) return
 
     setIsDeleting(true)
     setError(null)
 
     const { error: deleteError } = await supabase
-      .from('customers')
+      .from('contacts')
       .delete()
-      .eq('id', initialCustomer.id)
+      .eq('id', initialContact.id)
 
     setIsDeleting(false)
     setDeleteDialogOpen(false)
 
     if (deleteError) {
-      setError('Fehler beim Löschen des Kunden')
+      // Check if it's a foreign key constraint error
+      if (deleteError.code === '23503' || deleteError.message?.includes('foreign key') || deleteError.message?.includes('referenced')) {
+        setError('Dieser Kontakt wird noch in Rechnungen verwendet und kann nicht gelöscht werden.')
+      } else {
+        setError(`Fehler beim Löschen: ${deleteError.message}`)
+      }
       return
     }
 
-    toast.success('Kunde gelöscht', {
-      description: 'Der Kunde wurde erfolgreich gelöscht.',
+    toast.success('Kontakt gelöscht', {
+      description: 'Der Kontakt wurde erfolgreich gelöscht.',
     })
 
     onClose()
@@ -217,9 +257,9 @@ export default function CustomerEditForm({ customer: initialCustomer, onClose }:
       {/* Header */}
       <div className="flex-shrink-0 p-6 pb-4 border-b" style={{ borderColor: 'var(--border-default)' }}>
         <div>
-          <h1 className="text-headline">{isEditing ? 'Kunde bearbeiten' : 'Neuen Kunden erstellen'}</h1>
+          <h1 className="text-headline">{isEditing ? 'Kontakt bearbeiten' : 'Neuen Kontakt erstellen'}</h1>
           <p className="mt-2 text-meta">
-            {isEditing ? 'Bearbeiten Sie die Kundendaten' : 'Erstellen Sie einen neuen Kunden'}
+            {isEditing ? 'Bearbeiten Sie die Kontaktdaten' : 'Erstellen Sie einen neuen Kontakt'}
           </p>
         </div>
       </div>
@@ -243,8 +283,8 @@ export default function CustomerEditForm({ customer: initialCustomer, onClose }:
             <Input
               id="name"
               type="text"
-              value={customer.name}
-              onChange={(e) => setCustomer({ ...customer, name: e.target.value })}
+              value={contact.name}
+              onChange={(e) => setContact({ ...contact, name: e.target.value })}
               className="mt-1"
               autoComplete="off"
               required
@@ -258,8 +298,8 @@ export default function CustomerEditForm({ customer: initialCustomer, onClose }:
               <Input
                 id="street"
                 type="text"
-                value={customer.street}
-                onChange={(e) => setCustomer({ ...customer, street: e.target.value })}
+                value={contact.street}
+                onChange={(e) => setContact({ ...contact, street: e.target.value })}
                 className="mt-1"
                 autoComplete="off"
                 required
@@ -272,8 +312,8 @@ export default function CustomerEditForm({ customer: initialCustomer, onClose }:
               <Input
                 id="streetnumber"
                 type="text"
-                value={customer.streetnumber}
-                onChange={(e) => setCustomer({ ...customer, streetnumber: e.target.value })}
+                value={contact.streetnumber}
+                onChange={(e) => setContact({ ...contact, streetnumber: e.target.value })}
                 className="mt-1"
                 autoComplete="off"
                 required
@@ -288,8 +328,8 @@ export default function CustomerEditForm({ customer: initialCustomer, onClose }:
               <Input
                 id="zip"
                 type="text"
-                value={customer.zip}
-                onChange={(e) => setCustomer({ ...customer, zip: e.target.value })}
+                value={contact.zip}
+                onChange={(e) => setContact({ ...contact, zip: e.target.value })}
                 className="mt-1"
                 autoComplete="off"
                 required
@@ -302,8 +342,8 @@ export default function CustomerEditForm({ customer: initialCustomer, onClose }:
               <Input
                 id="city"
                 type="text"
-                value={customer.city}
-                onChange={(e) => setCustomer({ ...customer, city: e.target.value })}
+                value={contact.city}
+                onChange={(e) => setContact({ ...contact, city: e.target.value })}
                 className="mt-1"
                 autoComplete="off"
                 required
@@ -324,8 +364,8 @@ export default function CustomerEditForm({ customer: initialCustomer, onClose }:
                   className="mt-1 w-full justify-between"
                   style={{ height: 'auto', minHeight: '2.25rem' }}
                 >
-                  {customer.country
-                    ? COUNTRIES.find((country) => country.code === customer.country)?.name || customer.country
+                  {contact.country
+                    ? COUNTRIES.find((country) => country.code === contact.country)?.name || contact.country
                     : 'Land auswählen...'}
                   <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </Button>
@@ -344,13 +384,13 @@ export default function CustomerEditForm({ customer: initialCustomer, onClose }:
                         country.name.toLowerCase().includes(countrySearchQuery.toLowerCase()) ||
                         country.code.toLowerCase().includes(countrySearchQuery.toLowerCase())
                       ).map((country) => {
-                        const isSelected = customer.country === country.code
+                        const isSelected = contact.country === country.code
                         return (
                           <CommandItem
                             key={country.code}
                             value={country.name}
                             onSelect={() => {
-                              setCustomer({ ...customer, country: country.code })
+                              setContact({ ...contact, country: country.code })
                               setCountryOpen(false)
                               setCountrySearchQuery('')
                             }}
@@ -394,8 +434,8 @@ export default function CustomerEditForm({ customer: initialCustomer, onClose }:
             <Input
               id="email"
               type="email"
-              value={customer.email}
-              onChange={(e) => setCustomer({ ...customer, email: e.target.value })}
+              value={contact.email}
+              onChange={(e) => setContact({ ...contact, email: e.target.value })}
               className="mt-1"
               autoComplete="off"
             />
@@ -407,12 +447,107 @@ export default function CustomerEditForm({ customer: initialCustomer, onClose }:
             <Input
               id="vat_id"
               type="text"
-              value={customer.vat_id}
-              onChange={(e) => setCustomer({ ...customer, vat_id: e.target.value })}
+              value={contact.vat_id}
+              onChange={(e) => setContact({ ...contact, vat_id: e.target.value })}
               className="mt-1"
               autoComplete="off"
             />
           </div>
+
+          {/* Seller Section */}
+          <div className="pt-4 mt-4 border-t" style={{ borderColor: 'var(--border-default)' }}>
+            <div className="flex items-center justify-between">
+              <div>
+                <Label htmlFor="canBeSeller" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                  Kann Rechnungen stellen
+                </Label>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                  Aktivieren, wenn dieser Kontakt als Absender für Rechnungen verwendet werden kann
+                </p>
+              </div>
+              <Switch
+                id="canBeSeller"
+                checked={contact.canBeSeller}
+                onCheckedChange={(checked) => setContact({ ...contact, canBeSeller: checked })}
+              />
+            </div>
+          </div>
+
+          {contact.canBeSeller && (
+            <div className="space-y-4 pl-4 border-l-2" style={{ borderColor: 'var(--border-default)' }}>
+              <div>
+                <Label htmlFor="invoice_number_prefix" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                  Rechnungsnummer-Präfix
+                </Label>
+                <Input
+                  id="invoice_number_prefix"
+                  type="text"
+                  value={contact.invoice_number_prefix}
+                  onChange={(e) => setContact({ ...contact, invoice_number_prefix: e.target.value.toUpperCase() })}
+                  className="mt-1"
+                  autoComplete="off"
+                  placeholder="z.B. LISA"
+                />
+                <p className="text-xs text-zinc-500 mt-1">
+                  Rechnungsnummern werden als {contact.invoice_number_prefix || 'PREFIX'}-0001, {contact.invoice_number_prefix || 'PREFIX'}-0002, ... generiert
+                </p>
+              </div>
+              <div>
+                <Label htmlFor="tax_id" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                  Steuernummer
+                </Label>
+                <Input
+                  id="tax_id"
+                  type="text"
+                  value={contact.tax_id}
+                  onChange={(e) => setContact({ ...contact, tax_id: e.target.value })}
+                  className="mt-1"
+                  autoComplete="off"
+                />
+              </div>
+              <div>
+                <Label htmlFor="bank_iban" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                  IBAN
+                </Label>
+                <Input
+                  id="bank_iban"
+                  type="text"
+                  value={contact.bank_iban}
+                  onChange={(e) => setContact({ ...contact, bank_iban: e.target.value })}
+                  className="mt-1"
+                  autoComplete="off"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="bank_name" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                    Bank
+                  </Label>
+                  <Input
+                    id="bank_name"
+                    type="text"
+                    value={contact.bank_name}
+                    onChange={(e) => setContact({ ...contact, bank_name: e.target.value })}
+                    className="mt-1"
+                    autoComplete="off"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="bank_bic" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                    BIC
+                  </Label>
+                  <Input
+                    id="bank_bic"
+                    type="text"
+                    value={contact.bank_bic}
+                    onChange={(e) => setContact({ ...contact, bank_bic: e.target.value })}
+                    className="mt-1"
+                    autoComplete="off"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -443,7 +578,7 @@ export default function CustomerEditForm({ customer: initialCustomer, onClose }:
             </Button>
             <Button
               onClick={handleSave}
-              disabled={isSaving || isDeleting || !customer.name || !customer.street || !customer.streetnumber || !customer.zip || !customer.city || !customer.country}
+              disabled={isSaving || isDeleting || !contact.name || !contact.street || !contact.streetnumber || !contact.zip || !contact.city || !contact.country}
               className="text-sm"
             >
               {isSaving && <LoaderCircle className="h-4 w-4 mr-2 animate-spin" />}
@@ -457,9 +592,9 @@ export default function CustomerEditForm({ customer: initialCustomer, onClose }:
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Kunde löschen?</DialogTitle>
+            <DialogTitle>Kontakt löschen?</DialogTitle>
             <DialogDescription>
-              Möchten Sie diesen Kunden wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.
+              Möchten Sie diesen Kontakt wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

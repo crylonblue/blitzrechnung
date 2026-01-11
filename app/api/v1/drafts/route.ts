@@ -29,6 +29,8 @@ export async function GET(request: NextRequest) {
 /**
  * POST /api/v1/drafts
  * Create a new draft
+ * 
+ * Supports both old API (customer_id) and new API (seller_contact_id, buyer_contact_id)
  */
 export async function POST(request: NextRequest) {
   const auth = await validateApiKey(request)
@@ -41,30 +43,72 @@ export async function POST(request: NextRequest) {
     return badRequest('Invalid JSON body')
   }
 
-  const { customer_id, line_items, invoice_date, due_date } = body
+  const { 
+    // New API fields
+    seller_contact_id,
+    buyer_contact_id,
+    // Legacy field (maps to buyer_contact_id)
+    customer_id,
+    // Common fields
+    line_items, 
+    invoice_date, 
+    due_date,
+    invoice_number, // For external sellers
+  } = body
 
   const supabase = await createClient()
 
-  // If customer_id provided, fetch customer and create snapshot
-  let customerSnapshot = null
-  if (customer_id) {
-    const { data: customer, error: customerError } = await supabase
-      .from('customers')
+  // Determine seller
+  const seller_is_self = !seller_contact_id
+  let sellerSnapshot = null
+  
+  if (!seller_is_self && seller_contact_id) {
+    const { data: sellerContact, error: sellerError } = await supabase
+      .from('contacts')
       .select('*')
-      .eq('id', customer_id)
+      .eq('id', seller_contact_id)
       .eq('company_id', auth.companyId)
       .single()
 
-    if (customerError || !customer) {
-      return badRequest('Customer not found')
+    if (sellerError || !sellerContact) {
+      return badRequest('Seller contact not found')
     }
 
-    customerSnapshot = {
-      id: customer.id,
-      name: customer.name,
-      address: customer.address,
-      email: customer.email,
-      vat_id: customer.vat_id,
+    sellerSnapshot = {
+      id: sellerContact.id,
+      name: sellerContact.name,
+      address: sellerContact.address,
+      email: sellerContact.email,
+      vat_id: sellerContact.vat_id,
+      invoice_number_prefix: sellerContact.invoice_number_prefix,
+      tax_id: sellerContact.tax_id,
+      bank_details: sellerContact.bank_details,
+    }
+  }
+
+  // Determine buyer (support legacy customer_id)
+  const effectiveBuyerContactId = buyer_contact_id || customer_id
+  const buyer_is_self = effectiveBuyerContactId === 'self' || effectiveBuyerContactId === auth.companyId
+  let buyerSnapshot = null
+  
+  if (!buyer_is_self && effectiveBuyerContactId) {
+    const { data: buyerContact, error: buyerError } = await supabase
+      .from('contacts')
+      .select('*')
+      .eq('id', effectiveBuyerContactId)
+      .eq('company_id', auth.companyId)
+      .single()
+
+    if (buyerError || !buyerContact) {
+      return badRequest('Buyer contact not found')
+    }
+
+    buyerSnapshot = {
+      id: buyerContact.id,
+      name: buyerContact.name,
+      address: buyerContact.address,
+      email: buyerContact.email,
+      vat_id: buyerContact.vat_id,
     }
   }
 
@@ -100,7 +144,13 @@ export async function POST(request: NextRequest) {
     .insert({
       company_id: auth.companyId,
       status: 'draft',
-      customer_snapshot: customerSnapshot,
+      seller_is_self,
+      seller_contact_id: seller_is_self ? null : seller_contact_id,
+      seller_snapshot: sellerSnapshot,
+      buyer_is_self,
+      buyer_contact_id: buyer_is_self ? null : effectiveBuyerContactId,
+      buyer_snapshot: buyerSnapshot,
+      invoice_number: invoice_number || null,
       line_items: processedLineItems,
       invoice_date: invoice_date || formatDate(today),
       due_date: due_date || formatDate(defaultDueDate),

@@ -21,6 +21,14 @@ export default async function DraftsPage() {
 
   const companyIds = companyUsers?.map((cu) => cu.company_id) || []
 
+  // Get company data for displaying names
+  const { data: companies } = await supabase
+    .from('companies')
+    .select('id, name')
+    .in('id', companyIds)
+
+  const companyMap = new Map(companies?.map(c => [c.id, c.name]) || [])
+
   // Get all drafts for user's companies
   const { data: drafts, error } = await supabase
     .from('invoices')
@@ -57,7 +65,7 @@ export default async function DraftsPage() {
           <DraftsList drafts={[]} showEmptyLink />
         </div>
       ) : (
-        <DraftsTable drafts={drafts || []} />
+        <DraftsTable drafts={drafts || []} companyNames={Object.fromEntries(companyMap)} />
       )}
     </div>
   )

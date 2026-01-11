@@ -5,7 +5,7 @@ const openApiSpec = {
   openapi: '3.1.0',
   info: {
     title: `${APP_NAME} API`,
-    description: 'REST API für programmatischen Zugriff auf Rechnungen, Entwürfe und Kunden.',
+    description: 'REST API für programmatischen Zugriff auf Rechnungen, Entwürfe und Kontakte.',
     version: '1.0.0',
   },
   servers: [
@@ -35,7 +35,16 @@ const openApiSpec = {
           country: { type: 'string', example: 'Deutschland' },
         },
       },
-      Customer: {
+      BankDetails: {
+        type: 'object',
+        properties: {
+          bank_name: { type: 'string', example: 'Sparkasse Berlin' },
+          iban: { type: 'string', example: 'DE89370400440532013000' },
+          bic: { type: 'string', example: 'COBADEFFXXX' },
+          account_holder: { type: 'string', example: 'Max Mustermann' },
+        },
+      },
+      Contact: {
         type: 'object',
         properties: {
           id: { type: 'string', format: 'uuid' },
@@ -44,11 +53,15 @@ const openApiSpec = {
           address: { $ref: '#/components/schemas/Address' },
           email: { type: 'string', format: 'email', nullable: true },
           vat_id: { type: 'string', nullable: true, example: 'DE123456789' },
+          invoice_number_prefix: { type: 'string', nullable: true, example: 'ACME', description: 'Wenn gesetzt, kann dieser Kontakt Rechnungen stellen' },
+          invoice_number_counter: { type: 'integer', default: 0, description: 'Aktueller Zähler für Rechnungsnummern' },
+          tax_id: { type: 'string', nullable: true, description: 'Steuernummer (für Verkäufer)' },
+          bank_details: { $ref: '#/components/schemas/BankDetails', nullable: true },
           created_at: { type: 'string', format: 'date-time' },
           updated_at: { type: 'string', format: 'date-time' },
         },
       },
-      CustomerCreate: {
+      ContactCreate: {
         type: 'object',
         required: ['name', 'address'],
         properties: {
@@ -56,6 +69,9 @@ const openApiSpec = {
           address: { $ref: '#/components/schemas/Address' },
           email: { type: 'string', format: 'email' },
           vat_id: { type: 'string', example: 'DE123456789' },
+          invoice_number_prefix: { type: 'string', example: 'ACME', description: 'Wenn gesetzt, kann dieser Kontakt Rechnungen stellen' },
+          tax_id: { type: 'string', description: 'Steuernummer (für Verkäufer)' },
+          bank_details: { $ref: '#/components/schemas/BankDetails' },
         },
       },
       LineItem: {
@@ -80,7 +96,12 @@ const openApiSpec = {
           invoice_number: { type: 'string', nullable: true },
           invoice_date: { type: 'string', format: 'date' },
           due_date: { type: 'string', format: 'date' },
-          customer_snapshot: { type: 'object', nullable: true },
+          seller_is_self: { type: 'boolean', default: true, description: 'Wenn true, ist die eigene Firma der Verkäufer' },
+          seller_contact_id: { type: 'string', format: 'uuid', nullable: true, description: 'ID des externen Verkäufer-Kontakts' },
+          seller_snapshot: { type: 'object', nullable: true },
+          buyer_is_self: { type: 'boolean', default: false, description: 'Wenn true, ist die eigene Firma der Käufer' },
+          buyer_contact_id: { type: 'string', format: 'uuid', nullable: true, description: 'ID des Käufer-Kontakts' },
+          buyer_snapshot: { type: 'object', nullable: true },
           line_items: { type: 'array', items: { $ref: '#/components/schemas/LineItem' } },
           subtotal: { type: 'number' },
           vat_amount: { type: 'number' },
@@ -92,7 +113,8 @@ const openApiSpec = {
       DraftCreate: {
         type: 'object',
         properties: {
-          customer_id: { type: 'string', format: 'uuid', description: 'ID eines existierenden Kunden' },
+          seller_contact_id: { type: 'string', format: 'uuid', description: 'ID eines externen Kontakts als Verkäufer (optional, Standard: eigene Firma)' },
+          buyer_contact_id: { type: 'string', format: 'uuid', description: 'ID eines Kontakts als Käufer (oder "self" für eigene Firma)' },
           line_items: {
             type: 'array',
             items: {
@@ -109,6 +131,7 @@ const openApiSpec = {
           },
           invoice_date: { type: 'string', format: 'date' },
           due_date: { type: 'string', format: 'date' },
+          invoice_number: { type: 'string', description: 'Optionale manuelle Rechnungsnummer (für externe Verkäufer)' },
         },
       },
       Invoice: {
@@ -120,7 +143,12 @@ const openApiSpec = {
           invoice_number: { type: 'string', example: 'INV-0001' },
           invoice_date: { type: 'string', format: 'date' },
           due_date: { type: 'string', format: 'date' },
-          customer_snapshot: { type: 'object' },
+          seller_is_self: { type: 'boolean' },
+          seller_contact_id: { type: 'string', format: 'uuid', nullable: true },
+          seller_snapshot: { type: 'object' },
+          buyer_is_self: { type: 'boolean' },
+          buyer_contact_id: { type: 'string', format: 'uuid', nullable: true },
+          buyer_snapshot: { type: 'object' },
           line_items: { type: 'array', items: { $ref: '#/components/schemas/LineItem' } },
           subtotal: { type: 'number' },
           vat_amount: { type: 'number' },
@@ -177,10 +205,10 @@ const openApiSpec = {
     },
   },
   paths: {
-    '/customers': {
+    '/contacts': {
       get: {
-        tags: ['Customers'],
-        summary: 'Liste aller Kunden',
+        tags: ['Contacts'],
+        summary: 'Liste aller Kontakte',
         responses: {
           '200': {
             description: 'Erfolgreich',
@@ -189,7 +217,7 @@ const openApiSpec = {
                 schema: {
                   type: 'object',
                   properties: {
-                    data: { type: 'array', items: { $ref: '#/components/schemas/Customer' } },
+                    data: { type: 'array', items: { $ref: '#/components/schemas/Contact' } },
                     count: { type: 'integer' },
                   },
                 },
@@ -200,35 +228,35 @@ const openApiSpec = {
         },
       },
       post: {
-        tags: ['Customers'],
-        summary: 'Kunde erstellen',
+        tags: ['Contacts'],
+        summary: 'Kontakt erstellen',
         requestBody: {
           required: true,
-          content: { 'application/json': { schema: { $ref: '#/components/schemas/CustomerCreate' } } },
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/ContactCreate' } } },
         },
         responses: {
           '201': {
             description: 'Erstellt',
-            content: { 'application/json': { schema: { type: 'object', properties: { data: { $ref: '#/components/schemas/Customer' } } } } },
+            content: { 'application/json': { schema: { type: 'object', properties: { data: { $ref: '#/components/schemas/Contact' } } } } },
           },
           '400': { description: 'Validierungsfehler', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
           '401': { description: 'Nicht autorisiert', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
       },
     },
-    '/customers/{id}': {
+    '/contacts/{id}': {
       get: {
-        tags: ['Customers'],
-        summary: 'Einzelnen Kunden abrufen',
+        tags: ['Contacts'],
+        summary: 'Einzelnen Kontakt abrufen',
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
         responses: {
-          '200': { description: 'Erfolgreich', content: { 'application/json': { schema: { type: 'object', properties: { data: { $ref: '#/components/schemas/Customer' } } } } } },
+          '200': { description: 'Erfolgreich', content: { 'application/json': { schema: { type: 'object', properties: { data: { $ref: '#/components/schemas/Contact' } } } } } },
           '404': { description: 'Nicht gefunden', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
       },
       patch: {
-        tags: ['Customers'],
-        summary: 'Kunde aktualisieren',
+        tags: ['Contacts'],
+        summary: 'Kontakt aktualisieren',
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
         requestBody: {
           content: {
@@ -240,19 +268,22 @@ const openApiSpec = {
                   address: { $ref: '#/components/schemas/Address' },
                   email: { type: 'string' },
                   vat_id: { type: 'string' },
+                  invoice_number_prefix: { type: 'string' },
+                  tax_id: { type: 'string' },
+                  bank_details: { $ref: '#/components/schemas/BankDetails' },
                 },
               },
             },
           },
         },
         responses: {
-          '200': { description: 'Erfolgreich', content: { 'application/json': { schema: { type: 'object', properties: { data: { $ref: '#/components/schemas/Customer' } } } } } },
+          '200': { description: 'Erfolgreich', content: { 'application/json': { schema: { type: 'object', properties: { data: { $ref: '#/components/schemas/Contact' } } } } } },
           '404': { description: 'Nicht gefunden', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
       },
       delete: {
-        tags: ['Customers'],
-        summary: 'Kunde löschen',
+        tags: ['Contacts'],
+        summary: 'Kontakt löschen',
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
         responses: {
           '200': { description: 'Erfolgreich', content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean' } } } } } },
@@ -274,6 +305,7 @@ const openApiSpec = {
       post: {
         tags: ['Drafts'],
         summary: 'Entwurf erstellen',
+        description: 'Erstellt einen neuen Rechnungsentwurf. seller_contact_id ist optional (Standard: eigene Firma als Verkäufer). buyer_contact_id kann eine Kontakt-ID oder "self" sein.',
         requestBody: {
           content: { 'application/json': { schema: { $ref: '#/components/schemas/DraftCreate' } } },
         },
@@ -318,7 +350,7 @@ const openApiSpec = {
       post: {
         tags: ['Drafts'],
         summary: 'Entwurf finalisieren',
-        description: 'Generiert PDF (mit eingebetteter ZUGFeRD-XML) und separate XRechnung/ZUGFeRD-XML (EN 16931), lädt zu S3 hoch und setzt Status auf "created".',
+        description: 'Generiert PDF (mit eingebetteter ZUGFeRD-XML) und separate XRechnung/ZUGFeRD-XML (EN 16931), lädt zu S3 hoch und setzt Status auf "created". Die Rechnungsnummer wird automatisch generiert basierend auf dem Verkäufer (eigene Firma oder externer Kontakt).',
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
         responses: {
           '200': {
@@ -336,7 +368,7 @@ const openApiSpec = {
               },
             },
           },
-          '400': { description: 'Kunde fehlt', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '400': { description: 'Käufer fehlt oder Validierungsfehler', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
           '404': { description: 'Nicht gefunden', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
       },
@@ -539,7 +571,7 @@ const openApiSpec = {
     },
   },
   tags: [
-    { name: 'Customers', description: 'Kundenverwaltung' },
+    { name: 'Contacts', description: 'Kontaktverwaltung (Kunden, Lieferanten, Partner)' },
     { name: 'Drafts', description: 'Rechnungsentwürfe' },
     { name: 'Invoices', description: 'Fertige Rechnungen' },
     { name: 'Products', description: 'Produktvorlagen für wiederkehrende Positionen' },

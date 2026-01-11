@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Invoice, Company, CustomerSnapshot, EmailSettings } from '@/types'
+import { Invoice, Company, PartySnapshot, EmailSettings } from '@/types'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -40,7 +40,7 @@ export default function SendInvoiceModal({
   const [error, setError] = useState<string | null>(null)
   const [company, setCompany] = useState<Company | null>(null)
 
-  const customerSnapshot = invoice.customer_snapshot as unknown as CustomerSnapshot | null
+  const buyerSnapshot = invoice.buyer_snapshot as PartySnapshot | null
 
   // Form state
   const [recipientEmail, setRecipientEmail] = useState('')
@@ -75,13 +75,13 @@ export default function SendInvoiceModal({
     // Initialize form values
     const emailSettings = (companyData.email_settings as EmailSettings) || { mode: 'default' }
 
-    if (customerSnapshot) {
-      // Set recipient email from invoice or customer
-      setRecipientEmail(invoice.recipient_email || customerSnapshot.email || '')
+    if (buyerSnapshot) {
+      // Set recipient email from invoice or buyer
+      setRecipientEmail(invoice.recipient_email || buyerSnapshot.email || '')
 
       // Generate subject and body from templates
-      setSubject(generateEmailSubject(emailSettings.invoice_email_subject, invoice, customerSnapshot))
-      setBody(generateEmailBody(emailSettings.invoice_email_body, invoice, customerSnapshot))
+      setSubject(generateEmailSubject(emailSettings.invoice_email_subject, invoice, buyerSnapshot))
+      setBody(generateEmailBody(emailSettings.invoice_email_body, invoice, buyerSnapshot))
     }
 
     setIsLoading(false)

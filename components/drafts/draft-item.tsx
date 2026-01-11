@@ -8,13 +8,17 @@ import { Invoice } from '@/types'
 
 interface DraftItemProps {
   draft: Invoice
+  companyName?: string
 }
 
-export default function DraftItem({ draft }: DraftItemProps) {
+export default function DraftItem({ draft, companyName }: DraftItemProps) {
   const { openDrawer } = useDraftDrawer()
-  const customerSnapshot = draft.customer_snapshot as any
+  const buyerSnapshot = draft.buyer_snapshot as any
   const lineItems = draft.line_items as any[]
   const total = draft.total_amount || 0
+  const buyerName = draft.buyer_is_self 
+    ? (companyName || 'Eigene Firma')
+    : (buyerSnapshot?.name || 'Kein Empfänger')
 
   const handleClick = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -32,7 +36,7 @@ export default function DraftItem({ draft }: DraftItemProps) {
         <div className="flex-1">
           <div className="flex items-center gap-3">
             <h3 className="text-lg font-medium" style={{ color: 'var(--text-primary)' }}>
-              {customerSnapshot?.name || 'Unbenannter Kunde'}
+              {buyerName}
             </h3>
             <span className="status-badge info">
               Entwurf

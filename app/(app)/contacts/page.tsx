@@ -1,9 +1,9 @@
 import { createClient } from '@/lib/supabase/server'
-import CustomersTable from '@/components/customers/customers-table'
-import CustomersPageHeader from '@/components/customers/customers-page-header'
-import CustomersEmptyState from '@/components/customers/customers-empty-state'
+import ContactsTable from '@/components/contacts/contacts-table'
+import ContactsPageHeader from '@/components/contacts/contacts-page-header'
+import ContactsEmptyState from '@/components/contacts/contacts-empty-state'
 
-export default async function CustomersPage() {
+export default async function ContactsPage() {
   const supabase = await createClient()
   
   const {
@@ -21,8 +21,8 @@ export default async function CustomersPage() {
 
   const companyIds = companyUsers?.map((cu) => cu.company_id) || []
 
-  const { data: customers, error } = await supabase
-    .from('customers')
+  const { data: contacts, error } = await supabase
+    .from('contacts')
     .select('*')
     .in('company_id', companyIds)
     .order('name')
@@ -31,7 +31,7 @@ export default async function CustomersPage() {
     return (
       <div className="mx-auto max-w-7xl px-6 py-12">
         <div className="message-error">
-          Fehler beim Laden der Kunden: {error.message}
+          Fehler beim Laden der Kontakte: {error.message}
         </div>
       </div>
     )
@@ -39,14 +39,13 @@ export default async function CustomersPage() {
 
   return (
     <div className="mx-auto max-w-7xl px-6 py-12">
-      <CustomersPageHeader />
+      <ContactsPageHeader />
 
-      {customers && customers.length === 0 ? (
-        <CustomersEmptyState />
+      {contacts && contacts.length === 0 ? (
+        <ContactsEmptyState />
       ) : (
-        <CustomersTable customers={customers || []} />
+        <ContactsTable contacts={contacts || []} />
       )}
     </div>
   )
 }
-

@@ -3,8 +3,8 @@ import { createClient } from '@/lib/supabase/server'
 import { validateApiKey, unauthorized, badRequest, serverError, json } from '../_lib/auth'
 
 /**
- * GET /api/v1/customers
- * List all customers for the company
+ * GET /api/v1/contacts
+ * List all contacts for the company
  */
 export async function GET(request: NextRequest) {
   const auth = await validateApiKey(request)
@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
   const supabase = await createClient()
 
   const { data, error } = await supabase
-    .from('customers')
+    .from('contacts')
     .select('*')
     .eq('company_id', auth.companyId)
     .order('name')
@@ -26,8 +26,8 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * POST /api/v1/customers
- * Create a new customer
+ * POST /api/v1/contacts
+ * Create a new contact
  */
 export async function POST(request: NextRequest) {
   const auth = await validateApiKey(request)
@@ -40,7 +40,16 @@ export async function POST(request: NextRequest) {
     return badRequest('Invalid JSON body')
   }
 
-  const { name, address, email, vat_id } = body
+  const { 
+    name, 
+    address, 
+    email, 
+    vat_id,
+    // Seller-specific fields
+    invoice_number_prefix,
+    tax_id,
+    bank_details
+  } = body
 
   if (!name) {
     return badRequest('name is required')
@@ -53,13 +62,16 @@ export async function POST(request: NextRequest) {
   const supabase = await createClient()
 
   const { data, error } = await supabase
-    .from('customers')
+    .from('contacts')
     .insert({
       company_id: auth.companyId,
       name,
       address,
       email: email || null,
       vat_id: vat_id || null,
+      invoice_number_prefix: invoice_number_prefix || null,
+      tax_id: tax_id || null,
+      bank_details: bank_details || null,
     })
     .select()
     .single()
