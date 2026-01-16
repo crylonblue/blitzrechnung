@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createServiceRoleClient } from '@/lib/supabase/server'
 
 export interface ApiAuth {
   companyId: string
@@ -30,7 +30,7 @@ export async function validateApiKey(request: NextRequest): Promise<ApiAuth | nu
   const hashArray = Array.from(new Uint8Array(hashBuffer))
   const keyHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
 
-  const supabase = await createClient()
+  const supabase = createServiceRoleClient()
 
   // Find API key by hash
   const { data: apiKeyRecord, error } = await supabase
