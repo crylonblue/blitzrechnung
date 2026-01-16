@@ -162,6 +162,15 @@ export async function POST(
     // Convert plain text body to HTML
     const htmlBody = textToHtml(emailBody || '')
 
+    // Determine which server token to use
+    // Use custom server token if domain is verified, otherwise use default
+    const serverToken =
+      emailSettings.mode === 'custom_domain' &&
+      emailSettings.domain_verified &&
+      emailSettings.postmark_server_token
+        ? emailSettings.postmark_server_token
+        : undefined
+
     // Send email via Postmark
     await sendEmail({
       from,
@@ -171,6 +180,7 @@ export async function POST(
       textBody: emailBody,
       replyTo,
       attachments,
+      serverToken,
     })
 
     // Update invoice status and recipient email

@@ -13,7 +13,6 @@ import { LANDING_PAGE_URL } from '@/lib/config'
 export default function SignupPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [companyName, setCompanyName] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const router = useRouter()
@@ -24,15 +23,10 @@ export default function SignupPage() {
     setIsLoading(true)
     setError(null)
 
-    // Create user
-    const { data: authData, error: authError } = await supabase.auth.signUp({
+    // Create user - company will be created in onboarding
+    const { error: authError } = await supabase.auth.signUp({
       email,
       password,
-      options: {
-        data: {
-          full_name: companyName.trim(),
-        },
-      },
     })
 
     if (authError) {
@@ -41,92 +35,8 @@ export default function SignupPage() {
       return
     }
 
-    if (!authData.user) {
-      setError('Registrierung fehlgeschlagen')
-      setIsLoading(false)
-      return
-    }
-
-    // Try using function first, fallback to direct insert
-    let companyId: string | null = null
-    let company: any = null
-
-    // Try function first (if it exists)
-    // Pass user_id explicitly since auth.uid() is NULL before email confirmation
-    const { data: functionCompanyId, error: functionError } = await supabase.rpc(
-      'create_company_with_owner',
-      {
-        p_user_id: authData.user.id,
-        p_name: companyName,
-        p_address: {
-          street: '',
-          city: '',
-          zip: '',
-          country: 'DE',
-        },
-        p_country: 'DE',
-      }
-    )
-
-    if (!functionError && functionCompanyId) {
-      companyId = functionCompanyId
-      // Get the created company
-      const { data: fetchedCompany, error: fetchError } = await supabase
-        .from('companies')
-        .select('*')
-        .eq('id', companyId)
-        .single()
-
-      if (!fetchError && fetchedCompany) {
-        company = fetchedCompany
-      }
-    }
-
-    // Fallback to direct insert if function doesn't work
-    if (!company) {
-      // Generate UUID client-side to avoid needing .select()
-      // This bypasses the RLS SELECT policy issue during signup
-      const generatedCompanyId = crypto.randomUUID()
-
-      // Insert company WITHOUT .select() - only INSERT policy is checked
-      const { error: companyError } = await supabase
-        .from('companies')
-        .insert({
-          id: generatedCompanyId,
-          name: companyName,
-          address: {
-            street: '',
-            city: '',
-            zip: '',
-            country: 'DE',
-          },
-          country: 'DE',
-        })
-
-      if (companyError) {
-        setError('Fehler beim Erstellen des Unternehmens: ' + companyError.message)
-        setIsLoading(false)
-        return
-      }
-
-      // Link user to company as owner
-      const { error: linkError } = await supabase.from('company_users').insert({
-        user_id: authData.user.id,
-        company_id: generatedCompanyId,
-        role: 'owner',
-      })
-
-      if (linkError) {
-        setError('Fehler beim Verknüpfen des Unternehmens: ' + linkError.message)
-        setIsLoading(false)
-        return
-      }
-
-      companyId = generatedCompanyId
-      company = { id: generatedCompanyId, name: companyName }
-    }
-
-    router.push('/')
+    // Redirect to onboarding to complete company setup
+    router.push('/onboarding')
     router.refresh()
   }
 
@@ -284,21 +194,6 @@ export default function SignupPage() {
           </div>
 
           <form onSubmit={handleSignup} className="space-y-4">
-            <div>
-              <Label htmlFor="companyName">
-                Unternehmensname
-              </Label>
-              <Input
-                id="companyName"
-                type="text"
-                placeholder="z.B. Max Mustermann oder Muster GmbH"
-                value={companyName}
-                onChange={(e) => setCompanyName(e.target.value)}
-                required
-                className="mt-1.5 h-11"
-              />
-            </div>
-
             <div>
               <Label htmlFor="email">
                 E-Mail

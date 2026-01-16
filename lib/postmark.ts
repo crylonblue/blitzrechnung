@@ -51,6 +51,40 @@ export interface CreateDomainResult {
   dns_records: DomainDnsRecords
 }
 
+/**
+ * Response from Postmark Servers API
+ * See: https://postmarkapp.com/developer/api/servers-api
+ */
+interface PostmarkServerResponse {
+  ID: number
+  Name: string
+  ApiTokens: string[]
+  Color: string
+  SmtpApiActivated: boolean
+  RawEmailEnabled: boolean
+  DeliveryType: string
+  ServerLink: string
+  InboundAddress: string
+  InboundHookUrl: string
+  BounceHookUrl: string
+  OpenHookUrl: string
+  DeliveryHookUrl: string
+  PostFirstOpenOnly: boolean
+  InboundDomain: string
+  InboundHash: string
+  InboundSpamThreshold: number
+  TrackOpens: boolean
+  TrackLinks: string
+  IncludeBounceContentInHook: boolean
+  ClickHookUrl: string
+  EnableSmtpApiErrorHooks: boolean
+}
+
+export interface CreateServerResult {
+  postmark_server_id: number
+  postmark_server_token: string
+}
+
 function getServerToken(): string {
   const token = process.env.POSTMARK_SERVER_TOKEN
   if (!token) {
@@ -208,6 +242,62 @@ export async function deleteDomain(postmarkDomainId: number): Promise<void> {
 }
 
 /**
+ * Create a new Postmark server for a user's custom domain
+ * Each user with a custom domain gets their own dedicated server for isolation
+ * See: https://postmarkapp.com/developer/api/servers-api#create-server
+ */
+export async function createServer(name: string): Promise<CreateServerResult> {
+  const response = await fetch(`${POSTMARK_API_URL}/servers`, {
+    method: 'POST',
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      'X-Postmark-Account-Token': getAccountToken(),
+    },
+    body: JSON.stringify({
+      Name: name,
+      Color: 'blue',
+      TrackOpens: true,
+      TrackLinks: 'HtmlAndText',
+    }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.Message || 'Failed to create server')
+  }
+
+  const data: PostmarkServerResponse = await response.json()
+
+  return {
+    postmark_server_id: data.ID,
+    postmark_server_token: data.ApiTokens[0],
+  }
+}
+
+/**
+ * Delete a Postmark server
+ * See: https://postmarkapp.com/developer/api/servers-api#delete-server
+ */
+export async function deleteServer(serverId: number): Promise<void> {
+  const response = await fetch(
+    `${POSTMARK_API_URL}/servers/${serverId}`,
+    {
+      method: 'DELETE',
+      headers: {
+        'Accept': 'application/json',
+        'X-Postmark-Account-Token': getAccountToken(),
+      },
+    }
+  )
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.Message || 'Failed to delete server')
+  }
+}
+
+/**
  * Get the default sender email address
  */
 export function getDefaultFromEmail(): string {
@@ -216,6 +306,8 @@ export function getDefaultFromEmail(): string {
 
 /**
  * Send an email via Postmark
+ * If serverToken is provided, uses that (for custom domain servers)
+ * Otherwise falls back to the default POSTMARK_SERVER_TOKEN env variable
  */
 export async function sendEmail(options: {
   from: string
@@ -229,13 +321,16 @@ export async function sendEmail(options: {
     content: string // Base64 encoded
     contentType: string
   }>
+  serverToken?: string
 }): Promise<void> {
+  const token = options.serverToken || getServerToken()
+  
   const response = await fetch(`${POSTMARK_API_URL}/email`, {
     method: 'POST',
     headers: {
       'Accept': 'application/json',
       'Content-Type': 'application/json',
-      'X-Postmark-Server-Token': getServerToken(),
+      'X-Postmark-Server-Token': token,
     },
     body: JSON.stringify({
       From: options.from,

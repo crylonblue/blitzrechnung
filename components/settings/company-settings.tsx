@@ -8,6 +8,14 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { Check, ChevronsUpDown, LoaderCircle, Copy, CheckCircle, XCircle, AlertCircle } from 'lucide-react'
@@ -59,6 +67,7 @@ export default function CompanySettings({ company: initialCompany }: CompanySett
   const [isSettingUpDomain, setIsSettingUpDomain] = useState(false)
   const [isVerifyingDomain, setIsVerifyingDomain] = useState(false)
   const [isDeletingDomain, setIsDeletingDomain] = useState(false)
+  const [deleteDomainDialogOpen, setDeleteDomainDialogOpen] = useState(false)
   const [newDomainEmail, setNewDomainEmail] = useState('')
   const [newDomainName, setNewDomainName] = useState(initialCompany.name || '')
 
@@ -237,10 +246,6 @@ export default function CompanySettings({ company: initialCompany }: CompanySett
   }
 
   const handleDeleteDomain = async () => {
-    if (!confirm('Möchten Sie die eigene Domain wirklich entfernen? E-Mails werden dann wieder über blitzrechnung.de versendet.')) {
-      return
-    }
-
     setIsDeletingDomain(true)
     setError(null)
 
@@ -263,6 +268,7 @@ export default function CompanySettings({ company: initialCompany }: CompanySett
 
       toast.success('Domain entfernt')
       setNewDomainEmail('')
+      setDeleteDomainDialogOpen(false)
       router.refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Fehler beim Entfernen der Domain')
@@ -937,10 +943,9 @@ export default function CompanySettings({ company: initialCompany }: CompanySett
                         )}
                         <Button
                           variant="outline"
-                          onClick={handleDeleteDomain}
+                          onClick={() => setDeleteDomainDialogOpen(true)}
                           disabled={isDeletingDomain}
                         >
-                          {isDeletingDomain && <LoaderCircle className="h-4 w-4 mr-2 animate-spin" />}
                           Domain entfernen
                         </Button>
                       </div>
@@ -1003,6 +1008,39 @@ export default function CompanySettings({ company: initialCompany }: CompanySett
           </CardContent>
         </Card>
       </Tabs>
+
+      {/* Delete Domain Confirmation Dialog */}
+      <Dialog open={deleteDomainDialogOpen} onOpenChange={(open) => {
+        if (!isDeletingDomain) {
+          setDeleteDomainDialogOpen(open)
+        }
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Domain entfernen?</DialogTitle>
+            <DialogDescription>
+              Möchten Sie die eigene Domain wirklich entfernen? E-Mails werden dann wieder über blitzrechnung.de versendet.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteDomainDialogOpen(false)}
+              disabled={isDeletingDomain}
+            >
+              Abbrechen
+            </Button>
+            <Button
+              onClick={handleDeleteDomain}
+              disabled={isDeletingDomain}
+              variant="destructive"
+            >
+              {isDeletingDomain && <LoaderCircle className="h-4 w-4 mr-2 animate-spin" />}
+              Entfernen
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

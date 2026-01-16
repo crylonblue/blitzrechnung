@@ -20,19 +20,22 @@ export default async function Layout({ children }: { children: React.ReactNode }
     .limit(1)
     .single()
 
+  // Redirect to onboarding if user has no company
+  if (!companyUsers) {
+    redirect('/onboarding')
+  }
+
+  const companyId = companyUsers.company_id
   let companyName = 'Mein Unternehmen'
-  let companyId = ''
-  if (companyUsers) {
-    companyId = companyUsers.company_id
-    const { data: company } = await supabase
-      .from('companies')
-      .select('name')
-      .eq('id', companyUsers.company_id)
-      .single()
-    
-    if (company) {
-      companyName = company.name
-    }
+  
+  const { data: company } = await supabase
+    .from('companies')
+    .select('name')
+    .eq('id', companyUsers.company_id)
+    .single()
+  
+  if (company) {
+    companyName = company.name
   }
 
   // Get user profile

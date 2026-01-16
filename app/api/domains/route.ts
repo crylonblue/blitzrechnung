@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { createDomain, deleteDomain } from '@/lib/postmark'
+import { createDomain, deleteDomain, createServer } from '@/lib/postmark'
 import { EmailSettings } from '@/types'
 
 /**
@@ -56,10 +56,10 @@ export async function POST(request: NextRequest) {
   const domain = from_email.split('@')[1]
 
   try {
-    // Get current email settings to check if there's an existing domain
+    // Get current email settings and company name
     const { data: company } = await supabase
       .from('companies')
-      .select('email_settings')
+      .select('email_settings, name')
       .eq('id', companyUser.company_id)
       .single()
 
@@ -75,10 +75,24 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Create new domain in Postmark
-    const result = await createDomain(domain)
+    // Reuse existing server if available, otherwise create a new one
+    let serverResult: { postmark_server_id: number; postmark_server_token: string }
+    
+    if (currentSettings.postmark_server_id && currentSettings.postmark_server_token) {
+      // Reuse existing server
+      serverResult = {
+        postmark_server_id: currentSettings.postmark_server_id,
+        postmark_server_token: currentSettings.postmark_server_token,
+      }
+    } else {
+      // Create a new Postmark server for this user's custom domain
+      serverResult = await createServer(domain)
+    }
 
-    // Update company email settings
+    // Create new domain in Postmark
+    const domainResult = await createDomain(domain)
+
+    // Update company email settings with both server and domain info
     const newSettings: EmailSettings = {
       mode: 'custom_domain',
       reply_to_email: reply_to_email || undefined,
@@ -86,8 +100,10 @@ export async function POST(request: NextRequest) {
       from_email,
       from_name,
       domain_verified: false,
-      postmark_domain_id: result.postmark_domain_id,
-      dns_records: result.dns_records,
+      postmark_domain_id: domainResult.postmark_domain_id,
+      postmark_server_id: serverResult.postmark_server_id,
+      postmark_server_token: serverResult.postmark_server_token,
+      dns_records: domainResult.dns_records,
     }
 
     const { error: updateError } = await supabase
@@ -96,9 +112,9 @@ export async function POST(request: NextRequest) {
       .eq('id', companyUser.company_id)
 
     if (updateError) {
-      // Try to clean up the Postmark domain
+      // Try to clean up the Postmark domain (keep server for reuse)
       try {
-        await deleteDomain(result.postmark_domain_id)
+        await deleteDomain(domainResult.postmark_domain_id)
       } catch {}
       throw updateError
     }
@@ -106,7 +122,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       domain,
-      dns_records: result.dns_records,
+      dns_records: domainResult.dns_records,
     })
   } catch (err) {
     console.error('Error creating sender domain:', err)
@@ -167,11 +183,19 @@ export async function DELETE(request: NextRequest) {
       }
     }
 
-    // Reset to default settings
+    // Keep the server for reuse - Postmark has restrictions on server deletion
+    // and we want to allow users to re-add a domain without issues
+
+    // Reset to default settings but keep server info for reuse
     const newSettings: EmailSettings = {
       mode: 'default',
       reply_to_email: currentSettings.reply_to_email,
       reply_to_name: currentSettings.reply_to_name,
+      invoice_email_subject: currentSettings.invoice_email_subject,
+      invoice_email_body: currentSettings.invoice_email_body,
+      // Keep server info for reuse when adding a new domain
+      postmark_server_id: currentSettings.postmark_server_id,
+      postmark_server_token: currentSettings.postmark_server_token,
     }
 
     const { error: updateError } = await supabase

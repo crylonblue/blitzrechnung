@@ -103,6 +103,9 @@ export interface EmailSettings {
   domain_verified?: boolean
   domain_verified_at?: string
   postmark_domain_id?: number
+  // Postmark server for custom domain (each user gets their own server)
+  postmark_server_id?: number
+  postmark_server_token?: string
   dns_records?: {
     dkim?: DnsRecord
     return_path?: DnsRecord
