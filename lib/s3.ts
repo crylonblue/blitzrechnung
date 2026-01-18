@@ -7,6 +7,8 @@ function getS3Config() {
   const accessKeyId = process.env.S3_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID
   const secretAccessKey = process.env.S3_SECRET_KEY || process.env.AWS_SECRET_ACCESS_KEY
   const bucketName = process.env.S3_BUCKET_NAME
+  // Public URL for accessing files (e.g., https://cdn.blitzrechnung.de)
+  const publicUrl = process.env.S3_PUBLIC_URL
 
   // Provide helpful error messages
   if (!accessKeyId) {
@@ -34,7 +36,31 @@ function getS3Config() {
     accessKeyId,
     secretAccessKey,
     bucketName,
+    publicUrl,
   }
+}
+
+/**
+ * Builds a public URL for a given S3 key
+ * Uses S3_PUBLIC_URL if configured, otherwise falls back to S3 endpoint URL
+ */
+function buildPublicUrl(key: string, config: ReturnType<typeof getS3Config>): string {
+  // If public URL is configured (e.g., CDN), use it
+  if (config.publicUrl) {
+    // Remove trailing slash if present
+    const baseUrl = config.publicUrl.replace(/\/$/, '')
+    return `${baseUrl}/${key}`
+  }
+  
+  // Fallback to S3 endpoint URL
+  if (config.endpoint) {
+    // For Cloudflare R2: endpoint + /bucket-name/key
+    const endpointUrl = new URL(config.endpoint)
+    return `${endpointUrl.protocol}//${endpointUrl.host}/${config.bucketName}/${key}`
+  }
+  
+  // For AWS S3: standard format
+  return `https://${config.bucketName}.s3.${config.region}.amazonaws.com/${key}`
 }
 
 export async function uploadToS3(
@@ -74,15 +100,8 @@ export async function uploadToS3(
 
   await s3Client.send(command)
 
-  // Return the URL - use custom endpoint if provided, otherwise use AWS S3 format
-  if (config.endpoint) {
-    // For Cloudflare R2: endpoint + /bucket-name/key
-    const endpointUrl = new URL(config.endpoint)
-    return `${endpointUrl.protocol}//${endpointUrl.host}/${config.bucketName}/${key}`
-  } else {
-    // For AWS S3: standard format
-    return `https://${config.bucketName}.s3.${config.region}.amazonaws.com/${key}`
-  }
+  // Return the public URL
+  return buildPublicUrl(key, config)
 }
 
 export async function getPresignedUrl(
@@ -211,15 +230,8 @@ export async function uploadLogoToS3(
 
   await s3Client.send(command)
 
-  // Return the URL - use custom endpoint if provided, otherwise use AWS S3 format
-  if (config.endpoint) {
-    // For Cloudflare R2: endpoint + /bucket-name/key
-    const endpointUrl = new URL(config.endpoint)
-    return `${endpointUrl.protocol}//${endpointUrl.host}/${config.bucketName}/${key}`
-  } else {
-    // For AWS S3: standard format
-    return `https://${config.bucketName}.s3.${config.region}.amazonaws.com/${key}`
-  }
+  // Return the public URL
+  return buildPublicUrl(key, config)
 }
 
 /**
@@ -262,18 +274,30 @@ export async function deleteLogoFromS3(companyId: string): Promise<void> {
 
 /**
  * Extracts the S3 key from a file URL
+ * Handles both S3 endpoint URLs and public CDN URLs
  */
 function extractKeyFromUrl(fileUrl: string, bucketName: string): string {
   try {
     const url = new URL(fileUrl)
-    // Remove leading slash and bucket name if present
+    const publicUrl = process.env.S3_PUBLIC_URL
+    
+    // Remove leading slash and get path parts
     const pathParts = url.pathname.split('/').filter(Boolean)
-    // If the first part is the bucket name, skip it
+    
+    // If using public CDN URL, the path is the key directly (no bucket name prefix)
+    if (publicUrl) {
+      const publicUrlParsed = new URL(publicUrl)
+      if (url.host === publicUrlParsed.host) {
+        return pathParts.join('/')
+      }
+    }
+    
+    // For S3 endpoint URLs, the first part might be the bucket name
     if (pathParts[0] === bucketName) {
       return pathParts.slice(1).join('/')
-    } else {
-      return pathParts.join('/')
     }
+    
+    return pathParts.join('/')
   } catch {
     // If URL parsing fails, assume it's already a key
     return fileUrl
