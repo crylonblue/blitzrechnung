@@ -9,6 +9,8 @@ function getS3Config() {
   const bucketName = process.env.S3_BUCKET_NAME
   // Public URL for accessing files (e.g., https://cdn.blitzrechnung.de)
   const publicUrl = process.env.S3_PUBLIC_URL
+  // Optional path prefix for all S3 keys (e.g., "app" -> files stored at app/logos/..., app/invoices/...)
+  const pathPrefix = process.env.S3_PATH_PREFIX || ''
 
   // Provide helpful error messages
   if (!accessKeyId) {
@@ -37,7 +39,18 @@ function getS3Config() {
     secretAccessKey,
     bucketName,
     publicUrl,
+    pathPrefix,
   }
+}
+
+/**
+ * Builds the full S3 key with optional path prefix
+ */
+function buildKey(relativePath: string, config: ReturnType<typeof getS3Config>): string {
+  if (config.pathPrefix) {
+    return `${config.pathPrefix}/${relativePath}`
+  }
+  return relativePath
 }
 
 /**
@@ -89,7 +102,7 @@ export async function uploadToS3(
 
   const s3Client = new S3Client(s3ClientConfig)
 
-  const key = `app/${userId}/${invoiceId}/${fileName}`
+  const key = buildKey(`invoices/${userId}/${invoiceId}/${fileName}`, config)
   
   const command = new PutObjectCommand({
     Bucket: config.bucketName,
@@ -219,7 +232,7 @@ export async function uploadLogoToS3(
 
   // Determine file extension from content type
   const ext = contentType === 'image/png' ? 'png' : 'jpg'
-  const key = `logos/${companyId}/logo.${ext}`
+  const key = buildKey(`logos/${companyId}/logo.${ext}`, config)
   
   const command = new PutObjectCommand({
     Bucket: config.bucketName,
@@ -259,7 +272,7 @@ export async function deleteLogoFromS3(companyId: string): Promise<void> {
   const extensions = ['png', 'jpg']
   
   for (const ext of extensions) {
-    const key = `logos/${companyId}/logo.${ext}`
+    const key = buildKey(`logos/${companyId}/logo.${ext}`, config)
     try {
       const command = new DeleteObjectCommand({
         Bucket: config.bucketName,
@@ -284,7 +297,7 @@ function extractKeyFromUrl(fileUrl: string, bucketName: string): string {
     // Remove leading slash and get path parts
     const pathParts = url.pathname.split('/').filter(Boolean)
     
-    // If using public CDN URL, the path is the key directly (no bucket name prefix)
+    // If using public CDN URL, the path is the key directly (includes path prefix if any)
     if (publicUrl) {
       const publicUrlParsed = new URL(publicUrl)
       if (url.host === publicUrlParsed.host) {
