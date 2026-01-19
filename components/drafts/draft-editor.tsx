@@ -16,6 +16,7 @@ import { DatePicker } from '@/components/ui/date-picker'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { LoaderCircle, Trash2, Check } from 'lucide-react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useDraftDrawer } from '@/contexts/draft-drawer-context'
 import { ContactDrawerProvider } from '@/contexts/contact-drawer-context'
 import {
@@ -60,6 +61,9 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
 
   const lineItems = (draft.line_items as unknown as LineItem[]) || []
   const [isSaved, setIsSaved] = useState(!!draft.id && draft.status === 'draft')
+  
+  // Language state
+  const [language, setLanguage] = useState<'de' | 'en'>(draft.language as 'de' | 'en' || 'de')
 
   // Load company data
   useEffect(() => {
@@ -106,6 +110,7 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
           subtotal: subtotal,
           vat_amount: vatAmount,
           total_amount: totalAmount,
+          language: language,
         })
         .eq('id', draft.id)
         .select()
@@ -137,6 +142,7 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
           subtotal: subtotal,
           vat_amount: vatAmount,
           total_amount: totalAmount,
+          language: language,
         })
         .select()
         .single()
@@ -356,6 +362,7 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
             subtotal: subtotal,
             vat_amount: vatAmount,
             total_amount: totalAmount,
+            language: language,
             finalized_at: new Date().toISOString(),
           })
           .eq('id', draft.id)
@@ -389,6 +396,7 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
             subtotal: subtotal,
             vat_amount: vatAmount,
             total_amount: totalAmount,
+            language: language,
             finalized_at: new Date().toISOString(),
           })
           .select()
@@ -517,6 +525,27 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
                 </div>
               </div>
             </div>
+
+            {/* Language Selector - Only show if English invoices are enabled */}
+            {company?.enable_english_invoices && (
+              <div>
+                <h2 className="mb-4 text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--text-primary)' }}>Sprache</h2>
+                <div>
+                  <Label htmlFor="language">
+                    Rechnungssprache
+                  </Label>
+                  <Select value={language} onValueChange={(value: 'de' | 'en') => setLanguage(value)}>
+                    <SelectTrigger className="mt-1.5">
+                      <SelectValue placeholder="Sprache auswählen" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="de">Deutsch</SelectItem>
+                      <SelectItem value="en">English</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
 
             <div>
               <h2 className="mb-4 text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--text-primary)' }}>Positionen</h2>

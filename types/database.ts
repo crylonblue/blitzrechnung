@@ -28,6 +28,7 @@ export interface Database {
           contact_name: string | null
           contact_phone: string | null
           contact_email: string | null
+          enable_english_invoices: boolean
           created_at: string
           updated_at: string
         }
@@ -49,6 +50,7 @@ export interface Database {
           contact_name?: string | null
           contact_phone?: string | null
           contact_email?: string | null
+          enable_english_invoices?: boolean
           created_at?: string
           updated_at?: string
         }
@@ -70,6 +72,7 @@ export interface Database {
           contact_name?: string | null
           contact_phone?: string | null
           contact_email?: string | null
+          enable_english_invoices?: boolean
           created_at?: string
           updated_at?: string
         }
@@ -189,6 +192,7 @@ export interface Database {
           pdf_url: string | null
           xml_url: string | null
           recipient_email: string | null
+          language: string
           created_at: string
           updated_at: string
           finalized_at: string | null
@@ -214,6 +218,7 @@ export interface Database {
           pdf_url?: string | null
           xml_url?: string | null
           recipient_email?: string | null
+          language?: string
           created_at?: string
           updated_at?: string
           finalized_at?: string | null
@@ -239,6 +244,7 @@ export interface Database {
           pdf_url?: string | null
           xml_url?: string | null
           recipient_email?: string | null
+          language?: string
           created_at?: string
           updated_at?: string
           finalized_at?: string | null

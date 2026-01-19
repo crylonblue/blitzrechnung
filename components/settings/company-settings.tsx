@@ -19,6 +19,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { Check, ChevronsUpDown, LoaderCircle, Copy, CheckCircle, XCircle, AlertCircle } from 'lucide-react'
+import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import { COUNTRIES } from '@/lib/countries'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -57,6 +58,8 @@ export default function CompanySettings({ company: initialCompany }: CompanySett
     contact_name: initialCompany.contact_name || '',
     contact_phone: initialCompany.contact_phone || '',
     contact_email: initialCompany.contact_email || '',
+    // Language support
+    enable_english_invoices: initialCompany.enable_english_invoices || false,
   })
   const [emailSettings, setEmailSettings] = useState<EmailSettings>(initialEmailSettings)
   const [isSaving, setIsSaving] = useState(false)
@@ -104,6 +107,7 @@ export default function CompanySettings({ company: initialCompany }: CompanySett
           contact_name: company.contact_name || null,
           contact_phone: company.contact_phone || null,
           contact_email: company.contact_email || null,
+          enable_english_invoices: company.enable_english_invoices,
         })
         .eq('id', initialCompany.id)
 
@@ -681,6 +685,29 @@ export default function CompanySettings({ company: initialCompany }: CompanySett
                   <p className="mt-1.5 text-xs text-meta">
                     An diese Adresse werden fertige Rechnungen automatisch versendet (z.B. für Datev oder andere Buchhaltungssysteme)
                   </p>
+                </div>
+
+                {/* Language Support Section */}
+                <div className="pt-6 mt-6 border-t" style={{ borderColor: 'var(--border-default)' }}>
+                  <h2 className="mb-4 text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--text-primary)' }}>
+                    Sprache
+                  </h2>
+                  
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label htmlFor="enable_english_invoices" className="text-base">
+                        Englische Rechnungen aktivieren
+                      </Label>
+                      <p className="text-xs text-meta">
+                        Wenn aktiviert, können Sie bei der Rechnungserstellung zwischen Deutsch und Englisch wählen
+                      </p>
+                    </div>
+                    <Switch
+                      id="enable_english_invoices"
+                      checked={company.enable_english_invoices}
+                      onCheckedChange={(checked) => setCompany({ ...company, enable_english_invoices: checked })}
+                    />
+                  </div>
                 </div>
 
                 {/* Email Template Section */}

@@ -1,12 +1,13 @@
 import type { Invoice, PartySnapshot } from '@/types'
+import { getDefaultEmailSubject, getDefaultEmailBody, type InvoiceLanguage } from './invoice-translations'
 
 /**
- * Default email subject template
+ * Default email subject template (German)
  */
 export const DEFAULT_INVOICE_EMAIL_SUBJECT = 'Rechnung {invoice_number}'
 
 /**
- * Default email body template
+ * Default email body template (German)
  */
 export const DEFAULT_INVOICE_EMAIL_BODY = `Sehr geehrte Damen und Herren,
 
@@ -27,9 +28,15 @@ export const EMAIL_PLACEHOLDERS = [
 ] as const
 
 /**
- * Formats a number as German currency
+ * Formats a number as currency according to language
  */
-function formatCurrency(amount: number): string {
+function formatCurrency(amount: number, language: InvoiceLanguage = 'de'): string {
+  if (language === 'en') {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'EUR',
+    }).format(amount)
+  }
   return new Intl.NumberFormat('de-DE', {
     style: 'currency',
     currency: 'EUR',
@@ -37,11 +44,18 @@ function formatCurrency(amount: number): string {
 }
 
 /**
- * Formats a date string as German date
+ * Formats a date string according to language
  */
-function formatDate(dateString: string | null): string {
+function formatDate(dateString: string | null, language: InvoiceLanguage = 'de'): string {
   if (!dateString) return ''
   const date = new Date(dateString)
+  if (language === 'en') {
+    return new Intl.DateTimeFormat('en-US', {
+      month: '2-digit',
+      day: '2-digit',
+      year: 'numeric',
+    }).format(date)
+  }
   return new Intl.DateTimeFormat('de-DE', {
     day: '2-digit',
     month: '2-digit',
@@ -55,13 +69,14 @@ function formatDate(dateString: string | null): string {
 export function replaceEmailPlaceholders(
   template: string,
   invoice: Invoice,
-  buyer: PartySnapshot | null
+  buyer: PartySnapshot | null,
+  language: InvoiceLanguage = 'de'
 ): string {
   return template
     .replace(/{invoice_number}/g, invoice.invoice_number || '')
     .replace(/{customer_name}/g, buyer?.name || '')
-    .replace(/{total_amount}/g, formatCurrency(invoice.total_amount))
-    .replace(/{invoice_date}/g, formatDate(invoice.invoice_date))
+    .replace(/{total_amount}/g, formatCurrency(invoice.total_amount, language))
+    .replace(/{invoice_date}/g, formatDate(invoice.invoice_date, language))
 }
 
 /**
@@ -70,10 +85,12 @@ export function replaceEmailPlaceholders(
 export function generateEmailSubject(
   template: string | undefined,
   invoice: Invoice,
-  buyer: PartySnapshot | null
+  buyer: PartySnapshot | null,
+  language: InvoiceLanguage = 'de'
 ): string {
-  const subjectTemplate = template || DEFAULT_INVOICE_EMAIL_SUBJECT
-  return replaceEmailPlaceholders(subjectTemplate, invoice, buyer)
+  // Use template if provided, otherwise use language-specific default
+  const subjectTemplate = template || getDefaultEmailSubject(language)
+  return replaceEmailPlaceholders(subjectTemplate, invoice, buyer, language)
 }
 
 /**
@@ -82,10 +99,12 @@ export function generateEmailSubject(
 export function generateEmailBody(
   template: string | undefined,
   invoice: Invoice,
-  buyer: PartySnapshot | null
+  buyer: PartySnapshot | null,
+  language: InvoiceLanguage = 'de'
 ): string {
-  const bodyTemplate = template || DEFAULT_INVOICE_EMAIL_BODY
-  return replaceEmailPlaceholders(bodyTemplate, invoice, buyer)
+  // Use template if provided, otherwise use language-specific default
+  const bodyTemplate = template || getDefaultEmailBody(language)
+  return replaceEmailPlaceholders(bodyTemplate, invoice, buyer, language)
 }
 
 /**

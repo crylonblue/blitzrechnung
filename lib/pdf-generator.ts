@@ -2,6 +2,12 @@ import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import type { Invoice, InvoiceItem, Address } from "./schema";
 import { embedZugferdIntoPDF } from "./zugferd-generator";
 import { getUnitLabel } from "./units";
+import { 
+  getTranslations, 
+  formatDateForLanguage, 
+  formatCurrencyForLanguage,
+  type InvoiceLanguage 
+} from "./invoice-translations";
 
 function formatAddress(address: Address): { streetLine: string; cityLine: string } {
   return {
@@ -37,16 +43,13 @@ async function fetchImageAsBytes(url: string): Promise<{ bytes: Uint8Array; type
   }
 }
 
-function formatDate(dateString: string): string {
-  const [year, month, day] = dateString.split("-");
-  return `${day}.${month}.${year}`;
+// Legacy functions kept for backward compatibility, but now using translation utilities
+function formatDate(dateString: string, language: InvoiceLanguage = 'de'): string {
+  return formatDateForLanguage(dateString, language);
 }
 
-function formatCurrency(amount: number): string {
-  return amount.toLocaleString("de-DE", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }) + " €";
+function formatCurrency(amount: number, language: InvoiceLanguage = 'de'): string {
+  return formatCurrencyForLanguage(amount, language);
 }
 
 function calculateItemTotal(item: InvoiceItem): number {
@@ -58,7 +61,7 @@ function sanitizeText(text: string): string {
   return text.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-export async function generateInvoicePDF(invoice: Invoice): Promise<Uint8Array> {
+export async function generateInvoicePDF(invoice: Invoice, language: InvoiceLanguage = 'de'): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.create();
   const page = pdfDoc.addPage([595.28, 841.89]); // A4 size
   
@@ -71,6 +74,9 @@ export async function generateInvoicePDF(invoice: Invoice): Promise<Uint8Array> 
   const gray = rgb(0.4, 0.4, 0.4);
   
   let y = height - margin;
+  
+  // Get translations for the selected language
+  const t = getTranslations(language);
   
   // Logo (if provided)
   if (invoice.logoUrl) {
@@ -123,8 +129,8 @@ export async function generateInvoicePDF(invoice: Invoice): Promise<Uint8Array> 
     invoice.seller.subHeadline,
     sellerAddress.streetLine,
     sellerAddress.cityLine,
-    invoice.seller.taxNumber ? `Steuernummer: ${invoice.seller.taxNumber}` : null,
-    invoice.seller.vatId ? `USt-IdNr.: ${invoice.seller.vatId}` : null,
+    invoice.seller.taxNumber ? `${t.taxNumber}: ${invoice.seller.taxNumber}` : null,
+    invoice.seller.vatId ? `${t.vatId}: ${invoice.seller.vatId}` : null,
   ].filter(Boolean) as string[];
 
   sellerLines.forEach((line, i) => {
@@ -146,7 +152,7 @@ export async function generateInvoicePDF(invoice: Invoice): Promise<Uint8Array> 
   
   // Phone number (if provided)
   if (invoice.customer.phoneNumber) {
-    drawText(`Tel.: ${invoice.customer.phoneNumber}`, margin, y - customerLineOffset);
+    drawText(`${t.phone}: ${invoice.customer.phoneNumber}`, margin, y - customerLineOffset);
     customerLineOffset += 14;
   }
   
@@ -162,13 +168,13 @@ export async function generateInvoicePDF(invoice: Invoice): Promise<Uint8Array> 
   // Invoice Title - adjust position based on customer info lines
   const customerSectionHeight = customerLineOffset + (additionalInfoCount * 14) + 30;
   y -= customerSectionHeight;
-  drawText("RECHNUNG", margin, y, { font: helveticaBold, size: 24 });
+  drawText(t.invoice, margin, y, { font: helveticaBold, size: 24 });
 
   // Invoice Details
   y -= 40;
-  drawText(`Rechnungsnummer: ${invoice.invoiceNumber}`, margin, y);
-  drawText(`Rechnungsdatum: ${formatDate(invoice.invoiceDate)}`, margin, y - 14);
-  drawText(`Leistungsdatum: ${formatDate(invoice.serviceDate)}`, margin, y - 28);
+  drawText(`${t.invoiceNumber}: ${invoice.invoiceNumber}`, margin, y);
+  drawText(`${t.invoiceDate}: ${formatDate(invoice.invoiceDate, language)}`, margin, y - 14);
+  drawText(`${t.serviceDate}: ${formatDate(invoice.serviceDate, language)}`, margin, y - 28);
 
   // Table Header
   y -= 70;
@@ -184,11 +190,11 @@ export async function generateInvoicePDF(invoice: Invoice): Promise<Uint8Array> 
     total: width - margin, // Right edge of total column
   };
 
-  drawText("Beschreibung", colPositions.description, y, { font: helveticaBold });
-  drawText("Menge", colPositions.quantity, y, { font: helveticaBold });
-  drawText("Einheit", colPositions.unit, y, { font: helveticaBold });
-  drawText("Preis", colPositions.unitPrice, y, { font: helveticaBold });
-  drawText("Gesamt", colPositions.total, y, { font: helveticaBold });
+  drawText(t.description, colPositions.description, y, { font: helveticaBold });
+  drawText(t.quantity, colPositions.quantity, y, { font: helveticaBold });
+  drawText(t.unit, colPositions.unit, y, { font: helveticaBold });
+  drawText(t.price, colPositions.unitPrice, y, { font: helveticaBold });
+  drawText(t.total, colPositions.total, y, { font: helveticaBold });
 
   // Separator line
   y -= 5;
@@ -221,12 +227,12 @@ export async function generateInvoicePDF(invoice: Invoice): Promise<Uint8Array> 
     drawText(item.quantity.toString(), colPositions.quantity, y);
     drawText(getUnitLabel(item.unit), colPositions.unit, y);
     // Right-align unitPrice
-    const unitPriceText = formatCurrency(item.unitPrice);
+    const unitPriceText = formatCurrency(item.unitPrice, language);
     const sanitizedUnitPriceText = sanitizeText(unitPriceText);
     const unitPriceWidth = helvetica.widthOfTextAtSize(sanitizedUnitPriceText, 10);
     drawText(unitPriceText, colRightEdges.unitPrice - unitPriceWidth, y);
     // Right-align unitTotal
-    const unitTotalText = formatCurrency(itemTotal);
+    const unitTotalText = formatCurrency(itemTotal, language);
     const sanitizedUnitTotalText = sanitizeText(unitTotalText);
     const unitTotalWidth = helvetica.widthOfTextAtSize(sanitizedUnitTotalText, 10);
     drawText(unitTotalText, colRightEdges.total - unitTotalWidth, y);
@@ -264,9 +270,9 @@ export async function generateInvoicePDF(invoice: Invoice): Promise<Uint8Array> 
 
   // Totals
   y -= 20;
-  drawText("Nettobetrag:", 350, y);
+  drawText(`${t.netAmount}:`, 350, y);
   // Right-align netTotal
-  const netTotalText = formatCurrency(netTotal);
+  const netTotalText = formatCurrency(netTotal, language);
   const sanitizedNetTotalText = sanitizeText(netTotalText);
   const netTotalWidth = helvetica.widthOfTextAtSize(sanitizedNetTotalText, 10);
   drawText(netTotalText, colRightEdges.total - netTotalWidth, y);
@@ -275,9 +281,9 @@ export async function generateInvoicePDF(invoice: Invoice): Promise<Uint8Array> 
   const sortedVatRates = Array.from(vatByRate.entries()).sort((a, b) => a[0] - b[0]);
   for (const [rate, amounts] of sortedVatRates) {
     y -= 18;
-    drawText(`MwSt. (${rate}%):`, 350, y);
+    drawText(`${t.vat(rate)}:`, 350, y);
     // Right-align taxAmount
-    const taxAmountText = formatCurrency(amounts.tax);
+    const taxAmountText = formatCurrency(amounts.tax, language);
     const sanitizedTaxAmountText = sanitizeText(taxAmountText);
     const taxAmountWidth = helvetica.widthOfTextAtSize(sanitizedTaxAmountText, 10);
     drawText(taxAmountText, colRightEdges.total - taxAmountWidth, y);
@@ -292,9 +298,9 @@ export async function generateInvoicePDF(invoice: Invoice): Promise<Uint8Array> 
   });
 
   y -= 15;
-  drawText("Gesamtbetrag:", 350, y, { font: helveticaBold });
+  drawText(`${t.totalAmount}:`, 350, y, { font: helveticaBold });
   // Right-align grossTotal
-  const grossTotalText = formatCurrency(grossTotal);
+  const grossTotalText = formatCurrency(grossTotal, language);
   const sanitizedGrossTotalText = sanitizeText(grossTotalText);
   const grossTotalWidth = helveticaBold.widthOfTextAtSize(sanitizedGrossTotalText, 10);
   drawText(grossTotalText, colRightEdges.total - grossTotalWidth, y, { font: helveticaBold });
@@ -302,11 +308,11 @@ export async function generateInvoicePDF(invoice: Invoice): Promise<Uint8Array> 
   // Bank Details
   if (invoice.bankDetails) {
     y -= 50;
-    drawText("Bankverbindung:", margin, y, { font: helveticaBold });
+    drawText(`${t.bankDetails}:`, margin, y, { font: helveticaBold });
     y -= 14;
-    drawText(`IBAN: ${invoice.bankDetails.iban}`, margin, y);
+    drawText(`${t.iban}: ${invoice.bankDetails.iban}`, margin, y);
     y -= 14;
-    drawText(`Bank: ${invoice.bankDetails.bankName}`, margin, y);
+    drawText(`${t.bankName}: ${invoice.bankDetails.bankName}`, margin, y);
   }
 
   // Note
@@ -319,7 +325,7 @@ export async function generateInvoicePDF(invoice: Invoice): Promise<Uint8Array> 
   const footerParts = [
     invoice.seller.name,
     `${sellerAddress.streetLine}, ${sellerAddress.cityLine}`,
-    invoice.seller.phoneNumber ? `Tel.: ${invoice.seller.phoneNumber}` : null,
+    invoice.seller.phoneNumber ? `${t.phone}: ${invoice.seller.phoneNumber}` : null,
   ].filter(Boolean) as string[];
   const footerText = footerParts.join(' | ');
   const sanitizedFooterText = sanitizeText(footerText);
@@ -333,7 +339,8 @@ export async function generateInvoicePDF(invoice: Invoice): Promise<Uint8Array> 
   });
 
   // Set document metadata
-  pdfDoc.setTitle(`Rechnung ${invoice.invoiceNumber}`);
+  const invoiceLabel = language === 'en' ? 'Invoice' : 'Rechnung';
+  pdfDoc.setTitle(`${invoiceLabel} ${invoice.invoiceNumber}`);
   pdfDoc.setAuthor(invoice.seller.name);
   pdfDoc.setCreationDate(new Date());
   pdfDoc.setModificationDate(new Date());

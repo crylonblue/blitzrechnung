@@ -58,6 +58,7 @@ export async function POST(
 
   const customerSnapshot = invoice.customer_snapshot as unknown as CustomerSnapshot | null
   const emailSettings = (company.email_settings as EmailSettings) || { mode: 'default' }
+  const language = (invoice.language as 'de' | 'en') || 'de'
 
   // Determine recipient email
   const recipientEmail = body.recipient_email || invoice.recipient_email || customerSnapshot?.email
@@ -67,11 +68,11 @@ export async function POST(
 
   // Generate subject and body from templates if not provided
   const emailSubject = body.subject || (customerSnapshot 
-    ? generateEmailSubject(emailSettings.invoice_email_subject, invoice, customerSnapshot)
+    ? generateEmailSubject(emailSettings.invoice_email_subject, invoice, customerSnapshot, language)
     : `Rechnung ${invoice.invoice_number || ''}`)
   
   const emailBody = body.body || (customerSnapshot
-    ? generateEmailBody(emailSettings.invoice_email_body, invoice, customerSnapshot)
+    ? generateEmailBody(emailSettings.invoice_email_body, invoice, customerSnapshot, language)
     : '')
 
   try {

@@ -181,7 +181,9 @@ export async function POST(
   let pdfBuffer: Uint8Array
   let xmlString: string
   try {
-    pdfBuffer = await generateInvoicePDF(pdfInvoice)
+    // Pass the language from the invoice (defaults to 'de' if not set)
+    const language = (dbInvoice.language as 'de' | 'en') || 'de'
+    pdfBuffer = await generateInvoicePDF(pdfInvoice, language)
     xmlString = await generateXRechnungXML(pdfInvoice)
   } catch (err) {
     console.error('Error generating PDF/XML:', err)

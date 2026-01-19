@@ -139,7 +139,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Generate PDF with embedded ZUGFeRD
-    const pdfBuffer = await generateInvoicePDF(pdfInvoice)
+    // Pass the language from the invoice (defaults to 'de' if not set)
+    const language = (dbInvoice.language as 'de' | 'en') || 'de'
+    const pdfBuffer = await generateInvoicePDF(pdfInvoice, language)
 
     // Generate XRechnung XML
     const xmlString = await generateXRechnungXML(pdfInvoice)
