@@ -107,6 +107,7 @@ export default function DraftDrawer() {
         pdf_url: null,
         xml_url: null,
         recipient_email: null,
+        language: 'de', // Default language
         finalized_at: null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
