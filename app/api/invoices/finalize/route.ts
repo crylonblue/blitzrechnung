@@ -56,6 +56,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Buyer snapshot is missing' }, { status: 400 })
     }
 
+    // Validate contact_id constraints before changing status to 'created'
+    // These constraints exist in the database (migration 020_invoice_constraints.sql)
+    if (!dbInvoice.buyer_is_self && !dbInvoice.buyer_contact_id) {
+      return NextResponse.json({ 
+        error: 'Empfänger fehlt', 
+        details: 'Bitte wählen Sie einen Empfänger aus bevor Sie die Rechnung finalisieren.'
+      }, { status: 400 })
+    }
+    if (!dbInvoice.seller_is_self && !dbInvoice.seller_contact_id) {
+      return NextResponse.json({ 
+        error: 'Absender fehlt', 
+        details: 'Bitte wählen Sie einen Absender aus bevor Sie die Rechnung finalisieren.'
+      }, { status: 400 })
+    }
+
     // Get company for issuer data and logo
     const { data: company } = await supabase
       .from('companies')
@@ -219,7 +234,12 @@ export async function POST(request: NextRequest) {
       .eq('id', invoiceId)
 
     if (updateError) {
-      return NextResponse.json({ error: 'Failed to update invoice' }, { status: 500 })
+      console.error('Invoice update error:', updateError)
+      return NextResponse.json({ 
+        error: 'Failed to update invoice', 
+        details: updateError.message,
+        code: updateError.code 
+      }, { status: 500 })
     }
 
     return NextResponse.json({

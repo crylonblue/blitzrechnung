@@ -291,6 +291,16 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
       return
     }
 
+    // Additional check: ensure contact IDs are available for database constraints
+    if (!sellerIsSelf && !sellerSnapshot?.id) {
+      setError('Der ausgewählte Absender hat keine gültige ID. Bitte wählen Sie einen anderen Absender aus.')
+      return
+    }
+    if (!buyerIsSelf && !buyerSnapshot?.id) {
+      setError('Der ausgewählte Empfänger hat keine gültige ID. Bitte wählen Sie einen anderen Empfänger aus.')
+      return
+    }
+
     setIsFinalizing(true)
 
     try {
@@ -435,7 +445,10 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
 
       if (!response.ok) {
         const errorData = await response.json()
-        setError(errorData.error || 'Fehler beim Generieren der Rechnung')
+        const errorMessage = errorData.details 
+          ? `${errorData.error}: ${errorData.details}` 
+          : (errorData.error || 'Fehler beim Generieren der Rechnung')
+        setError(errorMessage)
         setIsFinalizing(false)
         return
       }
