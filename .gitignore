@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# KoSIT validator artifacts (downloaded, not committed)
+tests/.kosit/

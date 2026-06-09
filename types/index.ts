@@ -48,6 +48,9 @@ export interface LineItem {
   vat_rate: number
   total: number
   vat_amount?: number
+  // EN 16931 VAT category (S/Z/E/AE) and exemption reason (for E/AE)
+  tax_category?: 'S' | 'Z' | 'E' | 'AE'
+  exemption_reason?: string
 }
 
 // Helper type for bank details

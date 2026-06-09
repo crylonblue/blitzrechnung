@@ -224,6 +224,7 @@ export interface Database {
           invoice_number: string | null
           invoice_date: string | null
           due_date: string | null
+          service_date: string | null
           seller_is_self: boolean
           seller_contact_id: string | null
           seller_snapshot: Json | null
@@ -255,6 +256,7 @@ export interface Database {
           invoice_number?: string | null
           invoice_date?: string | null
           due_date?: string | null
+          service_date?: string | null
           seller_is_self?: boolean
           seller_contact_id?: string | null
           seller_snapshot?: Json | null
@@ -286,6 +288,7 @@ export interface Database {
           invoice_number?: string | null
           invoice_date?: string | null
           due_date?: string | null
+          service_date?: string | null
           seller_is_self?: boolean
           seller_contact_id?: string | null
           seller_snapshot?: Json | null

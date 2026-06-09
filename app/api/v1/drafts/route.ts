@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { createServiceRoleClient } from '@/lib/supabase/server'
 import { validateApiKey, unauthorized, badRequest, serverError, json } from '../_lib/auth'
+import { computeInvoiceTotals, round2 } from '@/lib/invoice-totals'
 
 /**
  * GET /api/v1/drafts
@@ -50,9 +51,10 @@ export async function POST(request: NextRequest) {
     // Legacy field (maps to buyer_contact_id)
     customer_id,
     // Common fields
-    line_items, 
-    invoice_date, 
+    line_items,
+    invoice_date,
     due_date,
+    service_date,
     invoice_number, // For external sellers
   } = body
 
@@ -153,34 +155,39 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Process line items - add IDs and calculate totals
-  const processedLineItems = (line_items || []).map((item: any) => {
-    const quantity = item.quantity || 1
-    const unitPrice = item.unit_price || 0
+  // Process line items - add IDs and calculate totals via the shared EN 16931
+  // calculator, so stored totals match the issued PDF/XRechnung exactly.
+  const rawItems = (line_items || []) as any[]
+  const totals = computeInvoiceTotals(
+    rawItems.map((item) => ({
+      quantity: item.quantity || 1,
+      unitPrice: item.unit_price || 0,
+      vatRate: item.vat_rate ?? 19,
+      taxCategory: item.tax_category ?? undefined,
+      exemptionReason: item.exemption_reason ?? undefined,
+    }))
+  )
+  const processedLineItems = rawItems.map((item, idx) => {
     const vatRate = item.vat_rate ?? 19
-    const total = quantity * unitPrice
-    const vatAmount = total * vatRate / 100
-    
+    const total = totals.lineNets[idx]
     return {
       id: item.id || crypto.randomUUID(),
       product_id: item.product_id || null,
       description: item.description || '',
-      quantity,
+      quantity: item.quantity || 1,
       unit: item.unit || 'piece',
-      unit_price: unitPrice,
+      unit_price: item.unit_price || 0,
       vat_rate: vatRate,
       total,
-      vat_amount: vatAmount,
+      vat_amount: round2((total * vatRate) / 100),
+      tax_category: item.tax_category ?? null,
+      exemption_reason: item.exemption_reason ?? null,
     }
   })
 
-  // Calculate totals
-  const subtotal = processedLineItems.reduce((sum: number, item: any) => sum + item.total, 0)
-  const vatAmount = processedLineItems.reduce(
-    (sum: number, item: any) => sum + (item.total * item.vat_rate) / 100,
-    0
-  )
-  const totalAmount = subtotal + vatAmount
+  const subtotal = totals.netTotal
+  const vatAmount = totals.taxAmount
+  const totalAmount = totals.grossTotal
 
   // Set default dates if not provided
   const today = new Date()
@@ -206,6 +213,7 @@ export async function POST(request: NextRequest) {
       line_items: processedLineItems,
       invoice_date: invoice_date || formatDate(today),
       due_date: due_date || formatDate(defaultDueDate),
+      service_date: service_date || invoice_date || formatDate(today),
       subtotal,
       vat_amount: vatAmount,
       total_amount: totalAmount,

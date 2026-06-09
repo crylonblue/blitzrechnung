@@ -101,6 +101,14 @@ export function validateInvoiceForFinalization(params: {
         })
       }
 
+      // BT-34: Seller electronic address — required for the e-invoice (XRechnung)
+      if (!company.contact_email?.trim()) {
+        errors.push({
+          field: 'issuer.email',
+          message: 'Kontakt-E-Mail der Firma fehlt. Für die E-Rechnung erforderlich, bitte in den Einstellungen hinterlegen.',
+        })
+      }
+
       // Note: Seller Contact (XRechnung BR-DE-2) is optional
     }
   } else {
@@ -172,6 +180,14 @@ export function validateInvoiceForFinalization(params: {
         })
       }
 
+      // BT-34: Seller electronic address — required for the e-invoice (XRechnung)
+      if (!issuerSnapshot.contact?.email?.trim() && !issuerSnapshot.email?.trim()) {
+        errors.push({
+          field: 'issuer.email',
+          message: 'E-Mail des Absenders fehlt. Für die E-Rechnung erforderlich.',
+        })
+      }
+
       // Note: Seller Contact (XRechnung BR-DE-2) is optional
     }
   }
@@ -190,6 +206,14 @@ export function validateInvoiceForFinalization(params: {
       errors.push({
         field: 'customer.name',
         message: 'Name des Empfängers fehlt.',
+      })
+    }
+
+    // BT-49: Buyer electronic address — required for the e-invoice (XRechnung)
+    if (!customerSnapshot.email?.trim()) {
+      errors.push({
+        field: 'customer.email',
+        message: 'E-Mail des Empfängers fehlt. Für die E-Rechnung erforderlich.',
       })
     }
 
@@ -277,6 +301,14 @@ export function validateInvoiceForFinalization(params: {
         errors.push({
           field: `lineItems.${index}.vat_rate`,
           message: `Position ${positionNum}: MwSt.-Satz muss zwischen 0% und 100% liegen.`,
+        })
+      }
+
+      // BT-120: exempt (§4) / reverse-charge (§13b) lines require an exemption reason
+      if ((item.tax_category === 'E' || item.tax_category === 'AE') && !item.exemption_reason?.trim()) {
+        errors.push({
+          field: `lineItems.${index}.exemption_reason`,
+          message: `Position ${positionNum}: Grund der Steuerbefreiung fehlt.`,
         })
       }
     })

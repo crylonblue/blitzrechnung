@@ -1,6 +1,12 @@
 import { zugferd } from "node-zugferd";
 import { EN16931 } from "node-zugferd/profile/en16931";
 import type { Invoice } from "./schema";
+import {
+  computeInvoiceTotals,
+  categoryFor,
+  round4,
+  type TotalsLineInput,
+} from "./invoice-totals";
 import { mapUnitToZugferdCode } from "./units";
 
 /**
@@ -28,43 +34,30 @@ interface ZugferdOptions {
  */
 function mapInvoiceToZugferdData(invoice: Invoice, options: ZugferdOptions = {}) {
   const { isCancellation = false, originalInvoiceNumber } = options;
-  // Group items by VAT rate and calculate totals per rate
-  const vatGroups = new Map<number, { basisAmount: number; taxAmount: number }>();
-  
-  let netTotalUnrounded = 0;
-  let taxTotalUnrounded = 0;
-  
-  for (const item of invoice.items) {
-    const itemNet = item.quantity * item.unitPrice;
-    const itemVatRate = item.vatRate ?? invoice.taxRate; // Use item rate or fallback to invoice rate
-    const itemTax = itemNet * (itemVatRate / 100);
-    
-    netTotalUnrounded += itemNet;
-    taxTotalUnrounded += itemTax;
-    
-    // Group by VAT rate
-    const existing = vatGroups.get(itemVatRate) || { basisAmount: 0, taxAmount: 0 };
-    vatGroups.set(itemVatRate, {
-      basisAmount: existing.basisAmount + itemNet,
-      taxAmount: existing.taxAmount + itemTax,
-    });
-  }
-  
-  const grossTotalUnrounded = netTotalUnrounded + taxTotalUnrounded;
-  
-  // Round to 2 decimal places for ZUGFeRD compliance
-  const netTotal = parseFloat((Math.round(netTotalUnrounded * 100) / 100).toFixed(2));
-  const taxAmount = parseFloat((Math.round(taxTotalUnrounded * 100) / 100).toFixed(2));
-  const grossTotal = parseFloat((Math.round(grossTotalUnrounded * 100) / 100).toFixed(2));
-  
-  // Build VAT breakdown array from groups
-  const vatBreakdown = Array.from(vatGroups.entries()).map(([rate, amounts]) => ({
-    calculatedAmount: parseFloat((Math.round(amounts.taxAmount * 100) / 100).toFixed(2)),
+
+  // All amounts come from the shared EN 16931 calculator so the XML, the PDF
+  // and the stored totals are guaranteed identical (see lib/invoice-totals.ts).
+  const totalsLines: TotalsLineInput[] = invoice.items.map((item) => ({
+    quantity: item.quantity,
+    unitPrice: item.unitPrice,
+    vatRate: item.vatRate ?? invoice.taxRate,
+    taxCategory: item.taxCategory,
+    exemptionReason: item.exemptionReason,
+  }));
+  const { netTotal, taxAmount, grossTotal, lineNets, vatBreakdown: vatGroups } =
+    computeInvoiceTotals(totalsLines);
+
+  // Map the breakdown groups onto the node-zugferd shape.
+  const vatBreakdown = vatGroups.map((g) => ({
+    calculatedAmount: g.taxAmount, // BT-117 (0 for E/AE/Z)
     typeCode: "VAT" as const,
-    basisAmount: parseFloat((Math.round(amounts.basisAmount * 100) / 100).toFixed(2)),
-    // Use category "S" for standard rate, "Z" for zero rate, "E" for exempt
-    categoryCode: (rate === 0 ? "Z" : "S") as "S" | "Z" | "E",
-    rateApplicablePercent: rate,
+    basisAmount: g.basisAmount, // BT-116
+    categoryCode: g.category,
+    rateApplicablePercent: g.rate,
+    // BT-120: exemption reason text — required for categories E and AE.
+    ...((g.category === "E" || g.category === "AE") && g.exemptionReason
+      ? { exemptionReasonText: g.exemptionReason }
+      : {}),
   }));
 
   // Ensure VAT ID has country prefix (required by ZUGFeRD)
@@ -108,8 +101,9 @@ function mapInvoiceToZugferdData(invoice: Invoice, options: ZugferdOptions = {})
   // Seller electronic address (PEPPOL-EN16931-R020)
   // Use contact email or fall back to a placeholder
   // schemeIdentifier "EM" = Email address
-  const sellerElectronicAddress = invoice.seller.contact?.email
-    ? { value: invoice.seller.contact.email, schemeIdentifier: "EM" as const }
+  const sellerEmail = invoice.seller.contact?.email || invoice.seller.email;
+  const sellerElectronicAddress = sellerEmail
+    ? { value: sellerEmail, schemeIdentifier: "EM" as const }
     : undefined;
 
   // Buyer electronic address (PEPPOL-EN16931-R010)
@@ -136,12 +130,6 @@ function mapInvoiceToZugferdData(invoice: Invoice, options: ZugferdOptions = {})
       issueDate: invoice.invoiceDate,
       typeCode, // 380 = Commercial invoice, 384 = Corrected/Cancellation invoice
       currency: invoice.currency,
-      // Reference to original invoice (required for code 384 - cancellation invoices)
-      ...(isCancellation && originalInvoiceNumber && {
-        invoiceReferencedDocument: [{
-          issuerAssignedID: originalInvoiceNumber,
-        }],
-      }),
       transaction: {
         tradeAgreement: {
           // BR-DE-15: Buyer Reference (required)
@@ -182,22 +170,40 @@ function mapInvoiceToZugferdData(invoice: Invoice, options: ZugferdOptions = {})
             },
             // PEPPOL-EN16931-R010: Buyer electronic address
             electronicAddress: buyerElectronicAddress,
+            // BT-48: Buyer VAT identifier (required for reverse charge, category AE)
+            ...(invoice.customer.vatId
+              ? { taxRegistration: { vatIdentifier: invoice.customer.vatId } }
+              : {}),
           },
         },
-        tradeDelivery: {}, // Required but can be empty for EN16931 profile
+        tradeDelivery: {
+          // BT-72: Actual delivery / service date (Leistungsdatum, §14 UStG).
+          // Must be in the XML, not only on the PDF, for the formats to agree.
+          information: {
+            deliveryDate: invoice.serviceDate,
+          },
+        },
         tradeSettlement: {
           currencyCode: invoice.currency as any,
+          // BG-3 / BT-25: Reference to the original invoice. Required by BR-DE-26
+          // when the document type code is 384 (cancellation/correction).
+          ...(isCancellation && originalInvoiceNumber
+            ? { precendingInvoices: [{ reference: originalInvoiceNumber }] }
+            : {}),
           // VAT breakdown per rate (supports multiple VAT rates)
           vatBreakdown,
           // BR-DE-1: Payment Instructions (always required)
           paymentInstruction,
           paymentTerms: grossTotal > 0
             ? {
-                dueDate: (() => {
-                  const invoiceDate = new Date(invoice.invoiceDate);
-                  invoiceDate.setDate(invoiceDate.getDate() + 14);
-                  return invoiceDate.toISOString().split("T")[0];
-                })(),
+                // BT-9: Use the agreed due date; fall back to +14 days only if none is set.
+                dueDate:
+                  invoice.dueDate ??
+                  (() => {
+                    const invoiceDate = new Date(invoice.invoiceDate);
+                    invoiceDate.setDate(invoiceDate.getDate() + 14);
+                    return invoiceDate.toISOString().split("T")[0];
+                  })(),
               }
             : undefined,
           monetarySummation: {
@@ -212,10 +218,10 @@ function mapInvoiceToZugferdData(invoice: Invoice, options: ZugferdOptions = {})
           },
         },
         line: invoice.items.map((item, index) => {
-          const itemTotalUnrounded = item.quantity * item.unitPrice;
-          const itemTotal = parseFloat((Math.round(itemTotalUnrounded * 100) / 100).toFixed(2));
-          // Use item's VAT rate or fallback to invoice default
           const itemVatRate = item.vatRate ?? invoice.taxRate;
+          const itemCategory = categoryFor(item.taxCategory, itemVatRate); // BT-151
+          const unitNet = round4(item.unitPrice); // BT-146 item net price (up to 4 decimals)
+          const itemTotal = lineNets[index]; // BT-131 line net amount (shared calculator)
 
           return {
             identifier: `LINE-${index + 1}`,
@@ -224,9 +230,11 @@ function mapInvoiceToZugferdData(invoice: Invoice, options: ZugferdOptions = {})
             },
             tradeAgreement: {
               netTradePrice: {
-                chargeAmount: itemTotal,
+                // BT-146: item NET unit price (not the line total). Derived line
+                // total uses this same value so validator recomputation matches.
+                chargeAmount: unitNet,
                 basisQuantity: {
-                  amount: item.quantity,
+                  amount: 1,
                   unitMeasureCode: mapUnitToZugferdCode(item.unit),
                 },
               },
@@ -240,8 +248,7 @@ function mapInvoiceToZugferdData(invoice: Invoice, options: ZugferdOptions = {})
             tradeSettlement: {
               tradeTax: {
                 typeCode: "VAT" as const,
-                // Use "Z" for zero rate, "S" for standard rate
-                categoryCode: (itemVatRate === 0 ? "Z" : "S") as "S" | "Z",
+                categoryCode: itemCategory,
                 rateApplicablePercent: itemVatRate,
               },
               monetarySummation: {

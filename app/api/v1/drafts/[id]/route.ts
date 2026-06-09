@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { createServiceRoleClient } from '@/lib/supabase/server'
 import { validateApiKey, unauthorized, notFound, badRequest, serverError, json } from '../../_lib/auth'
+import { computeInvoiceTotals, round2 } from '@/lib/invoice-totals'
 
 /**
  * GET /api/v1/drafts/:id
@@ -70,9 +71,10 @@ export async function PATCH(
     seller_contact_id,
     buyer_contact_id,
     customer_id, // Legacy support
-    line_items, 
-    invoice_date, 
+    line_items,
+    invoice_date,
     due_date,
+    service_date,
     invoice_number,
   } = body
 
@@ -194,40 +196,43 @@ export async function PATCH(
 
   // Handle line items update
   if (line_items !== undefined) {
-    const processedLineItems = (line_items || []).map((item: any) => {
-      const quantity = item.quantity || 1
-      const unitPrice = item.unit_price || 0
+    const rawItems = (line_items || []) as any[]
+    const totals = computeInvoiceTotals(
+      rawItems.map((item) => ({
+        quantity: item.quantity || 1,
+        unitPrice: item.unit_price || 0,
+        vatRate: item.vat_rate ?? 19,
+        taxCategory: item.tax_category ?? undefined,
+        exemptionReason: item.exemption_reason ?? undefined,
+      }))
+    )
+    const processedLineItems = rawItems.map((item, idx) => {
       const vatRate = item.vat_rate ?? 19
-      const total = quantity * unitPrice
-      const vatAmount = total * vatRate / 100
-      
+      const total = totals.lineNets[idx]
       return {
         id: item.id || crypto.randomUUID(),
         product_id: item.product_id || null,
         description: item.description || '',
-        quantity,
+        quantity: item.quantity || 1,
         unit: item.unit || 'piece',
-        unit_price: unitPrice,
+        unit_price: item.unit_price || 0,
         vat_rate: vatRate,
         total,
-        vat_amount: vatAmount,
+        vat_amount: round2((total * vatRate) / 100),
+        tax_category: item.tax_category ?? null,
+        exemption_reason: item.exemption_reason ?? null,
       }
     })
 
-    const subtotal = processedLineItems.reduce((sum: number, item: any) => sum + item.total, 0)
-    const vatAmount = processedLineItems.reduce(
-      (sum: number, item: any) => sum + (item.total * item.vat_rate) / 100,
-      0
-    )
-
     updates.line_items = processedLineItems
-    updates.subtotal = subtotal
-    updates.vat_amount = vatAmount
-    updates.total_amount = subtotal + vatAmount
+    updates.subtotal = totals.netTotal
+    updates.vat_amount = totals.taxAmount
+    updates.total_amount = totals.grossTotal
   }
 
   if (invoice_date !== undefined) updates.invoice_date = invoice_date
   if (due_date !== undefined) updates.due_date = due_date
+  if (service_date !== undefined) updates.service_date = service_date
   if (invoice_number !== undefined) updates.invoice_number = invoice_number
 
   if (Object.keys(updates).length === 0) {

@@ -147,6 +147,7 @@ export async function POST(
     invoice_number: cancellationNumber,
     invoice_date: new Date().toISOString().split('T')[0],
     due_date: dbInvoice.due_date, // Keep same due date
+    service_date: dbInvoice.service_date, // Keep same service date
     seller_is_self: dbInvoice.seller_is_self,
     seller_contact_id: dbInvoice.seller_contact_id,
     seller_snapshot: dbInvoice.seller_snapshot,
