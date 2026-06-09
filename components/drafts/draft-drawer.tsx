@@ -100,6 +100,7 @@ export default function DraftDrawer() {
         buyer_snapshot: null,
         invoice_date: formatDate(today),
         due_date: formatDate(dueDate),
+        service_date: formatDate(today),
         subtotal: 0,
         vat_amount: 0,
         total_amount: 0,

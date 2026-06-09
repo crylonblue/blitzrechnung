@@ -1,6 +1,7 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
-import type { Invoice, InvoiceItem, Address } from "./schema";
+import type { Invoice, Address } from "./schema";
 import { embedZugferdIntoPDF } from "./zugferd-generator";
+import { computeInvoiceTotals } from "./invoice-totals";
 import { getUnitLabel } from "./units";
 import { 
   getTranslations, 
@@ -70,10 +71,6 @@ function formatQuantity(quantity: number, language: InvoiceLanguage = 'de'): str
     return quantity.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
   return quantity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-function calculateItemTotal(item: InvoiceItem): number {
-  return item.quantity * item.unitPrice;
 }
 
 // Sanitize text by removing newlines and other problematic characters for PDF rendering
@@ -267,12 +264,14 @@ export async function generateInvoicePDF(
     invoiceDate: 'RECHNUNGSDATUM',
     reference: 'REFERENZ',
     serviceDate: 'LIEFERDATUM',
+    dueDate: 'FÄLLIG BIS',
     contactPerson: 'IHR ANSPRECHPARTNER',
   } : {
     invoiceNumber: 'INVOICE NO.',
     invoiceDate: 'INVOICE DATE',
     reference: 'REFERENCE',
     serviceDate: 'DELIVERY DATE',
+    dueDate: 'DUE DATE',
     contactPerson: 'YOUR CONTACT',
   };
 
@@ -282,6 +281,9 @@ export async function generateInvoicePDF(
     metaY = drawMetadataRow(metaLabels.reference, invoice.buyerReference, metaY);
   }
   metaY = drawMetadataRow(metaLabels.serviceDate, formatDate(invoice.serviceDate, language), metaY);
+  if (invoice.dueDate) {
+    metaY = drawMetadataRow(metaLabels.dueDate, formatDate(invoice.dueDate, language), metaY);
+  }
   if (invoice.seller.contact?.name) {
     metaY = drawMetadataRow(metaLabels.contactPerson, invoice.seller.contact.name, metaY);
   }
@@ -378,14 +380,24 @@ export async function generateInvoicePDF(
     color: COLOR_BLACK,
   });
 
+  // All amounts come from the shared EN 16931 calculator, so the PDF, the
+  // embedded XRechnung and the stored totals are guaranteed identical.
+  const totals = computeInvoiceTotals(
+    invoice.items.map((item) => ({
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      vatRate: item.vatRate ?? invoice.taxRate,
+      taxCategory: item.taxCategory,
+      exemptionReason: item.exemptionReason,
+    }))
+  );
+
   // Table rows
   y -= 18;
-  let netTotal = 0;
   const maxDescWidth = CONTENT_WIDTH * 0.45;
 
-  invoice.items.forEach((item) => {
-    const itemTotal = calculateItemTotal(item);
-    netTotal += itemTotal;
+  invoice.items.forEach((item, index) => {
+    const itemTotal = totals.lineNets[index];
 
     // Description (without numeration)
     drawText(item.description, col.description, y, { maxWidth: maxDescWidth });
@@ -411,25 +423,9 @@ export async function generateInvoicePDF(
   // ===========================================
   
   y -= 10;
-  
-  // Calculate VAT per rate
-  const vatByRate = new Map<number, { basis: number; tax: number }>();
-  let totalTax = 0;
-  
-  for (const item of invoice.items) {
-    const itemNet = item.quantity * item.unitPrice;
-    const itemVatRate = item.vatRate ?? invoice.taxRate;
-    const itemTax = itemNet * (itemVatRate / 100);
-    totalTax += itemTax;
-    
-    const existing = vatByRate.get(itemVatRate) || { basis: 0, tax: 0 };
-    vatByRate.set(itemVatRate, {
-      basis: existing.basis + itemNet,
-      tax: existing.tax + itemTax,
-    });
-  }
-  
-  const grossTotal = netTotal + totalTax;
+
+  const netTotal = totals.netTotal;
+  const grossTotal = totals.grossTotal;
 
   const totalsLabelX = tableRight - 180;
   const totalsValueX = tableRight;
@@ -440,12 +436,17 @@ export async function generateInvoicePDF(
   drawTextRight(formatCurrency(netTotal, language), totalsValueX, y);
   y -= 16;
 
-  // VAT lines
-  const sortedVatRates = Array.from(vatByRate.entries()).sort((a, b) => a[0] - b[0]);
-  for (const [rate, amounts] of sortedVatRates) {
-    const vatLabel = language === 'de' ? `Umsatzsteuer ${rate}%` : `VAT ${rate}%`;
+  // VAT lines — one per (category, rate) breakdown, matching the XRechnung.
+  const sortedBreakdown = [...totals.vatBreakdown].sort((a, b) => a.rate - b.rate);
+  for (const g of sortedBreakdown) {
+    const vatLabel =
+      g.category === 'E'
+        ? language === 'de' ? 'Steuerfrei (§ 4 UStG)' : 'Tax-exempt (§ 4 UStG)'
+        : g.category === 'AE'
+        ? language === 'de' ? 'Reverse Charge (§ 13b UStG)' : 'Reverse charge (§ 13b)'
+        : language === 'de' ? `Umsatzsteuer ${g.rate}%` : `VAT ${g.rate}%`;
     drawText(vatLabel, totalsLabelX, y);
-    drawTextRight(formatCurrency(amounts.tax, language), totalsValueX, y);
+    drawTextRight(formatCurrency(g.taxAmount, language), totalsValueX, y);
     y -= 16;
   }
 
@@ -464,7 +465,25 @@ export async function generateInvoicePDF(
   drawText(grossLabel, totalsLabelX, y, { font: helveticaBold });
   drawTextRight(formatCurrency(grossTotal, language), totalsValueX, y, { font: helveticaBold });
 
-  y -= 40;
+  y -= 24;
+
+  // Exemption reasons (§14 Abs. 4 Nr. 8 UStG: tax-exempt invoices must state the
+  // reason). One note per distinct reason from the VAT breakdown.
+  const exemptionReasons = [
+    ...new Set(
+      totals.vatBreakdown
+        .map((g) => g.exemptionReason?.trim())
+        .filter((r): r is string => !!r)
+    ),
+  ];
+  for (const reason of exemptionReasons) {
+    for (const wrapped of wrapText(sanitizeText(reason), CONTENT_WIDTH, helvetica, 9)) {
+      drawText(wrapped, MARGIN_LEFT, y, { size: 9, color: COLOR_GRAY });
+      y -= 12;
+    }
+  }
+
+  y -= 16;
 
   // ===========================================
   // SECTION 7: Outro/Payment Notice

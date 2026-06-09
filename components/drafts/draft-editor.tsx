@@ -114,6 +114,7 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
           buyer_snapshot: buyerIsSelf ? null : buyerSnapshot,
           invoice_date: draft.invoice_date,
           due_date: draft.due_date,
+          service_date: draft.service_date,
           subtotal: subtotal,
           vat_amount: vatAmount,
           total_amount: totalAmount,
@@ -147,6 +148,7 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
           buyer_snapshot: buyerIsSelf ? null : buyerSnapshot,
           invoice_date: draft.invoice_date,
           due_date: draft.due_date,
+          service_date: draft.service_date,
           subtotal: subtotal,
           vat_amount: vatAmount,
           total_amount: totalAmount,
@@ -202,7 +204,7 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
     }))
   }
 
-  const handleDateChange = (field: 'invoice_date' | 'due_date', value: string) => {
+  const handleDateChange = (field: 'invoice_date' | 'due_date' | 'service_date', value: string) => {
     setDraft((prev) => ({
       ...prev,
       [field]: value || null,
@@ -371,6 +373,7 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
             invoice_number: invoiceNumber,
             invoice_date: draft.invoice_date,
             due_date: draft.due_date,
+            service_date: draft.service_date,
             seller_is_self: sellerIsSelf,
             seller_contact_id: sellerIsSelf ? null : sellerSnapshot?.id || null,
             seller_snapshot: sellerIsSelf ? null : sellerSnapshot,
@@ -406,6 +409,7 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
             invoice_number: invoiceNumber,
             invoice_date: draft.invoice_date,
             due_date: draft.due_date,
+            service_date: draft.service_date,
             seller_is_self: sellerIsSelf,
             seller_contact_id: sellerIsSelf ? null : sellerSnapshot?.id || null,
             seller_snapshot: sellerIsSelf ? null : sellerSnapshot,
@@ -488,6 +492,7 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
           lineItems,
           invoiceDate: draft.invoice_date,
           dueDate: draft.due_date,
+          serviceDate: draft.service_date,
           language,
           buyerReference,
         }),
@@ -602,6 +607,17 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
                     value={draft.due_date}
                     onChange={(date) => handleDateChange('due_date', date || '')}
                     placeholder="Fälligkeitsdatum auswählen"
+                    className="mt-1.5"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="service_date">
+                    Leistungsdatum
+                  </Label>
+                  <DatePicker
+                    value={draft.service_date || draft.invoice_date}
+                    onChange={(date) => handleDateChange('service_date', date || '')}
+                    placeholder="Leistungsdatum auswählen"
                     className="mt-1.5"
                   />
                 </div>

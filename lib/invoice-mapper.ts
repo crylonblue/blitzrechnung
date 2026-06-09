@@ -39,6 +39,8 @@ export function mapDBInvoiceToPDFInvoice(
     unit: item.unit || 'piece', // Use unit from line item or default to piece
     unitPrice: item.unit_price,
     vatRate: item.vat_rate !== undefined && item.vat_rate !== null ? item.vat_rate : defaultTaxRate,
+    taxCategory: item.tax_category, // BT-151 VAT category (S/Z/E/AE)
+    exemptionReason: item.exemption_reason, // BT-120 reason for E/AE
   }))
 
   // Map seller including contact for XRechnung BR-DE-2 and legal info for footer
@@ -101,6 +103,7 @@ export function mapDBInvoiceToPDFInvoice(
     },
     phoneNumber: undefined,
     additionalInfo: buyerSnapshot.email ? [buyerSnapshot.email] : undefined,
+    vatId: buyerSnapshot.vat_id || undefined, // BT-48 buyer VAT identifier
   }
 
   // Map bank details from seller
@@ -115,7 +118,8 @@ export function mapDBInvoiceToPDFInvoice(
   return {
     invoiceNumber: dbInvoice.invoice_number || '',
     invoiceDate: dbInvoice.invoice_date || new Date().toISOString().split('T')[0],
-    serviceDate: dbInvoice.invoice_date || new Date().toISOString().split('T')[0], // Use invoice_date as service_date
+    serviceDate: dbInvoice.service_date || dbInvoice.invoice_date || new Date().toISOString().split('T')[0], // Leistungsdatum (BT-72); falls back to invoice date
+    dueDate: dbInvoice.due_date || undefined, // Payment due date (BT-9); generator falls back to +14 days if absent
     seller,
     customer,
     items,

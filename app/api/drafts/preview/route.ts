@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { generateInvoicePDF } from '@/lib/pdf-generator'
 import { mapDBInvoiceToPDFInvoice } from '@/lib/invoice-mapper'
+import { computeInvoiceTotals } from '@/lib/invoice-totals'
 import type { Invoice as DBInvoice, PartySnapshot, LineItem } from '@/types'
 
 interface PreviewRequest {
@@ -13,6 +14,7 @@ interface PreviewRequest {
   lineItems: LineItem[]
   invoiceDate: string | null
   dueDate: string | null
+  serviceDate?: string | null
   language: 'de' | 'en'
   buyerReference?: string
 }
@@ -122,10 +124,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Buyer information is required' }, { status: 400 })
     }
 
-    // Calculate totals
-    const subtotal = lineItems.reduce((sum, item) => sum + item.total, 0)
-    const vatAmount = lineItems.reduce((sum, item) => sum + (item.total * item.vat_rate) / 100, 0)
-    const totalAmount = subtotal + vatAmount
+    // Calculate totals via the shared EN 16931 calculator (matches PDF/XML)
+    const totals = computeInvoiceTotals(
+      lineItems.map((item) => ({
+        quantity: item.quantity,
+        unitPrice: item.unit_price,
+        vatRate: item.vat_rate ?? 19,
+        taxCategory: item.tax_category,
+        exemptionReason: item.exemption_reason,
+      }))
+    )
+    const subtotal = totals.netTotal
+    const vatAmount = totals.taxAmount
+    const totalAmount = totals.grossTotal
 
     // Get intro/outro text from company settings
     const introText = company.default_intro_text || null
@@ -141,6 +152,7 @@ export async function POST(request: NextRequest) {
       invoice_number: 'VORSCHAU', // Preview indicator
       invoice_date: invoiceDate || new Date().toISOString().split('T')[0],
       due_date: body.dueDate || null,
+      service_date: body.serviceDate || invoiceDate || new Date().toISOString().split('T')[0],
       seller_is_self: sellerIsSelf,
       seller_contact_id: null,
       seller_snapshot: sellerSnapshot as any,

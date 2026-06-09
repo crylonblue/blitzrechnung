@@ -300,8 +300,8 @@ function LineItemCard({ item, index, companyId, onUpdate, onTemplateSelect, onRe
           </div>
         </div>
 
-        {/* Price and VAT */}
-        <div className="grid grid-cols-2 gap-3">
+        {/* Price, VAT and tax category */}
+        <div className="grid grid-cols-3 gap-3">
           <div>
             <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
               Einzelpreis (€)
@@ -325,7 +325,47 @@ function LineItemCard({ item, index, companyId, onUpdate, onTemplateSelect, onRe
               className="mt-1"
             />
           </div>
+          <div>
+            <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+              Steuerart
+            </label>
+            <select
+              value={item.tax_category ?? (item.vat_rate === 0 ? 'Z' : 'S')}
+              onChange={(e) => {
+                const cat = e.target.value as NonNullable<LineItem['tax_category']>
+                // Exempt / reverse-charge / zero-rated lines carry a 0% rate.
+                const rateUpdate =
+                  cat === 'E' || cat === 'AE' || cat === 'Z'
+                    ? { vat_rate: 0 }
+                    : item.vat_rate === 0
+                    ? { vat_rate: 19 }
+                    : {}
+                onUpdate({ tax_category: cat, ...rateUpdate })
+              }}
+              className="mt-1 h-9 w-full rounded-md border border-zinc-300 bg-transparent px-2 text-sm dark:border-zinc-700"
+            >
+              <option value="S">Standard (19/7 %)</option>
+              <option value="E">Steuerfrei (§ 4 UStG)</option>
+              <option value="AE">Reverse Charge (§ 13b)</option>
+              <option value="Z">Nullsatz (0 %)</option>
+            </select>
+          </div>
         </div>
+
+        {/* Exemption reason — required for exempt (E) and reverse-charge (AE) lines */}
+        {(item.tax_category === 'E' || item.tax_category === 'AE') && (
+          <div>
+            <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+              Grund der Steuerbefreiung
+            </label>
+            <Input
+              value={item.exemption_reason || ''}
+              onChange={(e) => onUpdate({ exemption_reason: e.target.value })}
+              placeholder="z. B. Steuerfrei gemäß § 4 Nr. 14 UStG"
+              className="mt-1"
+            />
+          </div>
+        )}
 
         {/* Total */}
         <div className="text-right pt-2 border-t border-zinc-200 dark:border-zinc-700">

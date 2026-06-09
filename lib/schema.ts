@@ -45,7 +45,13 @@ export const CustomerSchema = z.object({
   address: AddressSchema,
   phoneNumber: z.string().optional(),
   additionalInfo: z.array(z.string()).optional(),
+  vatId: z.string().optional(), // BT-48 buyer VAT identifier (required for reverse charge)
 });
+
+// EN 16931 VAT category codes (UNCL5305) relevant for German invoices:
+// S = standard rate, Z = zero rate, E = exempt (§4 UStG), AE = reverse charge (§13b)
+export const TaxCategorySchema = z.enum(["S", "Z", "E", "AE"]);
+export type TaxCategory = z.infer<typeof TaxCategorySchema>;
 
 export const InvoiceItemSchema = z.object({
   description: z.string().min(1, "Item description is required"),
@@ -53,6 +59,10 @@ export const InvoiceItemSchema = z.object({
   unit: z.string().min(1, "Unit is required"),
   unitPrice: z.number().nonnegative("Unit price must be non-negative"),
   vatRate: z.number().min(0).max(100, "VAT rate must be between 0 and 100").default(19),
+  // BT-151 line VAT category. Defaults to S (rate>0) / Z (rate 0) when omitted.
+  taxCategory: TaxCategorySchema.optional(),
+  // BT-120 VAT exemption reason — required for categories E and AE.
+  exemptionReason: z.string().optional(),
 });
 
 export const BankDetailsSchema = z.object({
@@ -74,6 +84,7 @@ export const InvoiceSchema = z.object({
   invoiceNumber: z.string().min(1, "Invoice number is required"),
   invoiceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date format (YYYY-MM-DD)"),
   serviceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date format (YYYY-MM-DD)"),
+  dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date format (YYYY-MM-DD)").optional(),
   seller: SellerSchema,
   customer: CustomerSchema,
   items: z.array(InvoiceItemSchema).min(1, "At least one item is required"),
@@ -179,15 +190,35 @@ export function validateXRechnungInvoice(invoice: Invoice): {
     errors.push("BR-DE-9: Käufer-PLZ ist für XRechnung erforderlich");
   }
 
-  // PEPPOL-EN16931-R020: Seller electronic address (informational)
-  if (!invoice.seller.contact?.email) {
-    warnings.push("PEPPOL-EN16931-R020: Verkäufer-E-Mail-Adresse empfohlen für elektronischen Rechnungsaustausch");
+  // BT-34 / PEPPOL-EN16931-R020: Seller electronic address — required for XRechnung
+  if (!invoice.seller.contact?.email && !invoice.seller.email) {
+    errors.push("BT-34 (PEPPOL-EN16931-R020): Verkäufer-E-Mail-Adresse ist für die elektronische Rechnung erforderlich");
   }
 
-  // PEPPOL-EN16931-R010: Buyer electronic address (informational)
+  // BT-49 / PEPPOL-EN16931-R010: Buyer electronic address — required for XRechnung
   const buyerHasEmail = invoice.customer.additionalInfo?.some(info => info.includes('@'));
   if (!buyerHasEmail) {
-    warnings.push("PEPPOL-EN16931-R010: Käufer-E-Mail-Adresse empfohlen für elektronischen Rechnungsaustausch");
+    errors.push("BT-49 (PEPPOL-EN16931-R010): Käufer-E-Mail-Adresse ist für die elektronische Rechnung erforderlich");
+  }
+
+  // VAT category / rate consistency (BR-S-05, BR-E-05/10, BR-AE-05/10, BR-Z-05).
+  invoice.items.forEach((item, i) => {
+    const rate = item.vatRate ?? invoice.taxRate;
+    const category = item.taxCategory ?? (rate === 0 ? "Z" : "S");
+    if ((category === "E" || category === "AE") && !item.exemptionReason?.trim()) {
+      errors.push(`BT-120: Position ${i + 1} (steuerfrei/Reverse-Charge) benötigt einen Grund der Steuerbefreiung`);
+    }
+    if ((category === "E" || category === "AE" || category === "Z") && rate !== 0) {
+      errors.push(`Position ${i + 1}: Steuerart ${category} erfordert einen MwSt.-Satz von 0%`);
+    }
+    if (category === "S" && rate <= 0) {
+      errors.push(`Position ${i + 1}: Standardbesteuerung (S) erfordert einen MwSt.-Satz größer als 0%`);
+    }
+  });
+
+  // BR-AE-03: reverse charge requires the buyer's VAT identifier (BT-48).
+  if (invoice.items.some((item) => item.taxCategory === "AE") && !invoice.customer.vatId) {
+    errors.push("BR-AE-03: Reverse-Charge (§ 13b UStG) erfordert die USt-IdNr. des Käufers");
   }
 
   return {
