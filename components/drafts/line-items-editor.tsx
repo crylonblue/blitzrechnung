@@ -179,6 +179,50 @@ interface LineItemCardProps {
 function LineItemCard({ item, index, companyId, onUpdate, onTemplateSelect, onRemove, onOpenDrawer }: LineItemCardProps) {
   const [unitOpen, setUnitOpen] = useState(false)
   const [templateOpen, setTemplateOpen] = useState(false)
+  // "Anderer Satz" is a sticky local mode so a rate of 19 doesn't snap back to Standard.
+  const [customMode, setCustomMode] = useState(
+    item.tax_category !== 'E' &&
+      item.tax_category !== 'AE' &&
+      item.vat_rate !== 19 &&
+      item.vat_rate !== 7
+  )
+
+  // One plain-language "Besteuerung" choice drives both the rate and the EN 16931 category.
+  const taxChoice =
+    item.tax_category === 'E'
+      ? 'exempt'
+      : item.tax_category === 'AE'
+      ? 'reverse'
+      : customMode
+      ? 'custom'
+      : item.vat_rate === 7
+      ? 'std7'
+      : 'std19'
+
+  const applyTaxChoice = (choice: string) => {
+    switch (choice) {
+      case 'std19':
+        setCustomMode(false)
+        onUpdate({ tax_category: undefined, vat_rate: 19, exemption_reason: undefined })
+        break
+      case 'std7':
+        setCustomMode(false)
+        onUpdate({ tax_category: undefined, vat_rate: 7, exemption_reason: undefined })
+        break
+      case 'exempt':
+        setCustomMode(false)
+        onUpdate({ tax_category: 'E', vat_rate: 0 })
+        break
+      case 'reverse':
+        setCustomMode(false)
+        onUpdate({ tax_category: 'AE', vat_rate: 0 })
+        break
+      case 'custom':
+        setCustomMode(true)
+        onUpdate({ tax_category: undefined, exemption_reason: undefined })
+        break
+    }
+  }
 
   return (
     <div className="rounded-md border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-700 dark:bg-zinc-800">
@@ -300,8 +344,8 @@ function LineItemCard({ item, index, companyId, onUpdate, onTemplateSelect, onRe
           </div>
         </div>
 
-        {/* Price, VAT and tax category */}
-        <div className="grid grid-cols-3 gap-3">
+        {/* Price and taxation — one plain-language choice instead of rate + code */}
+        <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
               Einzelpreis (€)
@@ -315,44 +359,39 @@ function LineItemCard({ item, index, companyId, onUpdate, onTemplateSelect, onRe
           </div>
           <div>
             <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
-              MwSt. %
+              Besteuerung
+            </label>
+            <select
+              value={taxChoice}
+              onChange={(e) => applyTaxChoice(e.target.value)}
+              className="mt-1 h-9 w-full rounded-md border border-zinc-300 bg-transparent px-2 text-sm dark:border-zinc-700"
+            >
+              <option value="std19">19 % USt (Standard)</option>
+              <option value="std7">7 % USt (ermäßigt)</option>
+              <option value="exempt">Steuerfrei · § 4 UStG</option>
+              <option value="reverse">Reverse Charge · § 13b UStG</option>
+              <option value="custom">Anderer Satz …</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Custom VAT rate — only when "Anderer Satz" is chosen */}
+        {taxChoice === 'custom' && (
+          <div className="w-36">
+            <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+              MwSt.-Satz (%)
             </label>
             <NumberInput
               value={item.vat_rate}
-              onChange={(vat_rate) => onUpdate({ vat_rate })}
+              onChange={(vat_rate) => onUpdate({ vat_rate, tax_category: undefined })}
               min={0}
               max={100}
               className="mt-1"
             />
           </div>
-          <div>
-            <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
-              Steuerart
-            </label>
-            <select
-              value={item.tax_category ?? (item.vat_rate === 0 ? 'Z' : 'S')}
-              onChange={(e) => {
-                const cat = e.target.value as NonNullable<LineItem['tax_category']>
-                // Exempt / reverse-charge / zero-rated lines carry a 0% rate.
-                const rateUpdate =
-                  cat === 'E' || cat === 'AE' || cat === 'Z'
-                    ? { vat_rate: 0 }
-                    : item.vat_rate === 0
-                    ? { vat_rate: 19 }
-                    : {}
-                onUpdate({ tax_category: cat, ...rateUpdate })
-              }}
-              className="mt-1 h-9 w-full rounded-md border border-zinc-300 bg-transparent px-2 text-sm dark:border-zinc-700"
-            >
-              <option value="S">Standard (19/7 %)</option>
-              <option value="E">Steuerfrei (§ 4 UStG)</option>
-              <option value="AE">Reverse Charge (§ 13b)</option>
-              <option value="Z">Nullsatz (0 %)</option>
-            </select>
-          </div>
-        </div>
+        )}
 
-        {/* Exemption reason — required for exempt (E) and reverse-charge (AE) lines */}
+        {/* Exemption reason — required for exempt (§4) and reverse-charge (§13b) lines */}
         {(item.tax_category === 'E' || item.tax_category === 'AE') && (
           <div>
             <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
@@ -361,9 +400,16 @@ function LineItemCard({ item, index, companyId, onUpdate, onTemplateSelect, onRe
             <Input
               value={item.exemption_reason || ''}
               onChange={(e) => onUpdate({ exemption_reason: e.target.value })}
-              placeholder="z. B. Steuerfrei gemäß § 4 Nr. 14 UStG"
+              placeholder={
+                item.tax_category === 'AE'
+                  ? 'z. B. Steuerschuldnerschaft des Leistungsempfängers (§ 13b UStG)'
+                  : 'z. B. Steuerfrei gemäß § 4 Nr. 14 UStG (Heilbehandlung)'
+              }
               className="mt-1"
             />
+            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+              Pflichtangabe — erscheint auf Rechnung und in der E-Rechnung.
+            </p>
           </div>
         )}
 
