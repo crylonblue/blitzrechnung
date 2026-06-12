@@ -1,8 +1,21 @@
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { PDFDocument, rgb } from "pdf-lib";
+import fontkit from "@pdf-lib/fontkit";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { embedFacturX, Profile, Flavor } from "@stackforge-eu/factur-x";
 import type { Invoice, Address } from "./schema";
-import { embedZugferdIntoPDF } from "./zugferd-generator";
+import { generateXRechnungXML } from "./zugferd-generator";
 import { computeInvoiceTotals } from "./invoice-totals";
 import { getUnitLabel } from "./units";
+
+// Bundled assets, read once. PDF/A-3 requires every font embedded, so we ship a
+// real TTF instead of pdf-lib's non-embeddable standard fonts. Liberation Sans
+// is metric-compatible with the previous Helvetica, so the layout is unchanged.
+// The compact sRGB profile is the mandatory PDF/A output intent.
+const readAsset = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)));
+const FONT_REGULAR = readAsset("./assets/fonts/LiberationSans-Regular.ttf");
+const FONT_BOLD = readAsset("./assets/fonts/LiberationSans-Bold.ttf");
+const SRGB_ICC = new Uint8Array(readAsset("./assets/icc/sRGB.icc"));
 import { 
   getTranslations, 
   formatDateForLanguage, 
@@ -116,8 +129,9 @@ export async function generateInvoicePDF(
   const pdfDoc = await PDFDocument.create();
   const page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
   
-  const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  pdfDoc.registerFontkit(fontkit);
+  const helvetica = await pdfDoc.embedFont(FONT_REGULAR, { subset: true });
+  const helveticaBold = await pdfDoc.embedFont(FONT_BOLD, { subset: true });
   
   let y = PAGE_HEIGHT - MARGIN_TOP;
   
@@ -616,17 +630,26 @@ export async function generateInvoicePDF(
   pdfDoc.setCreator("Invoice API");
   pdfDoc.setProducer("Invoice API");
 
-  // Save the visual PDF first
+  // Save the visual PDF (fonts are now embedded via fontkit).
   const visualPdfBuffer = await pdfDoc.save({
     useObjectStreams: false,
     addDefaultPage: false,
   });
 
-  // Embed ZUGFeRD XML into PDF and convert to PDF/A-3b compliant document
-  const zugferdPdfBuffer = await embedZugferdIntoPDF(invoice, visualPdfBuffer, {
-    isCancellation,
-    originalInvoiceNumber,
+  // Generate the XRechnung XML and embed it into a PDF/A-3b conformant document.
+  // embedFacturX adds the PDF/A-3 identification, the sRGB output intent, the
+  // ZUGFeRD XMP metadata and the XML attachment — the parts a plain pdf-lib
+  // document is missing. Verified against the Mustang/veraPDF validator.
+  const xml = await generateXRechnungXML(invoice, { isCancellation, originalInvoiceNumber });
+  const result = await embedFacturX({
+    pdf: visualPdfBuffer,
+    xml,
+    profile: Profile.EN16931,
+    flavor: Flavor.ZUGFERD,
+    addPdfA3Metadata: true,
+    rgbIccProfile: SRGB_ICC,
+    unembeddedFonts: "throw", // never emit a PDF with a non-embedded font
   });
 
-  return zugferdPdfBuffer;
+  return result.pdf;
 }
