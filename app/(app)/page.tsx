@@ -280,7 +280,7 @@ export default async function DashboardPage() {
           ) : (
             <div className="space-y-3">
               {recentInvoices.map((invoice) => {
-                const customerSnapshot = invoice.customer_snapshot as any
+                const customerSnapshot = invoice.buyer_snapshot as any
                 return (
                   <Link
                     key={invoice.id}
@@ -344,7 +344,7 @@ export default async function DashboardPage() {
             </Link>
 
             <Link
-              href="/customers"
+              href="/contacts"
               className="card block transition-colors hover:border-[var(--border-strong)]"
               style={{ textDecoration: 'none' }}
             >
