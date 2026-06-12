@@ -9,6 +9,12 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  // Force the bundled PDF assets (fonts + sRGB ICC) into every API serverless
+  // function so pdf-generator's runtime readFileSync resolves on Vercel instead
+  // of relying on automatic file tracing.
+  outputFileTracingIncludes: {
+    '/api/**': ['./lib/assets/**/*'],
+  },
 };
 
 export default nextConfig;
