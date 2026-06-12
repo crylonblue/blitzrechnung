@@ -56,7 +56,7 @@ export async function POST(
     return badRequest('Invalid JSON body')
   }
 
-  const customerSnapshot = invoice.customer_snapshot as unknown as CustomerSnapshot | null
+  const customerSnapshot = invoice.buyer_snapshot as unknown as CustomerSnapshot | null
   const emailSettings = (company.email_settings as EmailSettings) || { mode: 'default' }
   const language = (invoice.language as 'de' | 'en') || 'de'
 

@@ -90,18 +90,14 @@ export default async function DashboardPage() {
   
   const companyDataCheck = checkCompanyData(company)
 
-  // Get stats
-  const [draftsResult, invoicesResult, recentInvoicesResult] = await Promise.all([
+  // Get stats: open drafts count, the 5 most recent invoices, and all issued
+  // invoices (status, dates, amounts) to derive the cash-flow KPIs below.
+  const [draftsResult, recentInvoicesResult, issuedInvoicesResult] = await Promise.all([
     supabase
       .from('invoices')
-      .select('id', { count: 'exact' })
+      .select('id', { count: 'exact', head: true })
       .in('company_id', companyIds)
       .eq('status', 'draft'),
-    supabase
-      .from('invoices')
-      .select('id', { count: 'exact' })
-      .in('company_id', companyIds)
-      .neq('status', 'draft'),
     supabase
       .from('invoices')
       .select('*')
@@ -109,20 +105,55 @@ export default async function DashboardPage() {
       .neq('status', 'draft')
       .order('created_at', { ascending: false })
       .limit(5),
+    supabase
+      .from('invoices')
+      .select('status, due_date, invoice_date, total_amount, subtotal')
+      .in('company_id', companyIds)
+      .neq('status', 'draft'),
   ])
 
   const draftsCount = draftsResult.count || 0
-  const invoicesCount = invoicesResult.count || 0
   const recentInvoices = recentInvoicesResult.data || []
 
-  // Calculate totals
-  const { data: allInvoices } = await supabase
-    .from('invoices')
-    .select('total_amount')
-    .in('company_id', companyIds)
-    .neq('status', 'draft')
+  // Cash-flow KPIs — what a business actually needs at a glance.
+  const UNPAID = new Set(['created', 'sent', 'reminded'])
+  const startOfToday = new Date()
+  startOfToday.setHours(0, 0, 0, 0)
+  const currentYear = startOfToday.getFullYear()
 
-  const totalRevenue = allInvoices?.reduce((sum, inv) => sum + (inv.total_amount || 0), 0) || 0
+  let openAmount = 0 // gross owed by customers (issued, not yet paid)
+  let overdueAmount = 0 // of the open amount, past the due date
+  let overdueCount = 0
+  let revenueYearNet = 0 // net revenue invoiced in the current year
+
+  for (const inv of issuedInvoicesResult.data || []) {
+    const gross = inv.total_amount || 0
+    if (UNPAID.has(inv.status)) {
+      openAmount += gross
+      if (inv.due_date) {
+        const due = new Date(inv.due_date)
+        due.setHours(0, 0, 0, 0)
+        if (due < startOfToday) {
+          overdueAmount += gross
+          overdueCount += 1
+        }
+      }
+    }
+    if (
+      inv.status !== 'cancelled' &&
+      inv.invoice_date &&
+      new Date(inv.invoice_date).getFullYear() === currentYear
+    ) {
+      revenueYearNet += inv.subtotal || 0
+    }
+  }
+
+  const eur = (value: number) =>
+    new Intl.NumberFormat('de-DE', {
+      style: 'currency',
+      currency: 'EUR',
+      maximumFractionDigits: 0,
+    }).format(value)
 
   return (
     <div className="mx-auto max-w-7xl px-6 py-12">
@@ -210,7 +241,52 @@ export default async function DashboardPage() {
         </p>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-3 mb-12">
+      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4 mb-12">
+        <Link
+          href="/invoices"
+          className="card block transition-colors hover:border-[var(--border-strong)]"
+          style={{ textDecoration: 'none' }}
+        >
+          <div>
+            <p className="text-meta mb-1">Offen</p>
+            <p className="text-3xl font-semibold" style={{ color: 'var(--text-primary)' }}>
+              {eur(openAmount)}
+            </p>
+            <p className="mt-1 text-xs text-meta">unbezahlt</p>
+          </div>
+        </Link>
+
+        <Link
+          href="/invoices"
+          className="card block transition-colors hover:border-[var(--border-strong)]"
+          style={{ textDecoration: 'none' }}
+        >
+          <div>
+            <p className="text-meta mb-1">Überfällig</p>
+            <p
+              className="text-3xl font-semibold"
+              style={{ color: overdueAmount > 0 ? 'var(--status-warning)' : 'var(--text-primary)' }}
+            >
+              {eur(overdueAmount)}
+            </p>
+            <p className="mt-1 text-xs text-meta">
+              {overdueCount === 0
+                ? 'nichts überfällig'
+                : `${overdueCount} ${overdueCount === 1 ? 'Rechnung' : 'Rechnungen'}`}
+            </p>
+          </div>
+        </Link>
+
+        <div className="card">
+          <div>
+            <p className="text-meta mb-1">Umsatz {currentYear}</p>
+            <p className="text-3xl font-semibold" style={{ color: 'var(--text-primary)' }}>
+              {eur(revenueYearNet)}
+            </p>
+            <p className="mt-1 text-xs text-meta">netto, fakturiert</p>
+          </div>
+        </div>
+
         <Link
           href="/drafts"
           className="card block transition-colors hover:border-[var(--border-strong)]"
@@ -221,34 +297,9 @@ export default async function DashboardPage() {
             <p className="text-3xl font-semibold" style={{ color: 'var(--text-primary)' }}>
               {draftsCount}
             </p>
+            <p className="mt-1 text-xs text-meta">offen</p>
           </div>
         </Link>
-
-        <Link
-          href="/invoices"
-          className="card block transition-colors hover:border-[var(--border-strong)]"
-          style={{ textDecoration: 'none' }}
-        >
-          <div>
-            <p className="text-meta mb-1">Rechnungen</p>
-            <p className="text-3xl font-semibold" style={{ color: 'var(--text-primary)' }}>
-              {invoicesCount}
-            </p>
-          </div>
-        </Link>
-
-        <div className="card">
-          <div>
-            <p className="text-meta mb-1">Gesamtumsatz</p>
-            <p className="text-3xl font-semibold" style={{ color: 'var(--text-primary)' }}>
-              {new Intl.NumberFormat('de-DE', {
-                style: 'currency',
-                currency: 'EUR',
-                maximumFractionDigits: 0,
-              }).format(totalRevenue)}
-            </p>
-          </div>
-        </div>
       </div>
 
       <div className="grid gap-8 lg:grid-cols-2">
@@ -280,7 +331,7 @@ export default async function DashboardPage() {
           ) : (
             <div className="space-y-3">
               {recentInvoices.map((invoice) => {
-                const customerSnapshot = invoice.customer_snapshot as any
+                const customerSnapshot = invoice.buyer_snapshot as any
                 return (
                   <Link
                     key={invoice.id}
@@ -344,7 +395,7 @@ export default async function DashboardPage() {
             </Link>
 
             <Link
-              href="/customers"
+              href="/contacts"
               className="card block transition-colors hover:border-[var(--border-strong)]"
               style={{ textDecoration: 'none' }}
             >
