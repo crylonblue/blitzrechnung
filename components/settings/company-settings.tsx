@@ -68,6 +68,25 @@ export default function CompanySettings({ company: initialCompany }: CompanySett
     register_number: (initialCompany as any).register_number || '',
     managing_director: (initialCompany as any).managing_director || '',
   })
+
+  // DATEV / Buchhaltung
+  const SKR_DEFAULTS = {
+    SKR03: { standard19: '8400', standard7: '8300', steuerfrei: '8100', nullsatz: '8200' },
+    SKR04: { standard19: '4400', standard7: '4300', steuerfrei: '4100', nullsatz: '4200' },
+  } as const
+  const initialDatev = (initialCompany.datev_settings as any) || {}
+  const [datev, setDatev] = useState({
+    skr: (initialDatev.skr === 'SKR04' ? 'SKR04' : 'SKR03') as 'SKR03' | 'SKR04',
+    berater_nr: initialDatev.berater_nr || '',
+    mandanten_nr: initialDatev.mandanten_nr || '',
+    wj_beginn: initialDatev.wj_beginn || '0101',
+    debitor_konto: initialDatev.debitor_konto || '10000',
+    standard19: initialDatev.erloes_konten?.standard19 || '8400',
+    standard7: initialDatev.erloes_konten?.standard7 || '8300',
+    steuerfrei: initialDatev.erloes_konten?.steuerfrei || '8100',
+    nullsatz: initialDatev.erloes_konten?.nullsatz || '8200',
+  })
+
   const [emailSettings, setEmailSettings] = useState<EmailSettings>(initialEmailSettings)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -170,6 +189,39 @@ export default function CompanySettings({ company: initialCompany }: CompanySett
       }
 
       toast.success('E-Mail-Einstellungen gespeichert')
+      router.refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Fehler beim Speichern')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleSaveDatev = async () => {
+    setIsSaving(true)
+    setError(null)
+    try {
+      const { error: updateError } = await supabase
+        .from('companies')
+        .update({
+          datev_settings: {
+            skr: datev.skr,
+            berater_nr: datev.berater_nr || null,
+            mandanten_nr: datev.mandanten_nr || null,
+            wj_beginn: datev.wj_beginn || '0101',
+            sachkontenlaenge: 4,
+            debitor_konto: datev.debitor_konto || '10000',
+            erloes_konten: {
+              standard19: datev.standard19,
+              standard7: datev.standard7,
+              steuerfrei: datev.steuerfrei,
+              nullsatz: datev.nullsatz,
+            },
+          },
+        })
+        .eq('id', initialCompany.id)
+      if (updateError) throw new Error(updateError.message)
+      toast.success('Buchhaltungseinstellungen gespeichert')
       router.refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Fehler beim Speichern')
@@ -364,6 +416,13 @@ export default function CompanySettings({ company: initialCompany }: CompanySett
             }}
           >
             API
+          </TabsTrigger>
+          <TabsTrigger
+            value="buchhaltung"
+            className="bg-transparent border-0 border-b-2 border-transparent rounded-none px-0 pb-3.5 text-sm font-medium transition-colors duration-150 hover:text-zinc-900 hover:border-zinc-300 data-[state=active]:border-zinc-900 data-[state=active]:text-zinc-900 data-[state=active]:font-semibold data-[state=active]:shadow-none"
+            style={{ color: 'var(--text-secondary)', borderTop: 'none', borderLeft: 'none', borderRight: 'none' }}
+          >
+            Buchhaltung
           </TabsTrigger>
         </TabsList>
 
@@ -1130,6 +1189,71 @@ export default function CompanySettings({ company: initialCompany }: CompanySett
             {/* API Tab */}
             <TabsContent value="api" className="mt-0">
               <ApiKeysSection companyId={initialCompany.id} />
+            </TabsContent>
+
+            <TabsContent value="buchhaltung" className="space-y-6 mt-0">
+              <CardHeader className="px-0 pb-4">
+                <CardTitle className="text-lg font-medium" style={{ color: 'var(--text-primary)' }}>
+                  DATEV-Export
+                </CardTitle>
+                <CardDescription className="text-sm">
+                  Für den DATEV-Buchungsstapel, den dein Steuerberater importiert. Berater- und
+                  Mandantennummer bekommst du von deinem Steuerberater; die Konten sind mit
+                  DATEV-Standardwerten vorbelegt.
+                </CardDescription>
+              </CardHeader>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <Label htmlFor="skr">Kontenrahmen</Label>
+                  <select
+                    id="skr"
+                    value={datev.skr}
+                    onChange={(e) => {
+                      const skr = e.target.value as 'SKR03' | 'SKR04'
+                      setDatev({ ...datev, skr, ...SKR_DEFAULTS[skr] })
+                    }}
+                    className="mt-1.5 h-9 w-full rounded-md border border-zinc-300 bg-transparent px-2 text-sm dark:border-zinc-700"
+                  >
+                    <option value="SKR03">SKR03</option>
+                    <option value="SKR04">SKR04</option>
+                  </select>
+                </div>
+                <div>
+                  <Label htmlFor="wj_beginn">Wirtschaftsjahr-Beginn (MMTT)</Label>
+                  <Input id="wj_beginn" value={datev.wj_beginn} onChange={(e) => setDatev({ ...datev, wj_beginn: e.target.value })} placeholder="0101" className="mt-1.5" />
+                </div>
+                <div>
+                  <Label htmlFor="berater_nr">Beraternummer</Label>
+                  <Input id="berater_nr" value={datev.berater_nr} onChange={(e) => setDatev({ ...datev, berater_nr: e.target.value })} placeholder="vom Steuerberater" className="mt-1.5" />
+                </div>
+                <div>
+                  <Label htmlFor="mandanten_nr">Mandantennummer</Label>
+                  <Input id="mandanten_nr" value={datev.mandanten_nr} onChange={(e) => setDatev({ ...datev, mandanten_nr: e.target.value })} placeholder="vom Steuerberater" className="mt-1.5" />
+                </div>
+                <div>
+                  <Label htmlFor="debitor_konto">Debitoren-Sammelkonto</Label>
+                  <Input id="debitor_konto" value={datev.debitor_konto} onChange={(e) => setDatev({ ...datev, debitor_konto: e.target.value })} className="mt-1.5" />
+                </div>
+              </div>
+
+              <div>
+                <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Erlöskonten</p>
+                <p className="text-xs text-meta mb-3">DATEV-Standardkonten — nur ändern, wenn dein Steuerberater andere vorgibt.</p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div><Label htmlFor="k19">Umsatzerlöse 19 %</Label><Input id="k19" value={datev.standard19} onChange={(e) => setDatev({ ...datev, standard19: e.target.value })} className="mt-1.5" /></div>
+                  <div><Label htmlFor="k7">Umsatzerlöse 7 %</Label><Input id="k7" value={datev.standard7} onChange={(e) => setDatev({ ...datev, standard7: e.target.value })} className="mt-1.5" /></div>
+                  <div><Label htmlFor="kfrei">Steuerfreie Umsätze (§ 4)</Label><Input id="kfrei" value={datev.steuerfrei} onChange={(e) => setDatev({ ...datev, steuerfrei: e.target.value })} className="mt-1.5" /></div>
+                  <div><Label htmlFor="k0">Nullsatz (0 %)</Label><Input id="k0" value={datev.nullsatz} onChange={(e) => setDatev({ ...datev, nullsatz: e.target.value })} className="mt-1.5" /></div>
+                </div>
+              </div>
+
+              <div className="flex justify-end border-t pt-6" style={{ borderColor: 'var(--border-default)' }}>
+                <Button onClick={handleSaveDatev} disabled={isSaving}>
+                  {isSaving && <LoaderCircle className="h-4 w-4 mr-2 animate-spin" />}
+                  Speichern
+                </Button>
+              </div>
             </TabsContent>
 
             <div className="flex justify-end border-t pt-6 mt-8" style={{ borderColor: 'var(--border-default)' }}>
