@@ -25,7 +25,9 @@ import { isOverdue, getStatusLabel, getStatusClass } from '@/lib/invoice-utils'
 
 type InvoiceStatus = 'created' | 'sent' | 'reminded' | 'paid' | 'cancelled'
 
-const AVAILABLE_STATUSES: InvoiceStatus[] = ['created', 'sent', 'reminded', 'paid', 'cancelled']
+// Manual status changes exclude 'cancelled' — cancellation only happens via the
+// real Storno flow (which creates a Stornorechnung), not by flipping the status.
+const AVAILABLE_STATUSES: InvoiceStatus[] = ['created', 'sent', 'reminded', 'paid']
 
 export default function InvoiceDrawer() {
   const { isOpen, invoiceId, closeDrawer } = useInvoiceDrawer()

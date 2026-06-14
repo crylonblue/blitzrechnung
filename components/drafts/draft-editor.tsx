@@ -45,6 +45,7 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
   const [isFinalizing, setIsFinalizing] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [finalizeConfirmOpen, setFinalizeConfirmOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [company, setCompany] = useState<Company | null>(null)
   const [isPreviewLoading, setIsPreviewLoading] = useState(false)
@@ -550,6 +551,18 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
           <div className="flex-shrink-0 px-6 pt-6 pb-4">
             <div className="message-error">
               {error}
+              {error.includes('Einstellungen') && (
+                <div className="mt-2">
+                  <a
+                    href="/settings"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm font-medium underline"
+                  >
+                    Einstellungen in neuem Tab öffnen →
+                  </a>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -582,6 +595,24 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
                   label="Empfänger auswählen..."
                   onSelect={handleBuyerSelect}
                 />
+                {buyerSnapshot && !buyerIsSelf && (
+                  <div className="mt-4">
+                    <Label htmlFor="buyer_email">E-Mail des Empfängers</Label>
+                    <Input
+                      id="buyer_email"
+                      type="email"
+                      value={buyerSnapshot.email || ''}
+                      onChange={(e) => setBuyerSnapshot({ ...buyerSnapshot, email: e.target.value })}
+                      placeholder="rechnung@kunde.de"
+                      className="mt-1.5"
+                    />
+                    {!buyerSnapshot.email?.trim() && (
+                      <p className="mt-1 text-xs" style={{ color: 'var(--status-warning)' }}>
+                        Für den Versand der E-Rechnung erforderlich.
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -743,9 +774,17 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
                 Vorschau
               </Button>
               <Button
-                onClick={handleFinalize}
-                disabled={isFinalizing || isSaving || isDeleting}
+                onClick={handleSaveDraft}
+                disabled={isSaving || isFinalizing || isDeleting}
                 variant="outline"
+                className="text-sm"
+              >
+                {isSaving && <LoaderCircle className="h-4 w-4 mr-2 animate-spin" />}
+                {isSaved ? 'Aktualisieren' : 'Als Entwurf speichern'}
+              </Button>
+              <Button
+                onClick={() => setFinalizeConfirmOpen(true)}
+                disabled={isFinalizing || isSaving || isDeleting}
                 className="text-sm"
               >
                 {isFinalizing ? (
@@ -754,14 +793,6 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
                   <Check className="h-4 w-4 mr-2" />
                 )}
                 Rechnung fertigstellen
-              </Button>
-              <Button
-                onClick={handleSaveDraft}
-                disabled={isSaving || isFinalizing || isDeleting}
-                className="text-sm"
-              >
-                {isSaving && <LoaderCircle className="h-4 w-4 mr-2 animate-spin" />}
-                {isSaved ? 'Aktualisieren' : 'Als Entwurf speichern'}
               </Button>
             </div>
           </div>
@@ -791,6 +822,29 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
               >
                 {isDeleting && <LoaderCircle className="h-4 w-4 mr-2 animate-spin" />}
                 Löschen
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Finalize Confirmation Dialog */}
+        <Dialog open={finalizeConfirmOpen} onOpenChange={setFinalizeConfirmOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Rechnung fertigstellen?</DialogTitle>
+              <DialogDescription>
+                Die Rechnung erhält eine endgültige, fortlaufende Rechnungsnummer und kann
+                danach nicht mehr bearbeitet werden. PDF und E-Rechnung (XRechnung/ZUGFeRD)
+                werden erzeugt.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setFinalizeConfirmOpen(false)} disabled={isFinalizing}>
+                Abbrechen
+              </Button>
+              <Button onClick={() => { setFinalizeConfirmOpen(false); handleFinalize() }} disabled={isFinalizing}>
+                {isFinalizing && <LoaderCircle className="h-4 w-4 mr-2 animate-spin" />}
+                Jetzt fertigstellen
               </Button>
             </DialogFooter>
           </DialogContent>
