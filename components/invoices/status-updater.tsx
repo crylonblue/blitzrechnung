@@ -83,18 +83,9 @@ export default function StatusUpdater({ invoice }: StatusUpdaterProps) {
         </Button>
       )}
 
-      {/* Stornieren - von created, sent, reminded oder paid */}
-      {['created', 'sent', 'reminded', 'paid'].includes(invoice.status) && (
-        <Button
-          onClick={() => handleStatusChange('cancelled')}
-          disabled={isUpdating}
-          variant="outline"
-          className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950"
-        >
-          {isUpdating && <LoaderCircle className="h-4 w-4 mr-2 animate-spin" />}
-          Stornieren
-        </Button>
-      )}
+      {/* Stornieren erfolgt ausschließlich über den echten Storno-Flow
+          (erzeugt eine Stornorechnung) im Rechnungs-Drawer, nicht durch
+          einfaches Setzen des Status. */}
     </div>
   )
 }
