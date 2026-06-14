@@ -27,6 +27,7 @@ export interface Database {
           bank_details: Json | null
           accounting_email: string | null
           email_settings: Json | null
+          datev_settings: Json | null
           contact_name: string | null
           contact_phone: string | null
           contact_email: string | null
@@ -56,6 +57,7 @@ export interface Database {
           bank_details?: Json | null
           accounting_email?: string | null
           email_settings?: Json | null
+          datev_settings?: Json | null
           contact_name?: string | null
           contact_phone?: string | null
           contact_email?: string | null
@@ -85,6 +87,7 @@ export interface Database {
           bank_details?: Json | null
           accounting_email?: string | null
           email_settings?: Json | null
+          datev_settings?: Json | null
           contact_name?: string | null
           contact_phone?: string | null
           contact_email?: string | null

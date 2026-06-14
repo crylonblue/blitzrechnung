@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import InvoicesTable from '@/components/invoices/invoices-table'
+import DatevExportButton from '@/components/invoices/datev-export-button'
 
 export default async function InvoicesPage() {
   const supabase = await createClient()
@@ -47,11 +48,14 @@ export default async function InvoicesPage() {
 
   return (
     <div className="mx-auto max-w-7xl px-6 py-12">
-      <div className="mb-12">
-        <h1 className="text-headline">Rechnungen</h1>
-        <p className="mt-2 text-meta">
-          Alle fertiggestellten Rechnungen
-        </p>
+      <div className="mb-12 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-headline">Rechnungen</h1>
+          <p className="mt-2 text-meta">
+            Alle fertiggestellten Rechnungen
+          </p>
+        </div>
+        <DatevExportButton />
       </div>
 
       {invoices && invoices.length === 0 ? (
