@@ -75,6 +75,13 @@ function formatDate(dateString: string, language: InvoiceLanguage = 'de'): strin
   return formatDateForLanguage(dateString, language);
 }
 
+function getEffectiveDueDate(invoice: Invoice): string {
+  if (invoice.dueDate) return invoice.dueDate;
+  const invoiceDate = new Date(invoice.invoiceDate);
+  invoiceDate.setDate(invoiceDate.getDate() + 14);
+  return invoiceDate.toISOString().split("T")[0];
+}
+
 function formatCurrency(amount: number, language: InvoiceLanguage = 'de'): string {
   return formatCurrencyForLanguage(amount, language);
 }
@@ -295,9 +302,7 @@ export async function generateInvoicePDF(
     metaY = drawMetadataRow(metaLabels.reference, invoice.buyerReference, metaY);
   }
   metaY = drawMetadataRow(metaLabels.serviceDate, formatDate(invoice.serviceDate, language), metaY);
-  if (invoice.dueDate) {
-    metaY = drawMetadataRow(metaLabels.dueDate, formatDate(invoice.dueDate, language), metaY);
-  }
+  metaY = drawMetadataRow(metaLabels.dueDate, formatDate(getEffectiveDueDate(invoice), language), metaY);
   if (invoice.seller.contact?.name) {
     metaY = drawMetadataRow(metaLabels.contactPerson, invoice.seller.contact.name, metaY);
   }

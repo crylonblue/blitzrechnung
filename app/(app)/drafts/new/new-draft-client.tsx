@@ -20,11 +20,19 @@ export default function NewDraftClient({ companyId }: NewDraftClientProps) {
     setIsCreating(true)
     setError(null)
 
+    const today = new Date()
+    const dueDate = new Date(today)
+    dueDate.setDate(dueDate.getDate() + 30)
+    const formatDate = (date: Date) => date.toISOString().split('T')[0]
+
     const { data, error: insertError } = await supabase
       .from('invoices')
       .insert({
         company_id: companyId,
         status: 'draft',
+        invoice_date: formatDate(today),
+        due_date: formatDate(dueDate),
+        service_date: formatDate(today),
         line_items: [],
         subtotal: 0,
         vat_amount: 0,
