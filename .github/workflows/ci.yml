@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Minimal gate: type-check + the Node test suite (EN 16931 / DATEV / totals).
+# Vercel already runs `next build` per push/PR; this adds the tests, which
+# otherwise run nowhere. ESLint is intentionally omitted until the `as any`
+# debt is cleared (it would fail today).
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Type-check
+        run: pnpm exec tsc --noEmit
+
+      - name: Tests
+        run: pnpm test
