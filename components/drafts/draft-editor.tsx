@@ -465,9 +465,10 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
         description: `Rechnung ${invoiceNumber} wurde erfolgreich erstellt.`,
       })
       
-      // Close drawer and refresh after successful finalize
+      // Close the drawer and take the user straight to the finished invoice,
+      // where "Versenden" is the obvious next step.
       closeDrawer()
-      router.refresh()
+      router.push(`/invoices/${finalizedInvoice.id}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Fehler beim Finalisieren')
       setIsFinalizing(false)
