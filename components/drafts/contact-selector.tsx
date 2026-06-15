@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { PartySnapshot, Contact, Company } from '@/types'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -37,13 +37,9 @@ export default function ContactSelector({
   const [open, setOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const { openDrawer } = useContactDrawer()
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
 
-  useEffect(() => {
-    loadContacts()
-  }, [companyId])
-
-  const loadContacts = async () => {
+  const loadContacts = useCallback(async () => {
     setIsLoading(true)
     let query = supabase
       .from('contacts')
@@ -62,7 +58,11 @@ export default function ContactSelector({
       setContacts(data)
     }
     setIsLoading(false)
-  }
+  }, [companyId, filterSellersOnly, supabase])
+
+  useEffect(() => {
+    loadContacts()
+  }, [loadContacts])
 
   const filteredContacts = contacts.filter((contact) =>
     contact.name.toLowerCase().includes(searchQuery.toLowerCase())

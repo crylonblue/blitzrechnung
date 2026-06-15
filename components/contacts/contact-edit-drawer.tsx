@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useContactEditDrawer } from '@/contexts/contact-edit-drawer-context'
@@ -11,23 +11,12 @@ import { createClient } from '@/lib/supabase/client'
 export default function ContactEditDrawer() {
   const { isOpen, contactId, closeDrawer } = useContactEditDrawer()
   const router = useRouter()
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
   const [contact, setContact] = useState<Contact | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Load contact when drawer opens
-  useEffect(() => {
-    if (isOpen && contactId) {
-      loadContact(contactId)
-    } else if (isOpen && !contactId) {
-      // For creating new contact, set contact to null
-      setContact(null)
-      setError(null)
-    }
-  }, [isOpen, contactId])
-
-  const loadContact = async (id: string) => {
+  const loadContact = useCallback(async (id: string) => {
     setIsLoading(true)
     setError(null)
 
@@ -45,7 +34,18 @@ export default function ContactEditDrawer() {
 
     setContact(data)
     setIsLoading(false)
-  }
+  }, [supabase])
+
+  // Load contact when drawer opens
+  useEffect(() => {
+    if (isOpen && contactId) {
+      loadContact(contactId)
+    } else if (isOpen && !contactId) {
+      // For creating new contact, set contact to null
+      setContact(null)
+      setError(null)
+    }
+  }, [isOpen, contactId, loadContact])
 
   const handleClose = () => {
     closeDrawer()

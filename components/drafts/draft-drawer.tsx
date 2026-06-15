@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { useDraftDrawer } from '@/contexts/draft-drawer-context'
@@ -11,21 +11,12 @@ import { createClient } from '@/lib/supabase/client'
 export default function DraftDrawer() {
   const { isOpen, draftId, closeDrawer } = useDraftDrawer()
   const router = useRouter()
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
   const [draft, setDraft] = useState<Invoice | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Load draft when drawer opens
-  useEffect(() => {
-    if (isOpen && draftId) {
-      loadDraft(draftId)
-    } else if (isOpen && !draftId) {
-      createNewDraft()
-    }
-  }, [isOpen, draftId])
-
-  const loadDraft = async (id: string) => {
+  const loadDraft = useCallback(async (id: string) => {
     setIsLoading(true)
     setError(null)
 
@@ -43,9 +34,9 @@ export default function DraftDrawer() {
 
     setDraft(data)
     setIsLoading(false)
-  }
+  }, [supabase])
 
-  const createNewDraft = async () => {
+  const createNewDraft = useCallback(async () => {
     setIsLoading(true)
     setError(null)
 
@@ -125,7 +116,16 @@ export default function DraftDrawer() {
       setError(err instanceof Error ? err.message : 'Fehler beim Erstellen')
       setIsLoading(false)
     }
-  }
+  }, [supabase])
+
+  // Load draft when drawer opens
+  useEffect(() => {
+    if (isOpen && draftId) {
+      loadDraft(draftId)
+    } else if (isOpen && !draftId) {
+      createNewDraft()
+    }
+  }, [isOpen, draftId, loadDraft, createNewDraft])
 
   // handleFinalize is now handled in DraftEditor itself
 
@@ -152,4 +152,3 @@ export default function DraftDrawer() {
     </Sheet>
   )
 }
-

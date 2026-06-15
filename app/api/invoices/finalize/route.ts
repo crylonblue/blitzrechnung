@@ -18,7 +18,12 @@ export async function POST(request: NextRequest) {
     await assertCompanyMembership(supabase, user.id, inv.company_id)
 
     const result = await finalizeInvoice(supabase, { companyId: inv.company_id, userId: user.id }, invoiceId)
-    return NextResponse.json({ success: true, pdfUrl: result.pdfUrl, xmlUrl: result.xmlUrl })
+    return NextResponse.json({
+      success: true,
+      invoice_number: result.invoice.invoice_number,
+      pdfUrl: result.pdfUrl,
+      xmlUrl: result.xmlUrl,
+    })
   } catch (err) {
     if (err instanceof InvoiceServiceError) {
       return NextResponse.json({ error: err.message, details: err.details }, { status: err.status })

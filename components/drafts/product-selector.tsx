@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Product } from '@/types'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
@@ -27,13 +27,9 @@ export default function ProductSelector({
   const [isLoading, setIsLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const { openDrawer } = useProductDrawer()
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
 
-  useEffect(() => {
-    loadProducts()
-  }, [companyId])
-
-  const loadProducts = async () => {
+  const loadProducts = useCallback(async () => {
     setIsLoading(true)
     const { data } = await supabase
       .from('products')
@@ -45,7 +41,11 @@ export default function ProductSelector({
       setProducts(data)
     }
     setIsLoading(false)
-  }
+  }, [companyId, supabase])
+
+  useEffect(() => {
+    loadProducts()
+  }, [loadProducts])
 
   const filteredProducts = products.filter((product) =>
     product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||

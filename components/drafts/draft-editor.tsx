@@ -3,12 +3,6 @@
 import { useState, useEffect } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { Invoice, LineItem, PartySnapshot, Address, Company } from '@/types'
-
-// Type for the atomic invoice number RPC result
-interface InvoiceNumberResult {
-  next_number: number
-  formatted_number: string
-}
 import { createClient } from '@/lib/supabase/client'
 import ContactSelector from './contact-selector'
 import LineItemsEditor from './line-items-editor'
@@ -307,57 +301,6 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
     setIsFinalizing(true)
 
     try {
-      // Reload company to ensure we have latest data
-      const { data: latestCompany } = await supabase
-        .from('companies')
-        .select('*')
-        .eq('id', draft.company_id)
-        .single()
-
-      // Get next invoice number using atomic RPC function
-      let invoiceNumber: string
-      if (sellerIsSelf) {
-        // Use company's invoice number sequence (atomic)
-        const { data: numberResult, error: numberError } = await supabase
-          .rpc('get_next_invoice_number', {
-            p_seller_type: 'company',
-            p_seller_id: draft.company_id,
-            p_prefix: latestCompany?.invoice_number_prefix || 'INV'
-          })
-          .single() as { data: InvoiceNumberResult | null, error: any }
-
-        if (numberError || !numberResult) {
-          console.error('Error generating invoice number:', numberError)
-          setError('Fehler bei der Rechnungsnummern-Generierung')
-          setIsFinalizing(false)
-          return
-        }
-
-        invoiceNumber = numberResult.formatted_number
-      } else if (sellerSnapshot?.invoice_number_prefix && sellerSnapshot.id) {
-        // Use external seller's invoice number sequence (atomic)
-        const { data: numberResult, error: numberError } = await supabase
-          .rpc('get_next_invoice_number', {
-            p_seller_type: 'contact',
-            p_seller_id: sellerSnapshot.id,
-            p_prefix: sellerSnapshot.invoice_number_prefix
-          })
-          .single() as { data: InvoiceNumberResult | null, error: any }
-
-        if (numberError || !numberResult) {
-          console.error('Error generating invoice number:', numberError)
-          setError('Fehler bei der Rechnungsnummern-Generierung')
-          setIsFinalizing(false)
-          return
-        }
-
-        invoiceNumber = numberResult.formatted_number
-      } else {
-        setError('Rechnungsnummer kann nicht generiert werden. Bitte hinterlegen Sie ein Präfix für den Absender.')
-        setIsFinalizing(false)
-        return
-      }
-
       // Calculate final totals
       const subtotal = lineItems.reduce((sum, item) => sum + item.total, 0)
       const vatAmount = lineItems.reduce((sum, item) => sum + (item.total * item.vat_rate) / 100, 0)
@@ -371,7 +314,6 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
           .from('invoices')
           .update({
             status: 'draft', // Keep as draft until upload succeeds
-            invoice_number: invoiceNumber,
             invoice_date: draft.invoice_date,
             due_date: draft.due_date,
             service_date: draft.service_date,
@@ -387,9 +329,9 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
             total_amount: totalAmount,
             language: language,
             buyer_reference: buyerReference || null,
-            finalized_at: new Date().toISOString(),
           })
           .eq('id', draft.id)
+          .eq('status', 'draft')
           .select()
           .single()
 
@@ -407,7 +349,6 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
           .insert({
             company_id: draft.company_id,
             status: 'draft', // Keep as draft until upload succeeds
-            invoice_number: invoiceNumber,
             invoice_date: draft.invoice_date,
             due_date: draft.due_date,
             service_date: draft.service_date,
@@ -423,7 +364,6 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
             total_amount: totalAmount,
             language: language,
             buyer_reference: buyerReference || null,
-            finalized_at: new Date().toISOString(),
           })
           .select()
           .single()
@@ -458,11 +398,12 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
         return
       }
 
+      const result = await response.json()
       setIsFinalizing(false)
       
       // Show success toast
       toast.success('Rechnung erstellt', {
-        description: `Rechnung ${invoiceNumber} wurde erfolgreich erstellt.`,
+        description: `Rechnung ${result.invoice_number || ''} wurde erfolgreich erstellt.`,
       })
       
       // Close the drawer and take the user straight to the finished invoice,

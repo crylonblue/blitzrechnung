@@ -146,7 +146,6 @@ export async function finalizeInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: 
   let invoiceNumber = dbInvoice.invoice_number
   if (!invoiceNumber) {
     invoiceNumber = await nextInvoiceNumber(supabase, dbInvoice, company)
-    await supabase.from('invoices').update({ invoice_number: invoiceNumber }).eq('id', invoiceId)
     dbInvoice.invoice_number = invoiceNumber
   }
 
@@ -186,6 +185,7 @@ export async function finalizeInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: 
 
   const updateData: Record<string, unknown> = {
     status: 'created',
+    invoice_number: invoiceNumber,
     seller_snapshot: sellerSnapshot,
     buyer_snapshot: finalBuyerSnapshot,
     pdf_url: pdfUrl,
@@ -199,7 +199,14 @@ export async function finalizeInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: 
     updateData.recipient_email = finalBuyerSnapshot.email
   }
 
-  const { data: updated, error: updErr } = await supabase.from('invoices').update(updateData).eq('id', invoiceId).select().single()
+  const { data: updated, error: updErr } = await supabase
+    .from('invoices')
+    .update(updateData)
+    .eq('id', invoiceId)
+    .eq('company_id', ctx.companyId)
+    .in('status', ['draft', 'created'])
+    .select()
+    .single()
   if (updErr) throw new InvoiceServiceError(500, 'SERVER_ERROR', 'Rechnung konnte nicht aktualisiert werden')
 
   return { invoice: updated as DBInvoice, pdfUrl, xmlUrl }
@@ -228,7 +235,12 @@ export async function cancelInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: st
   if (dbInvoice.status === 'cancelled') throw new InvoiceServiceError(400, 'VALIDATION_ERROR', 'Rechnung wurde bereits storniert.')
   if ((dbInvoice as any).invoice_type === 'cancellation') throw new InvoiceServiceError(400, 'VALIDATION_ERROR', 'Eine Stornorechnung kann nicht storniert werden.')
 
-  const { data: existing } = await supabase.from('invoices').select('id, invoice_number').eq('cancelled_invoice_id', invoiceId).maybeSingle()
+  const { data: existing } = await supabase
+    .from('invoices')
+    .select('id, invoice_number')
+    .eq('company_id', ctx.companyId)
+    .eq('cancelled_invoice_id', invoiceId)
+    .maybeSingle()
   if (existing) throw new InvoiceServiceError(400, 'VALIDATION_ERROR', `Für diese Rechnung existiert bereits eine Stornorechnung (${(existing as any).invoice_number}).`)
 
   const { data: company } = await supabase.from('companies').select('*').eq('id', ctx.companyId).single()
@@ -307,7 +319,7 @@ export async function cancelInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: st
     pdfBuffer = await generateInvoicePDF(pdfInvoice, language, options)
     xmlString = await generateXRechnungXML(pdfInvoice, options)
   } catch {
-    await supabase.from('invoices').delete().eq('id', cancellation.id)
+    await supabase.from('invoices').delete().eq('id', cancellation.id).eq('company_id', ctx.companyId)
     throw new InvoiceServiceError(500, 'SERVER_ERROR', 'Stornorechnungs-Dokumente konnten nicht erzeugt werden')
   }
 
@@ -317,13 +329,29 @@ export async function cancelInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: st
     pdfUrl = await uploadToS3(ctx.userId, cancellation.id, `${cancellationNumber}.pdf`, Buffer.from(pdfBuffer), 'application/pdf')
     xmlUrl = await uploadToS3(ctx.userId, cancellation.id, `${cancellationNumber}.xml`, Buffer.from(xmlString, 'utf-8'), 'application/xml')
   } catch {
-    await supabase.from('invoices').delete().eq('id', cancellation.id)
+    await supabase.from('invoices').delete().eq('id', cancellation.id).eq('company_id', ctx.companyId)
     throw new InvoiceServiceError(500, 'SERVER_ERROR', 'Stornorechnungs-Dateien konnten nicht hochgeladen werden')
   }
 
-  const { data: updatedCancellation } = await supabase.from('invoices').update({ pdf_url: pdfUrl, xml_url: xmlUrl }).eq('id', cancellation.id).select().single()
-  // Mark the original cancelled — non-fatal if it fails (the Storno exists).
-  await supabase.from('invoices').update({ status: 'cancelled' }).eq('id', invoiceId)
+  const { data: updatedCancellation, error: updCancellationErr } = await supabase
+    .from('invoices')
+    .update({ pdf_url: pdfUrl, xml_url: xmlUrl })
+    .eq('id', cancellation.id)
+    .eq('company_id', ctx.companyId)
+    .select()
+    .single()
+  if (updCancellationErr) {
+    throw new InvoiceServiceError(500, 'SERVER_ERROR', 'Stornorechnung konnte nicht aktualisiert werden')
+  }
+
+  const { error: originalUpdateErr } = await supabase
+    .from('invoices')
+    .update({ status: 'cancelled' })
+    .eq('id', invoiceId)
+    .eq('company_id', ctx.companyId)
+  if (originalUpdateErr) {
+    throw new InvoiceServiceError(500, 'SERVER_ERROR', 'Originalrechnung konnte nicht als storniert markiert werden')
+  }
 
   return {
     cancellationInvoice: (updatedCancellation || cancellation) as DBInvoice,

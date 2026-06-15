@@ -87,6 +87,8 @@ export async function PATCH(
     .from('invoices')
     .update({ status })
     .eq('id', id)
+    .eq('company_id', auth.companyId)
+    .neq('status', 'draft')
     .select()
     .single()
 

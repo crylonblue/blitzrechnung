@@ -243,6 +243,8 @@ export async function PATCH(
     .from('invoices')
     .update(updates)
     .eq('id', id)
+    .eq('company_id', auth.companyId)
+    .eq('status', 'draft')
     .select()
     .single()
 
@@ -284,6 +286,8 @@ export async function DELETE(
     .from('invoices')
     .delete()
     .eq('id', id)
+    .eq('company_id', auth.companyId)
+    .eq('status', 'draft')
 
   if (error) {
     return serverError(error.message)
