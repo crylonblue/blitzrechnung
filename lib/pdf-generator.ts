@@ -185,13 +185,36 @@ export async function generateInvoicePDF(
     drawText(text, rightX - textWidth, yPos, options);
   };
 
-  // Word wrap helper
+  // Word wrap helper — also breaks overlong single words so they never clip
   const wrapText = (text: string, maxWidth: number, font: typeof helvetica, size: number): string[] => {
     const words = text.split(' ');
     const lines: string[] = [];
     let currentLine = '';
-    
+
+    const pushLongWord = (word: string) => {
+      let chunk = '';
+      for (const char of word) {
+        const test = chunk + char;
+        if (font.widthOfTextAtSize(test, size) > maxWidth && chunk) {
+          lines.push(chunk);
+          chunk = char;
+        } else {
+          chunk = test;
+        }
+      }
+      currentLine = chunk;
+    };
+
     for (const word of words) {
+      if (font.widthOfTextAtSize(word, size) > maxWidth) {
+        if (currentLine) {
+          lines.push(currentLine);
+          currentLine = '';
+        }
+        pushLongWord(word);
+        continue;
+      }
+
       const testLine = currentLine ? `${currentLine} ${word}` : word;
       if (font.widthOfTextAtSize(testLine, size) > maxWidth && currentLine) {
         lines.push(currentLine);
@@ -414,27 +437,32 @@ export async function generateInvoicePDF(
   // Table rows
   y -= 18;
   const maxDescWidth = CONTENT_WIDTH * 0.45;
+  const descLineHeight = 14;
 
   invoice.items.forEach((item, index) => {
     const itemTotal = totals.lineNets[index];
+    const descLines = wrapText(sanitizeText(item.description), maxDescWidth, helvetica, 10);
 
-    // Description (without numeration)
-    drawText(item.description, col.description, y, { maxWidth: maxDescWidth });
-    
+    // Description wraps within its column; qty/price stay on the first line
+    descLines.forEach((line, lineIndex) => {
+      drawText(line, col.description, y - lineIndex * descLineHeight);
+    });
+
     // Quantity with unit combined for German format
     const qtyText = formatQuantity(item.quantity, language);
     drawTextRight(qtyText, col.quantity + 40, y);
-    
+
     // Unit
     drawText(getUnitLabel(item.unit), col.unit, y);
-    
+
     // Unit price
     drawTextRight(formatCurrency(item.unitPrice, language), col.unitPrice + 55, y);
-    
+
     // Total
     drawTextRight(formatCurrency(itemTotal, language), col.total, y);
 
-    y -= 20;
+    const rowHeight = Math.max(20, descLines.length * descLineHeight + 6);
+    y -= rowHeight;
   });
 
   // ===========================================
