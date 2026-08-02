@@ -41,7 +41,10 @@ export async function updateSession(request: NextRequest) {
     !request.nextUrl.pathname.startsWith('/signup') &&
     !request.nextUrl.pathname.startsWith('/auth') &&
     !request.nextUrl.pathname.startsWith('/api/v1') &&
-    !request.nextUrl.pathname.startsWith('/api/docs')
+    !request.nextUrl.pathname.startsWith('/api/docs') &&
+    // Stripe posts here unauthenticated; a redirect to /login would silently
+    // fail every webhook delivery.
+    !request.nextUrl.pathname.startsWith('/api/billing/webhook')
   ) {
     // no user, potentially respond by redirecting the user to the login page
     const url = request.nextUrl.clone()

@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceRoleClient } from '@/lib/supabase/server'
+import { getBillingState } from '@/lib/billing'
 
 export interface ApiAuth {
   companyId: string
   userId: string
+  /** Company has an unexpired trial or a live subscription. */
+  entitled: boolean
+  /** API access is a Pro feature; trials count as Pro. */
+  isPro: boolean
 }
 
 /**
@@ -49,10 +54,30 @@ export async function validateApiKey(request: NextRequest): Promise<ApiAuth | nu
     .update({ last_used_at: new Date().toISOString() })
     .eq('id', apiKeyRecord.id)
 
+  // Resolved here rather than per route so the plan check downstream costs no
+  // extra round trip.
+  const billing = await getBillingState(supabase, apiKeyRecord.company_id)
+
   return {
     companyId: apiKeyRecord.company_id,
     userId: apiKeyRecord.user_id,
+    entitled: billing.entitled,
+    isPro: billing.isPro,
   }
+}
+
+/**
+ * Plan enforcement for the public API, which blitzrechnung.de sells as a Pro
+ * feature. Returns an error response to hand back, or null to proceed.
+ */
+export function requireApiAccess(auth: ApiAuth): NextResponse | null {
+  if (!auth.entitled) {
+    return paymentRequired('Your trial has ended. Choose a plan to keep using the API.')
+  }
+  if (!auth.isPro) {
+    return paymentRequired('API access requires the Pro plan.')
+  }
+  return null
 }
 
 /**
@@ -62,6 +87,13 @@ export function unauthorized() {
   return NextResponse.json(
     { error: 'Invalid or missing API key', code: 'UNAUTHORIZED' },
     { status: 401 }
+  )
+}
+
+export function paymentRequired(message: string) {
+  return NextResponse.json(
+    { error: message, code: 'PAYMENT_REQUIRED' },
+    { status: 402 }
   )
 }
 

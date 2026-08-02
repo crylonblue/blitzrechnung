@@ -1,5 +1,6 @@
 import AppLayout from '@/components/layout/app-layout'
 import { createClient } from '@/lib/supabase/server'
+import { getBillingState } from '@/lib/billing'
 import { redirect } from 'next/navigation'
 
 export default async function Layout({ children }: { children: React.ReactNode }) {
@@ -45,12 +46,17 @@ export default async function Layout({ children }: { children: React.ReactNode }
     .eq('id', user.id)
     .single()
 
+  const billing = await getBillingState(supabase, companyId)
+
   return (
     <AppLayout
       companyName={companyName}
       userEmail={userProfile?.email || user.email || ''}
       userName={userProfile?.name}
       companyId={companyId}
+      inTrial={billing.inTrial}
+      entitled={billing.entitled}
+      trialDaysLeft={billing.trialDaysLeft}
     >
       {children}
     </AppLayout>

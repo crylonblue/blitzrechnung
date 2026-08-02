@@ -1,6 +1,9 @@
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createServiceRoleClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import CompanySettings from '@/components/settings/company-settings'
+import BillingSection from '@/components/settings/billing-section'
+import { getBillingState, earlyBirdSlotsLeft } from '@/lib/billing'
+import { loadPlanPricing } from '@/lib/stripe'
 
 export default async function SettingsPage() {
   const supabase = await createClient()
@@ -48,9 +51,28 @@ export default async function SettingsPage() {
     )
   }
 
+  const [billing, pricing, slotsLeft] = await Promise.all([
+    getBillingState(supabase, company.id),
+    loadPlanPricing(),
+    // Counting claimed launch slots needs to see every company's row, which RLS
+    // rightly forbids. A missing service-role key just hides the offer.
+    (async () => {
+      try {
+        return await earlyBirdSlotsLeft(createServiceRoleClient())
+      } catch {
+        return 0
+      }
+    })(),
+  ])
+
   return (
     <div className="mx-auto max-w-4xl px-6 py-12">
-      <CompanySettings company={company} />
+      <CompanySettings
+        company={company}
+        billing={
+          <BillingSection billing={billing} pricing={pricing} earlyBirdSlotsLeft={slotsLeft} />
+        }
+      />
     </div>
   )
 }

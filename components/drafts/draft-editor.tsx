@@ -388,10 +388,23 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
         }),
       })
 
+      // The paywall. The draft is already saved at this point, so nothing the
+      // user typed is lost — they just can't turn it into a numbered invoice.
+      if (response.status === 402) {
+        const errorData = await response.json()
+        setError(errorData.details || errorData.error)
+        setIsFinalizing(false)
+        toast.error(errorData.error || 'Testphase abgelaufen', {
+          description: errorData.details,
+          action: { label: 'Tarif wählen', onClick: () => router.push('/settings') },
+        })
+        return
+      }
+
       if (!response.ok) {
         const errorData = await response.json()
-        const errorMessage = errorData.details 
-          ? `${errorData.error}: ${errorData.details}` 
+        const errorMessage = errorData.details
+          ? `${errorData.error}: ${errorData.details}`
           : (errorData.error || 'Fehler beim Generieren der Rechnung')
         setError(errorMessage)
         setIsFinalizing(false)

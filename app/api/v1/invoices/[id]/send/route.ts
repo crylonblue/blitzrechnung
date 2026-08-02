@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { createServiceRoleClient } from '@/lib/supabase/server'
-import { validateApiKey, unauthorized, notFound, badRequest, serverError, json } from '../../../_lib/auth'
+import { validateApiKey, requireApiAccess, unauthorized, notFound, badRequest, serverError, json } from '../../../_lib/auth'
 import { sendInvoice, InvoiceServiceError } from '@/lib/invoice-service'
 
 /**
@@ -9,6 +9,8 @@ import { sendInvoice, InvoiceServiceError } from '@/lib/invoice-service'
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await validateApiKey(request)
   if (!auth) return unauthorized()
+  const denied = requireApiAccess(auth)
+  if (denied) return denied
 
   const { id } = await params
   const supabase = createServiceRoleClient()

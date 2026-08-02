@@ -25,14 +25,18 @@ import { COUNTRIES } from '@/lib/countries'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from 'sonner'
 import ApiKeysSection from './api-keys-section'
+import DatevExportButton from '@/components/invoices/datev-export-button'
 import { DEFAULT_INVOICE_EMAIL_SUBJECT, DEFAULT_INVOICE_EMAIL_BODY, EMAIL_PLACEHOLDERS } from '@/lib/email-templates'
 import LogoUpload from './logo-upload'
 
 interface CompanySettingsProps {
   company: Company
+  /** Rendered into the "Tarif" tab; composed on the server so the billing
+   *  state and Stripe prices are fetched there rather than in the browser. */
+  billing?: React.ReactNode
 }
 
-export default function CompanySettings({ company: initialCompany }: CompanySettingsProps) {
+export default function CompanySettings({ company: initialCompany, billing }: CompanySettingsProps) {
   const router = useRouter()
   const supabase = createClient()
   const bankDetails = (initialCompany.bank_details as any) || {}
@@ -423,6 +427,13 @@ export default function CompanySettings({ company: initialCompany }: CompanySett
             style={{ color: 'var(--text-secondary)', borderTop: 'none', borderLeft: 'none', borderRight: 'none' }}
           >
             Buchhaltung
+          </TabsTrigger>
+          <TabsTrigger
+            value="tarif"
+            className="bg-transparent border-0 border-b-2 border-transparent rounded-none px-0 pb-3.5 text-sm font-medium transition-colors duration-150 hover:text-zinc-900 hover:border-zinc-300 data-[state=active]:border-zinc-900 data-[state=active]:text-zinc-900 data-[state=active]:font-semibold data-[state=active]:shadow-none"
+            style={{ color: 'var(--text-secondary)', borderTop: 'none', borderLeft: 'none', borderRight: 'none' }}
+          >
+            Tarif
           </TabsTrigger>
         </TabsList>
 
@@ -1192,15 +1203,18 @@ export default function CompanySettings({ company: initialCompany }: CompanySett
             </TabsContent>
 
             <TabsContent value="buchhaltung" className="space-y-6 mt-0">
-              <CardHeader className="px-0 pb-4">
-                <CardTitle className="text-lg font-medium" style={{ color: 'var(--text-primary)' }}>
-                  DATEV-Export
-                </CardTitle>
-                <CardDescription className="text-sm">
-                  Für den DATEV-Buchungsstapel, den dein Steuerberater importiert. Berater- und
-                  Mandantennummer bekommst du von deinem Steuerberater; die Konten sind mit
-                  DATEV-Standardwerten vorbelegt.
-                </CardDescription>
+              <CardHeader className="px-0 pb-4 flex-row items-start justify-between gap-4 space-y-0">
+                <div className="space-y-1.5">
+                  <CardTitle className="text-lg font-medium" style={{ color: 'var(--text-primary)' }}>
+                    DATEV-Export
+                  </CardTitle>
+                  <CardDescription className="text-sm">
+                    Für den DATEV-Buchungsstapel, den dein Steuerberater importiert. Berater- und
+                    Mandantennummer bekommst du von deinem Steuerberater; die Konten sind mit
+                    DATEV-Standardwerten vorbelegt.
+                  </CardDescription>
+                </div>
+                <DatevExportButton />
               </CardHeader>
 
               <div className="grid gap-4 sm:grid-cols-2">
@@ -1254,6 +1268,11 @@ export default function CompanySettings({ company: initialCompany }: CompanySett
                   Speichern
                 </Button>
               </div>
+            </TabsContent>
+
+            {/* Tarif Tab */}
+            <TabsContent value="tarif" className="space-y-6 mt-0">
+              {billing}
             </TabsContent>
 
             <div className="flex justify-end border-t pt-6 mt-8" style={{ borderColor: 'var(--border-default)' }}>

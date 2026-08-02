@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { createServiceRoleClient } from '@/lib/supabase/server'
-import { validateApiKey, unauthorized, notFound, badRequest, json } from '../../../_lib/auth'
+import { validateApiKey, requireApiAccess, unauthorized, notFound, badRequest, json } from '../../../_lib/auth'
 
 /**
  * GET /api/v1/invoices/:id/pdf
@@ -12,6 +12,8 @@ export async function GET(
 ) {
   const auth = await validateApiKey(request)
   if (!auth) return unauthorized()
+  const denied = requireApiAccess(auth)
+  if (denied) return denied
 
   const { id } = await params
   const supabase = createServiceRoleClient()

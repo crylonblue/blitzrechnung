@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { createServiceRoleClient } from '@/lib/supabase/server'
-import { validateApiKey, unauthorized, badRequest, serverError, json } from '../_lib/auth'
+import { validateApiKey, requireApiAccess, unauthorized, badRequest, serverError, json } from '../_lib/auth'
 import { computeInvoiceTotals, round2 } from '@/lib/invoice-totals'
 
 /**
@@ -10,6 +10,8 @@ import { computeInvoiceTotals, round2 } from '@/lib/invoice-totals'
 export async function GET(request: NextRequest) {
   const auth = await validateApiKey(request)
   if (!auth) return unauthorized()
+  const denied = requireApiAccess(auth)
+  if (denied) return denied
 
   const supabase = createServiceRoleClient()
 
@@ -36,6 +38,8 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const auth = await validateApiKey(request)
   if (!auth) return unauthorized()
+  const denied = requireApiAccess(auth)
+  if (denied) return denied
 
   let body: any
   try {

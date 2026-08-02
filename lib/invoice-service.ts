@@ -7,6 +7,7 @@ import { mapDBInvoiceToPDFInvoice } from './invoice-mapper'
 import { validateXRechnungInvoice } from './schema'
 import { sendEmail, getDefaultFromEmail } from './postmark'
 import { textToHtml, generateEmailSubject, generateEmailBody } from './email-templates'
+import { getBillingState, TRIAL_EXPIRED_MESSAGE, TRIAL_EXPIRED_DETAILS } from './billing'
 
 /**
  * Shared invoice business logic, used by both the session API (app/api/*) and
@@ -108,6 +109,13 @@ export interface FinalizeResult {
 }
 
 export async function finalizeInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: string): Promise<FinalizeResult> {
+  // The paywall. Drafting, contacts and existing invoices stay free forever;
+  // access is only required at the moment an invoice becomes a legal document.
+  const billing = await getBillingState(supabase, ctx.companyId)
+  if (!billing.entitled) {
+    throw new InvoiceServiceError(402, 'PAYMENT_REQUIRED', TRIAL_EXPIRED_MESSAGE, TRIAL_EXPIRED_DETAILS)
+  }
+
   const { data: invoice, error } = await supabase
     .from('invoices')
     .select('*')

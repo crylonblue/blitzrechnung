@@ -10,6 +10,7 @@ import DraftDrawer from '@/components/drafts/draft-drawer'
 import ContactEditDrawer from '@/components/contacts/contact-edit-drawer'
 import InvoiceDrawer from '@/components/invoices/invoice-drawer'
 import { Toaster } from '@/components/ui/sonner'
+import TrialBanner from './trial-banner'
 
 interface AppLayoutProps {
   children: React.ReactNode
@@ -17,9 +18,12 @@ interface AppLayoutProps {
   userEmail: string
   userName?: string | null
   companyId: string
+  inTrial: boolean
+  entitled: boolean
+  trialDaysLeft: number
 }
 
-export default function AppLayout({ children, companyName, userEmail, userName, companyId }: AppLayoutProps) {
+export default function AppLayout({ children, companyName, userEmail, userName, companyId, inTrial, entitled, trialDaysLeft }: AppLayoutProps) {
   return (
     <DraftDrawerProvider>
       <ContactDrawerProvider>
@@ -32,6 +36,7 @@ export default function AppLayout({ children, companyName, userEmail, userName, 
 
                 {/* Main Content */}
                 <main className="flex-1 pl-80">
+                  <TrialBanner inTrial={inTrial} entitled={entitled} trialDaysLeft={trialDaysLeft} />
                   {children}
                 </main>
 

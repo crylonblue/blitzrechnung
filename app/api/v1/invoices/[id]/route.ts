@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { createServiceRoleClient } from '@/lib/supabase/server'
-import { validateApiKey, unauthorized, notFound, badRequest, serverError, json } from '../../_lib/auth'
+import { validateApiKey, requireApiAccess, unauthorized, notFound, badRequest, serverError, json } from '../../_lib/auth'
 
 const VALID_STATUSES = ['created', 'sent', 'reminded', 'paid', 'cancelled']
 
@@ -14,6 +14,8 @@ export async function GET(
 ) {
   const auth = await validateApiKey(request)
   if (!auth) return unauthorized()
+  const denied = requireApiAccess(auth)
+  if (denied) return denied
 
   const { id } = await params
   const supabase = createServiceRoleClient()
@@ -43,6 +45,8 @@ export async function PATCH(
 ) {
   const auth = await validateApiKey(request)
   if (!auth) return unauthorized()
+  const denied = requireApiAccess(auth)
+  if (denied) return denied
 
   const { id } = await params
 
