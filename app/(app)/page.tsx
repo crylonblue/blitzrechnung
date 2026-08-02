@@ -3,6 +3,8 @@ import Link from 'next/link'
 import { format } from 'date-fns'
 import { de } from 'date-fns/locale'
 import type { Address, BankDetails } from '@/types'
+import { getBillingState } from '@/lib/billing'
+import TrialConversionBanner from '@/components/dashboard/trial-conversion-banner'
 
 interface MissingCompanyData {
   hasMissingData: boolean
@@ -92,7 +94,8 @@ export default async function DashboardPage() {
 
   // Get stats: open drafts count, the 5 most recent invoices, and all issued
   // invoices (status, dates, amounts) to derive the cash-flow KPIs below.
-  const [draftsResult, recentInvoicesResult, issuedInvoicesResult] = await Promise.all([
+  const [billing, draftsResult, recentInvoicesResult, issuedInvoicesResult] = await Promise.all([
+    companyIds.length > 0 ? getBillingState(supabase, companyIds[0]) : Promise.resolve(null),
     supabase
       .from('invoices')
       .select('id', { count: 'exact', head: true })
@@ -233,7 +236,16 @@ export default async function DashboardPage() {
           </div>
         </div>
       )}
-      
+
+      {billing && (
+        <TrialConversionBanner
+          plan={billing.plan}
+          inTrial={billing.inTrial}
+          entitled={billing.entitled}
+          trialDaysLeft={billing.trialDaysLeft}
+        />
+      )}
+
       <div className="mb-12">
         <h1 className="text-headline">Übersicht</h1>
         <p className="mt-2 text-meta">

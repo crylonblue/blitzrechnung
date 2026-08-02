@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Company, Address, EmailSettings } from '@/types'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -36,8 +36,16 @@ interface CompanySettingsProps {
   billing?: React.ReactNode
 }
 
+const SETTINGS_TABS = ['company', 'invoices', 'email', 'api', 'buchhaltung', 'tarif'] as const
+
 export default function CompanySettings({ company: initialCompany, billing }: CompanySettingsProps) {
   const router = useRouter()
+  // Lets other screens deep-link to a tab, e.g. /settings?tab=tarif from the
+  // dashboard conversion banner.
+  const requestedTab = useSearchParams().get('tab')
+  const initialTab = SETTINGS_TABS.includes(requestedTab as (typeof SETTINGS_TABS)[number])
+    ? (requestedTab as string)
+    : 'company'
   const supabase = createClient()
   const bankDetails = (initialCompany.bank_details as any) || {}
   const initialEmailSettings = (initialCompany.email_settings as unknown as EmailSettings) || { mode: 'default' }
@@ -371,7 +379,7 @@ export default function CompanySettings({ company: initialCompany, billing }: Co
         </div>
       )}
 
-      <Tabs defaultValue="company" className="w-full">
+      <Tabs defaultValue={initialTab} className="w-full">
         <TabsList className="mb-8 bg-transparent border-b border-zinc-200 rounded-none h-auto p-0 gap-8 w-full justify-start">
           <TabsTrigger 
             value="company"
