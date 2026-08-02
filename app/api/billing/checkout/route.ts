@@ -6,6 +6,9 @@ import { earlyBirdSlotsLeft } from '@/lib/billing'
 // Tags these sessions in the Dashboard so checkout flows stay comparable.
 const INTEGRATION_ID = 'blitzrechnung-subscription-kvxmrtwd'
 
+const KLEINUNTERNEHMER_FOOTER =
+  'Gemäß § 19 UStG wird keine Umsatzsteuer berechnet.'
+
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient()
@@ -64,6 +67,10 @@ export async function POST(request: NextRequest) {
         email: user.email ?? undefined,
         name: company?.name ?? undefined,
         metadata: { company_id: companyId },
+        // § 14 Abs. 4 Nr. 8 UStG wants the reason for the tax exemption stated
+        // on the invoice itself. It belongs here rather than on the plan
+        // picker, where it carries no legal weight and reads as small print.
+        invoice_settings: { footer: KLEINUNTERNEHMER_FOOTER },
       })
       customerId = customer.id
       await service.from('subscriptions').upsert(

@@ -194,7 +194,7 @@ export default function BillingSection({ billing, pricing, earlyBirdSlotsLeft }:
         </div>
 
         <p className="text-[13px] text-muted-foreground">
-          Kein Ausweis von Umsatzsteuer gemäß § 19 UStG. Jederzeit kündbar.
+          Alle Preise sind Endpreise. Jederzeit kündbar.
         </p>
       </div>
     </div>
