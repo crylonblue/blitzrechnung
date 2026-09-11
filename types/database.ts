@@ -32,6 +32,7 @@ export interface Database {
           contact_phone: string | null
           contact_email: string | null
           enable_english_invoices: boolean
+          invoice_show_girocode: boolean
           default_intro_text: string | null
           default_outro_text: string | null
           court: string | null
@@ -63,6 +64,7 @@ export interface Database {
           contact_phone?: string | null
           contact_email?: string | null
           enable_english_invoices?: boolean
+          invoice_show_girocode?: boolean
           default_intro_text?: string | null
           default_outro_text?: string | null
           court?: string | null
@@ -94,6 +96,7 @@ export interface Database {
           contact_phone?: string | null
           contact_email?: string | null
           enable_english_invoices?: boolean
+          invoice_show_girocode?: boolean
           default_intro_text?: string | null
           default_outro_text?: string | null
           court?: string | null

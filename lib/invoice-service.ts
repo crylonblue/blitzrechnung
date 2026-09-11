@@ -176,7 +176,9 @@ export async function finalizeInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: 
   let pdfBuffer: Uint8Array
   let xmlString: string
   try {
-    pdfBuffer = await generateInvoicePDF(pdfInvoice, language)
+    pdfBuffer = await generateInvoicePDF(pdfInvoice, language, {
+      showGirocode: (company as any).invoice_show_girocode !== false,
+    })
     xmlString = await generateXRechnungXML(pdfInvoice)
   } catch {
     throw new InvoiceServiceError(500, 'SERVER_ERROR', 'Fehler beim Erzeugen der Rechnungsdokumente')

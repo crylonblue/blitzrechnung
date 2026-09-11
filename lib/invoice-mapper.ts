@@ -112,6 +112,7 @@ export function mapDBInvoiceToPDFInvoice(
         iban: sellerSnapshot.bank_details.iban,
         bankName: sellerSnapshot.bank_details.bank_name || '',
         bic: sellerSnapshot.bank_details.bic || undefined,
+        accountHolder: sellerSnapshot.bank_details.account_holder || undefined,
       }
     : undefined
 

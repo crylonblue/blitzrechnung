@@ -22,6 +22,7 @@ import { Check, ChevronsUpDown, LoaderCircle, Copy, CheckCircle, XCircle, AlertC
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import { COUNTRIES } from '@/lib/countries'
+import { isValidIban } from '@/lib/girocode'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from 'sonner'
 import ApiKeysSection from './api-keys-section'
@@ -72,6 +73,8 @@ export default function CompanySettings({ company: initialCompany, billing }: Co
     contact_email: initialCompany.contact_email || '',
     // Language support
     enable_english_invoices: initialCompany.enable_english_invoices || false,
+    // Girocode on invoice PDFs — on unless the company opted out
+    invoice_show_girocode: initialCompany.invoice_show_girocode !== false,
     // Invoice text settings
     default_intro_text: initialCompany.default_intro_text || 'Vielen Dank für Ihr Vertrauen. Bitte überweisen Sie den Rechnungsbetrag innerhalb der angegebenen Zahlungsfrist.',
     default_outro_text: initialCompany.default_outro_text || 'Vielen Dank für Ihren Auftrag. Bei Fragen zu dieser Rechnung stehen wir Ihnen gerne zur Verfügung.',
@@ -146,6 +149,7 @@ export default function CompanySettings({ company: initialCompany, billing }: Co
           contact_phone: company.contact_phone || null,
           contact_email: company.contact_email || null,
           enable_english_invoices: company.enable_english_invoices,
+          invoice_show_girocode: company.invoice_show_girocode,
           default_intro_text: company.default_intro_text || null,
           default_outro_text: company.default_outro_text || null,
           // Legal information for footer
@@ -671,6 +675,31 @@ export default function CompanySettings({ company: initialCompany, billing }: Co
                         placeholder="COBADEFFXXX"
                       />
                     </div>
+
+                    <div className="flex items-center justify-between pt-2">
+                      <div className="space-y-0.5 pr-6">
+                        <Label htmlFor="invoice_show_girocode" className="text-base">
+                          Girocode auf Rechnungen drucken
+                        </Label>
+                        <p className="text-xs text-meta">
+                          Ihre Kunden scannen den QR-Code mit ihrer Banking-App — Empfänger, IBAN und
+                          Betrag sind dann schon ausgefüllt. Erscheint nur, wenn eine gültige IBAN
+                          hinterlegt ist; auf Stornorechnungen nie.
+                        </p>
+                      </div>
+                      <Switch
+                        id="invoice_show_girocode"
+                        checked={company.invoice_show_girocode}
+                        onCheckedChange={(checked) => setCompany({ ...company, invoice_show_girocode: checked })}
+                      />
+                    </div>
+
+                    {company.invoice_show_girocode && company.iban.length > 0 && !isValidIban(company.iban) && (
+                      <p className="text-xs" style={{ color: 'var(--text-meta)' }}>
+                        Diese IBAN besteht die Prüfziffernkontrolle nicht — bitte prüfen Sie sie. Bis
+                        dahin wird kein Girocode gedruckt.
+                      </p>
+                    )}
                   </div>
                 </div>
 

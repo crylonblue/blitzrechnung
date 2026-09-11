@@ -12,6 +12,7 @@ Einfache, sichere und ruhige Rechnungserstellung für kleine bis mittelgroße Un
 - ✅ **Rechnungs-Historie**: Übersicht aller finalisierten Rechnungen mit Status-Tracking
 - ✅ **Kundenverwaltung**: CRUD-Operationen für Kunden
 - ✅ **Firmeneinstellungen**: Verwaltung von Firmendaten und Standardwerten
+- ✅ **Girocode**: EPC-QR-Code auf der Rechnung — Kunden scannen ihn mit der Banking-App und die Überweisung ist vorausgefüllt
 - ✅ **Authentifizierung**: Email/Passwort und Google Login
 
 ## Tech Stack
