@@ -69,6 +69,8 @@ export const BankDetailsSchema = z.object({
   iban: z.string().min(1, "IBAN is required"),
   bankName: z.string().min(1, "Bank name is required"),
   bic: z.string().optional(),
+  // Payee shown by the customer's banking app when they scan the Girocode.
+  accountHolder: z.string().optional(),
 });
 
 // XRechnung BR-DE-1: Bank details required for payment instructions

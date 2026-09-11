@@ -188,8 +188,11 @@ export async function POST(request: NextRequest) {
       buyerReference || 'VORSCHAU' // Use provided reference or show preview indicator
     )
 
-    // Generate PDF
-    const pdfBuffer = await generateInvoicePDF(pdfInvoice, language || 'de')
+    // Generate PDF. The preview must show the Girocode exactly as the finalized
+    // invoice will, otherwise the preview stops being a preview.
+    const pdfBuffer = await generateInvoicePDF(pdfInvoice, language || 'de', {
+      showGirocode: (company as any)?.invoice_show_girocode !== false,
+    })
 
     // Return PDF as binary response
     return new NextResponse(Buffer.from(pdfBuffer), {

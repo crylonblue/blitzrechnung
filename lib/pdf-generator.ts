@@ -7,6 +7,8 @@ import type { Invoice, Address } from "./schema";
 import { generateXRechnungXML } from "./zugferd-generator";
 import { computeInvoiceTotals } from "./invoice-totals";
 import { getUnitLabel } from "./units";
+import { buildEpcPayload } from "./girocode";
+import { encodeQrMatrix, qrMatrixToRuns } from "./qr";
 
 // Bundled assets, read once. PDF/A-3 requires every font embedded, so we ship a
 // real TTF instead of pdf-lib's non-embeddable standard fonts. Liberation Sans
@@ -31,6 +33,15 @@ const MARGIN_RIGHT = 50;
 const MARGIN_TOP = 50;
 const MARGIN_BOTTOM = 50;
 const CONTENT_WIDTH = PAGE_WIDTH - MARGIN_LEFT - MARGIN_RIGHT;
+// Baseline of the footer block. Hoisted because the Girocode is anchored
+// relative to it, and it must be known before the footer itself is drawn.
+const FOOTER_Y = MARGIN_BOTTOM + 60;
+
+// Girocode geometry: the code sits bottom-left, just above the footer rule, so
+// it lands in the same place on every invoice instead of drifting with the
+// length of the line-item table.
+const GIROCODE_SIZE = 72;
+const GIROCODE_BOTTOM = FOOTER_Y + 34;
 
 // Colors
 const COLOR_BLACK = rgb(0, 0, 0);
@@ -124,6 +135,11 @@ interface PdfGenerationOptions {
   isCancellation?: boolean;
   /** Original invoice number for cancellation invoices */
   originalInvoiceNumber?: string;
+  /**
+   * Print the EPC/Girocode QR code when the seller's bank details allow it.
+   * Defaults to on; a cancellation invoice never carries one.
+   */
+  showGirocode?: boolean;
 }
 
 export async function generateInvoicePDF(
@@ -131,7 +147,7 @@ export async function generateInvoicePDF(
   language: InvoiceLanguage = 'de',
   options: PdfGenerationOptions = {}
 ): Promise<Uint8Array> {
-  const { isCancellation = false, originalInvoiceNumber } = options;
+  const { isCancellation = false, originalInvoiceNumber, showGirocode = true } = options;
   
   const pdfDoc = await PDFDocument.create();
   const page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
@@ -548,10 +564,95 @@ export async function generateInvoicePDF(
   }
 
   // ===========================================
+  // SECTION 7b: Girocode (EPC069-12 QR code)
+  // ===========================================
+
+  // Scanning the code pre-fills a SEPA transfer in the customer's banking app,
+  // so nobody has to retype an IBAN. Never on a cancellation invoice: a
+  // Stornorechnung is not something anyone should be able to scan and pay.
+  if (showGirocode && !isCancellation && invoice.bankDetails?.iban) {
+    const payload = buildEpcPayload({
+      beneficiaryName: invoice.bankDetails.accountHolder || invoice.seller.name,
+      iban: invoice.bankDetails.iban,
+      bic: invoice.bankDetails.bic,
+      amount: grossTotal,
+      currency: invoice.currency,
+      remittanceInfo:
+        language === 'de'
+          ? `Rechnung ${invoice.invoiceNumber}`
+          : `Invoice ${invoice.invoiceNumber}`,
+    });
+
+    // The generator emits a single page, so a long invoice can flow down into
+    // this band. Rather than overlap the payment note, the code steps aside.
+    const hasRoom = y > GIROCODE_BOTTOM + GIROCODE_SIZE + 10;
+
+    if (payload && hasRoom) {
+      const matrix = encodeQrMatrix(payload);
+      const runs = qrMatrixToRuns(matrix, GIROCODE_SIZE);
+      const qrLeft = MARGIN_LEFT;
+      const qrTop = GIROCODE_BOTTOM + GIROCODE_SIZE;
+
+      // A quiet zone is part of the symbol: without it a scanner may not find
+      // the code against the surrounding text.
+      const quietZone = (GIROCODE_SIZE / matrix.length) * 4;
+      page.drawRectangle({
+        x: qrLeft - quietZone,
+        y: GIROCODE_BOTTOM - quietZone,
+        width: GIROCODE_SIZE + quietZone * 2,
+        height: GIROCODE_SIZE + quietZone * 2,
+        color: rgb(1, 1, 1),
+      });
+
+      for (const run of runs) {
+        page.drawRectangle({
+          x: qrLeft + run.x,
+          // Runs are measured from the top of the code; PDF y grows upward.
+          y: qrTop - run.y - run.height,
+          width: run.width,
+          height: run.height,
+          color: COLOR_BLACK,
+        });
+      }
+
+      const captionX = qrLeft + GIROCODE_SIZE + 16;
+      const captionWidth = PAGE_WIDTH - MARGIN_RIGHT - captionX;
+      let captionY = qrTop - 8;
+
+      drawText(
+        language === 'de' ? 'PER BANKING-APP BEZAHLEN' : 'PAY WITH YOUR BANKING APP',
+        captionX,
+        captionY,
+        { font: helveticaBold, size: 8 }
+      );
+      captionY -= 14;
+
+      const captionBody =
+        language === 'de'
+          ? 'Code mit der Banking-App scannen — Empfänger, IBAN und Betrag werden automatisch ausgefüllt.'
+          : 'Scan the code with your banking app — payee, IBAN and amount are filled in automatically.';
+      for (const line of wrapText(captionBody, captionWidth, helvetica, 8)) {
+        drawText(line, captionX, captionY, { size: 8, color: COLOR_GRAY });
+        captionY -= 10;
+      }
+
+      captionY -= 2;
+      const reference =
+        language === 'de'
+          ? `${formatCurrency(grossTotal, language)} · Verwendungszweck: Rechnung ${invoice.invoiceNumber}`
+          : `${formatCurrency(grossTotal, language)} · Reference: Invoice ${invoice.invoiceNumber}`;
+      for (const line of wrapText(reference, captionWidth, helvetica, 8)) {
+        drawText(line, captionX, captionY, { size: 8 });
+        captionY -= 10;
+      }
+    }
+  }
+
+  // ===========================================
   // SECTION 8: Footer (4 Columns)
   // ===========================================
-  
-  const footerY = MARGIN_BOTTOM + 60;
+
+  const footerY = FOOTER_Y;
   const footerFontSize = 8;
   const footerLineHeight = 11;
   const footerColWidth = CONTENT_WIDTH / 4;
