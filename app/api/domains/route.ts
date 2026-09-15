@@ -1,23 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { createDomain, deleteDomain, createServer } from '@/lib/postmark'
+import { createDomain, deleteDomain } from '@/lib/email'
 import { EmailSettings } from '@/types'
 
 /**
- * POST /api/domains - Register a custom sender domain
+ * Either the response to send back, or the company the caller may act on.
+ * The `never` members let TypeScript narrow on `if (auth.error)`.
  */
-export async function POST(request: NextRequest) {
-  const supabase = await createClient()
+type OwnerResult =
+  | { error: NextResponse; companyId?: never }
+  | { error?: never; companyId: string }
 
+/**
+ * Resolve the caller's company and make sure they may change email settings.
+ */
+async function requireOwner(
+  supabase: Awaited<ReturnType<typeof createClient>>
+): Promise<OwnerResult> {
   const {
     data: { user },
   } = await supabase.auth.getUser()
 
   if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
   }
 
-  // Get the user's company
   const { data: companyUser } = await supabase
     .from('company_users')
     .select('company_id, role')
@@ -25,13 +32,26 @@ export async function POST(request: NextRequest) {
     .single()
 
   if (!companyUser) {
-    return NextResponse.json({ error: 'No company found' }, { status: 404 })
+    return { error: NextResponse.json({ error: 'No company found' }, { status: 404 }) }
   }
 
-  // Only owners can manage email settings
   if (companyUser.role !== 'owner') {
-    return NextResponse.json({ error: 'Only owners can manage email settings' }, { status: 403 })
+    return {
+      error: NextResponse.json({ error: 'Only owners can manage email settings' }, { status: 403 }),
+    }
   }
+
+  return { companyId: companyUser.company_id as string }
+}
+
+/**
+ * POST /api/domains - Register a custom sender domain
+ */
+export async function POST(request: NextRequest) {
+  const supabase = await createClient()
+
+  const auth = await requireOwner(supabase)
+  if (auth.error) return auth.error
 
   const body = await request.json()
   const { from_email, from_name, reply_to_email } = body
@@ -56,65 +76,51 @@ export async function POST(request: NextRequest) {
   const domain = from_email.split('@')[1]
 
   try {
-    // Get current email settings and company name
     const { data: company } = await supabase
       .from('companies')
-      .select('email_settings, name')
-      .eq('id', companyUser.company_id)
+      .select('email_settings')
+      .eq('id', auth.companyId)
       .single()
 
     const currentSettings = (company?.email_settings as EmailSettings) || { mode: 'default' }
 
-    // If there's an existing Postmark domain, delete it first
-    if (currentSettings.postmark_domain_id) {
-      try {
-        await deleteDomain(currentSettings.postmark_domain_id)
-      } catch (err) {
-        console.error('Failed to delete existing domain:', err)
-        // Continue anyway - it might not exist in Postmark
+    // Drop a previously registered domain so a changed sender address does not
+    // leave an orphan behind in the provider account.
+    if (currentSettings.provider === 'ahasend' && currentSettings.custom_domain) {
+      if (currentSettings.custom_domain !== domain) {
+        try {
+          await deleteDomain(currentSettings.custom_domain)
+        } catch (err) {
+          console.error('Failed to delete existing domain:', err)
+          // Continue anyway - it might already be gone.
+        }
       }
     }
 
-    // Reuse existing server if available, otherwise create a new one
-    let serverResult: { postmark_server_id: number; postmark_server_token: string }
-    
-    if (currentSettings.postmark_server_id && currentSettings.postmark_server_token) {
-      // Reuse existing server
-      serverResult = {
-        postmark_server_id: currentSettings.postmark_server_id,
-        postmark_server_token: currentSettings.postmark_server_token,
-      }
-    } else {
-      // Create a new Postmark server for this user's custom domain
-      serverResult = await createServer(domain)
-    }
-
-    // Create new domain in Postmark
     const domainResult = await createDomain(domain)
 
-    // Update company email settings with both server and domain info
     const newSettings: EmailSettings = {
+      ...currentSettings,
       mode: 'custom_domain',
       reply_to_email: reply_to_email || undefined,
       custom_domain: domain,
       from_email,
       from_name,
-      domain_verified: false,
-      postmark_domain_id: domainResult.postmark_domain_id,
-      postmark_server_id: serverResult.postmark_server_id,
-      postmark_server_token: serverResult.postmark_server_token,
+      domain_verified: domainResult.verified,
+      domain_verified_at: domainResult.verified ? new Date().toISOString() : undefined,
+      provider: 'ahasend',
       dns_records: domainResult.dns_records,
     }
 
     const { error: updateError } = await supabase
       .from('companies')
       .update({ email_settings: newSettings })
-      .eq('id', companyUser.company_id)
+      .eq('id', auth.companyId)
 
     if (updateError) {
-      // Try to clean up the Postmark domain (keep server for reuse)
+      // Roll the provider back so we do not keep a domain we cannot reach.
       try {
-        await deleteDomain(domainResult.postmark_domain_id)
+        await deleteDomain(domain)
       } catch {}
       throw updateError
     }
@@ -122,6 +128,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       domain,
+      verified: domainResult.verified,
       dns_records: domainResult.dns_records,
     })
   } catch (err) {
@@ -136,72 +143,43 @@ export async function POST(request: NextRequest) {
 /**
  * DELETE /api/domains - Remove custom domain and switch back to default
  */
-export async function DELETE(request: NextRequest) {
+export async function DELETE() {
   const supabase = await createClient()
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
-  // Get the user's company
-  const { data: companyUser } = await supabase
-    .from('company_users')
-    .select('company_id, role')
-    .eq('user_id', user.id)
-    .single()
-
-  if (!companyUser) {
-    return NextResponse.json({ error: 'No company found' }, { status: 404 })
-  }
-
-  // Only owners can manage email settings
-  if (companyUser.role !== 'owner') {
-    return NextResponse.json({ error: 'Only owners can manage email settings' }, { status: 403 })
-  }
+  const auth = await requireOwner(supabase)
+  if (auth.error) return auth.error
 
   try {
-    // Get current email settings
     const { data: company } = await supabase
       .from('companies')
       .select('email_settings')
-      .eq('id', companyUser.company_id)
+      .eq('id', auth.companyId)
       .single()
 
     const currentSettings = (company?.email_settings as EmailSettings) || { mode: 'default' }
 
-    // Delete domain in Postmark if exists
-    if (currentSettings.postmark_domain_id) {
+    if (currentSettings.provider === 'ahasend' && currentSettings.custom_domain) {
       try {
-        await deleteDomain(currentSettings.postmark_domain_id)
+        await deleteDomain(currentSettings.custom_domain)
       } catch (err) {
         console.error('Failed to delete domain:', err)
-        // Continue anyway
+        // Continue anyway - the local settings should still be reset.
       }
     }
 
-    // Keep the server for reuse - Postmark has restrictions on server deletion
-    // and we want to allow users to re-add a domain without issues
-
-    // Reset to default settings but keep server info for reuse
+    // Reset to the shared sender, keeping everything unrelated to the domain.
     const newSettings: EmailSettings = {
       mode: 'default',
       reply_to_email: currentSettings.reply_to_email,
       reply_to_name: currentSettings.reply_to_name,
       invoice_email_subject: currentSettings.invoice_email_subject,
       invoice_email_body: currentSettings.invoice_email_body,
-      // Keep server info for reuse when adding a new domain
-      postmark_server_id: currentSettings.postmark_server_id,
-      postmark_server_token: currentSettings.postmark_server_token,
     }
 
     const { error: updateError } = await supabase
       .from('companies')
       .update({ email_settings: newSettings })
-      .eq('id', companyUser.company_id)
+      .eq('id', auth.companyId)
 
     if (updateError) {
       throw updateError

@@ -5,7 +5,7 @@ import { generateXRechnungXML } from './zugferd-generator'
 import { uploadToS3, downloadFromS3 } from './s3'
 import { mapDBInvoiceToPDFInvoice } from './invoice-mapper'
 import { validateXRechnungInvoice } from './schema'
-import { sendEmail, getDefaultFromEmail } from './postmark'
+import { sendEmail, getDefaultFromEmail } from './email'
 import { textToHtml, generateEmailSubject, generateEmailBody } from './email-templates'
 import { getBillingState, TRIAL_EXPIRED_MESSAGE, TRIAL_EXPIRED_DETAILS } from './billing'
 
@@ -416,11 +416,6 @@ export async function sendInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: stri
       ? `${emailSettings.reply_to_name} <${emailSettings.reply_to_email}>`
       : emailSettings.reply_to_email
     : undefined
-  const serverToken =
-    emailSettings.mode === 'custom_domain' && emailSettings.domain_verified && emailSettings.postmark_server_token
-      ? emailSettings.postmark_server_token
-      : undefined
-
   // Attachments (PDF required, XML if present); legacy invoice_file_reference fallback.
   const attachments: Array<{ name: string; content: string; contentType: string }> = []
   const downloadErrors: string[] = []
@@ -452,7 +447,7 @@ export async function sendInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: stri
   }
 
   try {
-    await sendEmail({ from, to: recipientEmail, subject, htmlBody: textToHtml(emailBody || ''), textBody: emailBody, replyTo, attachments, serverToken })
+    await sendEmail({ from, to: recipientEmail, subject, htmlBody: textToHtml(emailBody || ''), textBody: emailBody, replyTo, attachments })
   } catch (err) {
     throw new InvoiceServiceError(500, 'SERVER_ERROR', err instanceof Error ? err.message : 'Fehler beim Versenden der E-Mail')
   }

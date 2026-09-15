@@ -1,12 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { verifyDomain } from '@/lib/postmark'
+import { verifyDomain } from '@/lib/email'
 import { EmailSettings } from '@/types'
 
 /**
- * POST /api/domains/verify - Verify DNS records for custom domain
+ * POST /api/domains/verify - Re-check the DNS records for the custom domain
  */
-export async function POST(request: NextRequest) {
+export async function POST() {
   const supabase = await createClient()
 
   const {
@@ -37,18 +37,29 @@ export async function POST(request: NextRequest) {
 
   const currentSettings = (company?.email_settings as EmailSettings) || { mode: 'default' }
 
-  if (!currentSettings.postmark_domain_id) {
+  if (!currentSettings.custom_domain) {
     return NextResponse.json(
       { error: 'No custom domain configured' },
       { status: 400 }
     )
   }
 
-  try {
-    // Verify the domain in Postmark
-    const result = await verifyDomain(currentSettings.postmark_domain_id)
+  // Domains from the old Postmark setup were never registered with the current
+  // provider, so there is nothing to check until the customer sets them up again.
+  if (currentSettings.provider !== 'ahasend') {
+    return NextResponse.json(
+      {
+        error:
+          'Diese Domain stammt aus der vorherigen E-Mail-Anbindung und muss einmalig neu eingerichtet werden.',
+        requires_setup: true,
+      },
+      { status: 409 }
+    )
+  }
 
-    // Update email settings with verification status
+  try {
+    const result = await verifyDomain(currentSettings.custom_domain)
+
     const newSettings: EmailSettings = {
       ...currentSettings,
       domain_verified: result.verified,
@@ -67,8 +78,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       verified: result.verified,
-      dkim_verified: result.dkim_verified,
-      return_path_verified: result.return_path_verified,
       dns_records: result.dns_records,
     })
   } catch (err) {
