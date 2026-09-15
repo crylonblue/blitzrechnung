@@ -1,37 +1,19 @@
 import { createClient } from '@/lib/supabase/server'
+import { getAppSession } from '@/lib/app-session'
+import { INVOICE_LIST_COLUMNS } from '@/lib/list-columns'
 import Link from 'next/link'
 import InvoicesTable from '@/components/invoices/invoices-table'
 import DatevExportButton from '@/components/invoices/datev-export-button'
 
 export default async function InvoicesPage() {
+  // Nutzer und Firmen kommen aus dem pro Request gecachten Resolver — das
+  // Layout hat sie ohnehin schon aufgelöst, der Aufruf kostet hier nichts mehr.
+  const { companyIds, companyNames } = await getAppSession()
   const supabase = await createClient()
-  
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
-    return null
-  }
-
-  const { data: companyUsers } = await supabase
-    .from('company_users')
-    .select('company_id')
-    .eq('user_id', user.id)
-
-  const companyIds = companyUsers?.map((cu) => cu.company_id) || []
-
-  // Get company data for displaying names
-  const { data: companies } = await supabase
-    .from('companies')
-    .select('id, name')
-    .in('id', companyIds)
-
-  const companyMap = new Map(companies?.map(c => [c.id, c.name]) || [])
 
   const { data: invoices, error } = await supabase
     .from('invoices')
-    .select('*')
+    .select(INVOICE_LIST_COLUMNS)
     .in('company_id', companyIds)
     .neq('status', 'draft')
     .order('created_at', { ascending: false })
@@ -70,9 +52,8 @@ export default async function InvoicesPage() {
           </Link>
         </div>
       ) : (
-        <InvoicesTable invoices={invoices || []} companyNames={Object.fromEntries(companyMap)} />
+        <InvoicesTable invoices={(invoices as never) || []} companyNames={companyNames} />
       )}
     </div>
   )
 }
-

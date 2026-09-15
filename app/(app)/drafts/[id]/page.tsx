@@ -1,17 +1,11 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
+import { getAppSession } from '@/lib/app-session'
 import DraftEditor from '@/components/drafts/draft-editor'
 
 export default async function DraftPage({ params }: { params: { id: string } }) {
+  const { companyIds } = await getAppSession()
   const supabase = await createClient()
-  
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
-    redirect('/login')
-  }
 
   const { data: draft, error } = await supabase
     .from('invoices')
@@ -23,15 +17,9 @@ export default async function DraftPage({ params }: { params: { id: string } }) 
     redirect('/drafts')
   }
 
-  // Check if user has access to this draft's company
-  const { data: companyUsers } = await supabase
-    .from('company_users')
-    .select('company_id')
-    .eq('user_id', user.id)
-    .eq('company_id', draft.company_id)
-    .single()
-
-  if (!companyUsers) {
+  // Zugriffsprüfung gegen die bereits geladenen Zugehörigkeiten — gleiche
+  // Bedingung wie vorher, nur ohne zusätzlichen Roundtrip.
+  if (!companyIds.includes(draft.company_id)) {
     redirect('/drafts')
   }
 

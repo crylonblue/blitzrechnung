@@ -4,6 +4,7 @@ import { format } from 'date-fns'
 import { de } from 'date-fns/locale'
 import type { Address, BankDetails } from '@/types'
 import { getBillingState } from '@/lib/billing'
+import { getAppSession } from '@/lib/app-session'
 import TrialConversionBanner from '@/components/dashboard/trial-conversion-banner'
 
 interface MissingCompanyData {
@@ -63,39 +64,19 @@ function checkCompanyData(company: {
 }
 
 export default async function DashboardPage() {
+  // Nutzer und Firmen kommen aus dem pro Request gecachten Resolver.
+  const { companyId, companyIds } = await getAppSession()
   const supabase = await createClient()
-  
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
 
-  if (!user) {
-    return null
-  }
-
-  // Get user's companies
-  const { data: companyUsers } = await supabase
-    .from('company_users')
-    .select('company_id')
-    .eq('user_id', user.id)
-
-  const companyIds = companyUsers?.map((cu) => cu.company_id) || []
-  
-  // Get company data for validation
-  const { data: company } = companyIds.length > 0
-    ? await supabase
-        .from('companies')
-        .select('name, address, tax_id, vat_id, bank_details')
-        .eq('id', companyIds[0])
-        .single()
-    : { data: null }
-  
-  const companyDataCheck = checkCompanyData(company)
-
-  // Get stats: open drafts count, the 5 most recent invoices, and all issued
-  // invoices (status, dates, amounts) to derive the cash-flow KPIs below.
-  const [billing, draftsResult, recentInvoicesResult, issuedInvoicesResult] = await Promise.all([
-    companyIds.length > 0 ? getBillingState(supabase, companyIds[0]) : Promise.resolve(null),
+  // Die Firmenprüfung braucht mehr Felder als der Resolver mitbringt, hängt aber
+  // an nichts hier — sie läuft deshalb parallel zu den Kennzahlen statt davor.
+  const [company_, billing, draftsResult, recentInvoicesResult, issuedInvoicesResult] = await Promise.all([
+    supabase
+      .from('companies')
+      .select('name, address, tax_id, vat_id, bank_details')
+      .eq('id', companyId)
+      .single(),
+    getBillingState(supabase, companyId),
     supabase
       .from('invoices')
       .select('id', { count: 'exact', head: true })
@@ -115,6 +96,8 @@ export default async function DashboardPage() {
       .neq('status', 'draft'),
   ])
 
+  const company = company_.data
+  const companyDataCheck = checkCompanyData(company)
   const draftsCount = draftsResult.count || 0
   const recentInvoices = recentInvoicesResult.data || []
 

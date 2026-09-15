@@ -1,25 +1,13 @@
 import { createClient } from '@/lib/supabase/server'
+import { getAppSession } from '@/lib/app-session'
 import ContactsTable from '@/components/contacts/contacts-table'
 import ContactsPageHeader from '@/components/contacts/contacts-page-header'
 import ContactsEmptyState from '@/components/contacts/contacts-empty-state'
 
 export default async function ContactsPage() {
+  // Nutzer und Firmen kommen aus dem pro Request gecachten Resolver.
+  const { companyIds } = await getAppSession()
   const supabase = await createClient()
-  
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
-    return null
-  }
-
-  const { data: companyUsers } = await supabase
-    .from('company_users')
-    .select('company_id')
-    .eq('user_id', user.id)
-
-  const companyIds = companyUsers?.map((cu) => cu.company_id) || []
 
   const { data: contacts, error } = await supabase
     .from('contacts')

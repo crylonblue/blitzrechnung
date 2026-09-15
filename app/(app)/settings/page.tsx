@@ -1,26 +1,21 @@
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server'
-import { redirect } from 'next/navigation'
 import CompanySettings from '@/components/settings/company-settings'
 import BillingSection from '@/components/settings/billing-section'
 import { getBillingState, earlyBirdSlotsLeft } from '@/lib/billing'
 import { loadPlanPricing } from '@/lib/stripe'
+import { getAppSession } from '@/lib/app-session'
 
 export default async function SettingsPage() {
+  // Nutzer kommt aus dem pro Request gecachten Resolver. Die Rollenprüfung
+  // unten bleibt eine eigene Abfrage: Sie filtert gezielt auf 'owner' und ist
+  // damit etwas anderes als die reine Firmenzugehörigkeit.
+  const { userId } = await getAppSession()
   const supabase = await createClient()
-  
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
 
-  if (!user) {
-    redirect('/login')
-  }
-
-  // Get user's first company (for MVP, we assume one company per user)
   const { data: companyUsers } = await supabase
     .from('company_users')
     .select('company_id, role')
-    .eq('user_id', user.id)
+    .eq('user_id', userId)
     .eq('role', 'owner')
     .limit(1)
     .single()
