@@ -96,10 +96,13 @@ export interface DnsRecord {
   type: string
   host: string
   value: string
-  verified?: boolean
+  /** Whether the domain can send without this record. */
+  required: boolean
+  /** Whether the provider currently sees the record in DNS. */
+  verified: boolean
 }
 
-// Helper type for email settings (Postmark integration)
+// Helper type for email settings (AhaSend integration)
 export interface EmailSettings {
   mode: 'default' | 'custom_domain'
   reply_to_email?: string
@@ -110,14 +113,14 @@ export interface EmailSettings {
   from_name?: string
   domain_verified?: boolean
   domain_verified_at?: string
-  postmark_domain_id?: number
-  // Postmark server for custom domain (each user gets their own server)
-  postmark_server_id?: number
-  postmark_server_token?: string
-  dns_records?: {
-    dkim?: DnsRecord
-    return_path?: DnsRecord
-  }
+  /**
+   * Which provider the custom domain is registered with. Companies onboarded
+   * on the old Postmark integration have no value here and have to run the
+   * domain setup again.
+   */
+  provider?: 'ahasend'
+  /** Records the customer has to publish. Shape varies by provider. */
+  dns_records?: DnsRecord[]
   // Invoice email template fields
   invoice_email_subject?: string
   invoice_email_body?: string

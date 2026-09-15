@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Company, Address, EmailSettings } from '@/types'
+import { Company, Address, DnsRecord, EmailSettings } from '@/types'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -22,6 +22,7 @@ import { Check, ChevronsUpDown, LoaderCircle, Copy, CheckCircle, XCircle, AlertC
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import { COUNTRIES } from '@/lib/countries'
+import { CUSTOM_DOMAIN_CONTACT_EMAIL, DEFAULT_SENDER_EMAIL } from '@/lib/config'
 import { isValidIban } from '@/lib/girocode'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from 'sonner'
@@ -35,6 +36,19 @@ interface CompanySettingsProps {
   /** Rendered into the "Tarif" tab; composed on the server so the billing
    *  state and Stripe prices are fetched there rather than in the browser. */
   billing?: React.ReactNode
+}
+
+/**
+ * Human-readable name for a DNS record. The provider returns records without
+ * labels, so we recognise the well-known shapes and otherwise fall back to the
+ * record type, which is still enough for a customer to paste it correctly.
+ */
+function dnsRecordLabel(record: DnsRecord): string {
+  if (record.host.includes('._domainkey')) return 'DKIM'
+  if (record.host.startsWith('_dmarc')) return 'DMARC'
+  if (record.value.startsWith('v=spf1') || record.value.includes('spf')) return 'SPF'
+  if (record.type === 'MX') return 'Empfang'
+  return 'Record'
 }
 
 const SETTINGS_TABS = ['company', 'invoices', 'email', 'api', 'buchhaltung', 'tarif'] as const
@@ -109,12 +123,9 @@ export default function CompanySettings({ company: initialCompany, billing }: Co
   const [countrySearchQuery, setCountrySearchQuery] = useState('')
   
   // Email domain setup state
-  const [isSettingUpDomain, setIsSettingUpDomain] = useState(false)
   const [isVerifyingDomain, setIsVerifyingDomain] = useState(false)
   const [isDeletingDomain, setIsDeletingDomain] = useState(false)
   const [deleteDomainDialogOpen, setDeleteDomainDialogOpen] = useState(false)
-  const [newDomainEmail, setNewDomainEmail] = useState('')
-  const [newDomainName, setNewDomainName] = useState(initialCompany.name || '')
 
   const handleSave = async () => {
     setIsSaving(true)
@@ -246,54 +257,6 @@ export default function CompanySettings({ company: initialCompany, billing }: Co
     }
   }
 
-  const handleSetupDomain = async () => {
-    if (!newDomainEmail || !newDomainName) {
-      toast.error('Bitte E-Mail-Adresse und Absendername eingeben')
-      return
-    }
-
-    setIsSettingUpDomain(true)
-    setError(null)
-
-    try {
-      const response = await fetch('/api/domains', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          from_email: newDomainEmail,
-          from_name: newDomainName,
-          reply_to_email: emailSettings.reply_to_email,
-        }),
-      })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Fehler beim Einrichten der Domain')
-      }
-
-      // Update local state immediately with the new settings
-      setEmailSettings({
-        ...emailSettings,
-        mode: 'custom_domain',
-        custom_domain: data.domain,
-        from_email: newDomainEmail,
-        from_name: newDomainName,
-        domain_verified: false,
-        dns_records: data.dns_records,
-      })
-
-      toast.success('Domain eingerichtet', {
-        description: 'Bitte fügen Sie die DNS-Einträge hinzu und verifizieren Sie die Domain.',
-      })
-      router.refresh()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Fehler beim Einrichten der Domain')
-    } finally {
-      setIsSettingUpDomain(false)
-    }
-  }
-
   const handleVerifyDomain = async () => {
     setIsVerifyingDomain(true)
     setError(null)
@@ -353,7 +316,6 @@ export default function CompanySettings({ company: initialCompany, billing }: Co
       })
 
       toast.success('Domain entfernt')
-      setNewDomainEmail('')
       setDeleteDomainDialogOpen(false)
       router.refresh()
     } catch (err) {
@@ -1009,10 +971,10 @@ export default function CompanySettings({ company: initialCompany, billing }: Co
                   </div>
                   <p className="text-sm text-meta">
                     {emailSettings.mode === 'default' 
-                      ? 'E-Mails werden über rechnung@blitzrechnung.de versendet.'
+                      ? `E-Mails werden über ${DEFAULT_SENDER_EMAIL} versendet.`
                       : emailSettings.domain_verified
                         ? `E-Mails werden über ${emailSettings.from_email} versendet.`
-                        : `E-Mails werden über rechnung@blitzrechnung.de versendet, bis ${emailSettings.custom_domain} verifiziert ist.`
+                        : `E-Mails werden über ${DEFAULT_SENDER_EMAIL} versendet, bis ${emailSettings.custom_domain} verifiziert ist.`
                     }
                   </p>
                 </div>
@@ -1077,102 +1039,74 @@ export default function CompanySettings({ company: initialCompany, billing }: Co
                         </div>
                       </div>
 
+                      {/* Domain from the previous provider: needs a fresh setup */}
+                      {emailSettings.provider !== 'ahasend' && (
+                        <div className="p-3 rounded border" style={{ borderColor: '#f59e0b', backgroundColor: '#fffbeb' }}>
+                          <div className="flex items-start gap-2">
+                            <AlertCircle className="h-4 w-4 mt-0.5 text-amber-500 shrink-0" />
+                            <div className="text-sm">
+                              <p className="font-medium">Domain muss neu eingerichtet werden</p>
+                              <p className="text-meta">
+                                Wir haben den E-Mail-Anbieter gewechselt. Richten Sie die Domain einmalig
+                                neu ein, um wieder von Ihrer eigenen Adresse zu versenden. Bis dahin
+                                versenden wir Ihre Rechnungen weiterhin über {DEFAULT_SENDER_EMAIL}.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       {/* DNS Records */}
-                      {emailSettings.dns_records && (
+                      {emailSettings.dns_records && emailSettings.dns_records.length > 0 && (
                         <div className="space-y-3">
                           <p className="text-sm font-medium">Erforderliche DNS-Einträge:</p>
-                          
-                          {/* DKIM Record */}
-                          {emailSettings.dns_records.dkim?.value && (
-                            <div 
+
+                          {emailSettings.dns_records.map((record, index) => (
+                            <div
+                              key={`${record.type}-${record.host}-${index}`}
                               className="p-3 rounded border"
-                              style={{ 
-                                borderColor: emailSettings.dns_records.dkim?.verified === true 
-                                  ? '#22c55e' 
-                                  : emailSettings.dns_records.dkim?.verified === false 
-                                    ? '#ef4444' 
+                              style={{
+                                borderColor: record.verified
+                                  ? '#22c55e'
+                                  : record.required
+                                    ? '#ef4444'
                                     : 'var(--border-default)',
-                                backgroundColor: emailSettings.dns_records.dkim?.verified === true 
-                                  ? '#f0fdf4' 
-                                  : emailSettings.dns_records.dkim?.verified === false 
-                                    ? '#fef2f2' 
-                                    : 'var(--background)'
+                                backgroundColor: record.verified
+                                  ? '#f0fdf4'
+                                  : record.required
+                                    ? '#fef2f2'
+                                    : 'var(--background)',
                               }}
                             >
                               <div className="flex items-center justify-between mb-1">
                                 <div className="flex items-center gap-2">
-                                  {emailSettings.dns_records.dkim?.verified === true ? (
+                                  {record.verified ? (
                                     <CheckCircle className="h-4 w-4 text-green-500" />
-                                  ) : emailSettings.dns_records.dkim?.verified === false ? (
+                                  ) : record.required ? (
                                     <XCircle className="h-4 w-4 text-red-500" />
                                   ) : (
                                     <AlertCircle className="h-4 w-4 text-zinc-400" />
                                   )}
-                                  <span className="text-xs font-medium uppercase text-meta">DKIM (TXT)</span>
+                                  <span className="text-xs font-medium uppercase text-meta">
+                                    {dnsRecordLabel(record)} ({record.type})
+                                  </span>
+                                  {!record.required && (
+                                    <span className="text-xs text-meta">optional</span>
+                                  )}
                                 </div>
                                 <Button
                                   variant="ghost"
                                   size="sm"
                                   className="h-6 px-2"
-                                  onClick={() => copyToClipboard(emailSettings.dns_records?.dkim?.value || '')}
+                                  onClick={() => copyToClipboard(record.value)}
                                 >
                                   <Copy className="h-3 w-3" />
                                 </Button>
                               </div>
-                              <p className="text-xs text-meta mb-1">Host: {emailSettings.dns_records.dkim?.host}</p>
-                              <p className="text-xs font-mono break-all">{emailSettings.dns_records.dkim?.value}</p>
+                              <p className="text-xs text-meta mb-1">Host: {record.host}</p>
+                              <p className="text-xs font-mono break-all">{record.value}</p>
                             </div>
-                          )}
-
-                          {/* Return Path Record */}
-                          {emailSettings.dns_records.return_path?.value && (
-                            <div 
-                              className="p-3 rounded border"
-                              style={{ 
-                                borderColor: emailSettings.dns_records.return_path?.verified === true 
-                                  ? '#22c55e' 
-                                  : emailSettings.dns_records.return_path?.verified === false 
-                                    ? '#ef4444' 
-                                    : 'var(--border-default)',
-                                backgroundColor: emailSettings.dns_records.return_path?.verified === true 
-                                  ? '#f0fdf4' 
-                                  : emailSettings.dns_records.return_path?.verified === false 
-                                    ? '#fef2f2' 
-                                    : 'var(--background)'
-                              }}
-                            >
-                              <div className="flex items-center justify-between mb-1">
-                                <div className="flex items-center gap-2">
-                                  {emailSettings.dns_records.return_path?.verified === true ? (
-                                    <CheckCircle className="h-4 w-4 text-green-500" />
-                                  ) : emailSettings.dns_records.return_path?.verified === false ? (
-                                    <XCircle className="h-4 w-4 text-red-500" />
-                                  ) : (
-                                    <AlertCircle className="h-4 w-4 text-zinc-400" />
-                                  )}
-                                  <span className="text-xs font-medium uppercase text-meta">Return-Path (CNAME)</span>
-                                </div>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-6 px-2"
-                                  onClick={() => copyToClipboard(emailSettings.dns_records?.return_path?.value || '')}
-                                >
-                                  <Copy className="h-3 w-3" />
-                                </Button>
-                              </div>
-                              <p className="text-xs text-meta mb-1">Host: {emailSettings.dns_records.return_path?.host}</p>
-                              <p className="text-xs font-mono break-all">{emailSettings.dns_records.return_path?.value}</p>
-                            </div>
-                          )}
-
-                          {/* Info if no DNS records available */}
-                          {!emailSettings.dns_records.dkim?.value &&
-                           !emailSettings.dns_records.return_path?.value && (
-                            <p className="text-sm text-meta">
-                              Keine DNS-Einträge erforderlich. Die Domain wird automatisch über Postmark verifiziert.
-                            </p>
-                          )}
+                          ))}
                         </div>
                       )}
 
@@ -1196,38 +1130,24 @@ export default function CompanySettings({ company: initialCompany, billing }: Co
                   ) : (
                     <div className="space-y-4">
                       <p className="text-sm text-meta">
-                        Richten Sie eine eigene Domain ein, um E-Mails von Ihrer Firmenadresse zu versenden.
-                        Sie müssen dafür DNS-Einträge bei Ihrem Domain-Anbieter hinzufügen.
+                        Standardmäßig versenden wir Ihre Rechnungen über {DEFAULT_SENDER_EMAIL}.
+                        Ihre Firmenadresse steht dabei als Antwortadresse im Absender.
                       </p>
 
-                      <div>
-                        <Label htmlFor="new_domain_email">Absender E-Mail-Adresse</Label>
-                        <Input
-                          id="new_domain_email"
-                          type="email"
-                          value={newDomainEmail}
-                          onChange={(e) => setNewDomainEmail(e.target.value)}
-                          className="mt-1.5"
-                          placeholder="rechnung@ihre-firma.de"
-                        />
+                      <div className="p-4 rounded-lg border" style={{ borderColor: 'var(--border-default)' }}>
+                        <p className="text-sm font-medium mb-1">Versand von Ihrer eigenen Domain</p>
+                        <p className="text-sm text-meta">
+                          Sie möchten Rechnungen von Ihrer eigenen Firmendomain versenden? Wir
+                          richten das für Sie ein. Schreiben Sie uns an{' '}
+                          <a
+                            href={`mailto:${CUSTOM_DOMAIN_CONTACT_EMAIL}?subject=${encodeURIComponent('Eigene Absender-Domain einrichten')}`}
+                            className="underline"
+                          >
+                            {CUSTOM_DOMAIN_CONTACT_EMAIL}
+                          </a>
+                          .
+                        </p>
                       </div>
-
-                      <div>
-                        <Label htmlFor="new_domain_name">Absender-Name</Label>
-                        <Input
-                          id="new_domain_name"
-                          type="text"
-                          value={newDomainName}
-                          onChange={(e) => setNewDomainName(e.target.value)}
-                          className="mt-1.5"
-                          placeholder="Muster GmbH"
-                        />
-                      </div>
-
-                      <Button onClick={handleSetupDomain} disabled={isSettingUpDomain || !newDomainEmail || !newDomainName}>
-                        {isSettingUpDomain && <LoaderCircle className="h-4 w-4 mr-2 animate-spin" />}
-                        Eigene Domain einrichten
-                      </Button>
                     </div>
                   )}
                 </div>
@@ -1335,7 +1255,7 @@ export default function CompanySettings({ company: initialCompany, billing }: Co
           <DialogHeader>
             <DialogTitle>Domain entfernen?</DialogTitle>
             <DialogDescription>
-              Möchten Sie die eigene Domain wirklich entfernen? E-Mails werden dann wieder über blitzrechnung.de versendet.
+              Möchten Sie die eigene Domain wirklich entfernen? E-Mails werden dann wieder über {DEFAULT_SENDER_EMAIL} versendet.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
