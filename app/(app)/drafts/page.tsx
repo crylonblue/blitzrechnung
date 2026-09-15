@@ -1,38 +1,17 @@
 import { createClient } from '@/lib/supabase/server'
+import { getAppSession } from '@/lib/app-session'
+import { DRAFT_LIST_COLUMNS } from '@/lib/list-columns'
 import DraftsList from '@/components/drafts/drafts-list'
 import DraftsTable from '@/components/drafts/drafts-table'
 
 export default async function DraftsPage() {
+  // Nutzer und Firmen kommen aus dem pro Request gecachten Resolver.
+  const { companyIds, companyNames } = await getAppSession()
   const supabase = await createClient()
-  
-  // Get user's companies
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
 
-  if (!user) {
-    return null
-  }
-
-  const { data: companyUsers } = await supabase
-    .from('company_users')
-    .select('company_id')
-    .eq('user_id', user.id)
-
-  const companyIds = companyUsers?.map((cu) => cu.company_id) || []
-
-  // Get company data for displaying names
-  const { data: companies } = await supabase
-    .from('companies')
-    .select('id, name')
-    .in('id', companyIds)
-
-  const companyMap = new Map(companies?.map(c => [c.id, c.name]) || [])
-
-  // Get all drafts for user's companies
   const { data: drafts, error } = await supabase
     .from('invoices')
-    .select('*')
+    .select(DRAFT_LIST_COLUMNS)
     .in('company_id', companyIds)
     .eq('status', 'draft')
     .order('created_at', { ascending: false })
@@ -65,7 +44,7 @@ export default async function DraftsPage() {
           <DraftsList drafts={[]} showEmptyLink />
         </div>
       ) : (
-        <DraftsTable drafts={drafts || []} companyNames={Object.fromEntries(companyMap)} />
+        <DraftsTable drafts={(drafts as never) || []} companyNames={companyNames} />
       )}
     </div>
   )

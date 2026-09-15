@@ -1,59 +1,23 @@
 import AppLayout from '@/components/layout/app-layout'
 import { createClient } from '@/lib/supabase/server'
 import { getBillingState } from '@/lib/billing'
-import { redirect } from 'next/navigation'
+import { getAppSession } from '@/lib/app-session'
 
 export default async function Layout({ children }: { children: React.ReactNode }) {
+  // Vorher: getUser() → company_users → companies → user_profiles → Abrechnung,
+  // fünf Aufrufe streng nacheinander. Der Resolver bündelt die ersten vier zu
+  // zwei (ein Auth-Aufruf, ein eingebetteter Select) und teilt das Ergebnis mit
+  // den Seiten darunter, die es bisher allesamt erneut geholt haben.
+  const session = await getAppSession()
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
-    redirect('/login')
-  }
-
-  // Get user's first company
-  const { data: companyUsers } = await supabase
-    .from('company_users')
-    .select('company_id')
-    .eq('user_id', user.id)
-    .limit(1)
-    .single()
-
-  // Redirect to onboarding if user has no company
-  if (!companyUsers) {
-    redirect('/onboarding')
-  }
-
-  const companyId = companyUsers.company_id
-  let companyName = 'Mein Unternehmen'
-  
-  const { data: company } = await supabase
-    .from('companies')
-    .select('name')
-    .eq('id', companyUsers.company_id)
-    .single()
-  
-  if (company) {
-    companyName = company.name
-  }
-
-  // Get user profile
-  const { data: userProfile } = await supabase
-    .from('user_profiles')
-    .select('name, email')
-    .eq('id', user.id)
-    .single()
-
-  const billing = await getBillingState(supabase, companyId)
+  const billing = await getBillingState(supabase, session.companyId)
 
   return (
     <AppLayout
-      companyName={companyName}
-      userEmail={userProfile?.email || user.email || ''}
-      userName={userProfile?.name}
-      companyId={companyId}
+      companyName={session.companyName}
+      userEmail={session.email}
+      userName={session.userName ?? undefined}
+      companyId={session.companyId}
       inTrial={billing.inTrial}
       entitled={billing.entitled}
       trialDaysLeft={billing.trialDaysLeft}
@@ -62,4 +26,3 @@ export default async function Layout({ children }: { children: React.ReactNode }
     </AppLayout>
   )
 }
-

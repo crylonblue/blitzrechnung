@@ -1,28 +1,10 @@
-import { createClient } from '@/lib/supabase/server'
-import { redirect } from 'next/navigation'
+import { getAppSession } from '@/lib/app-session'
 import NewDraftClient from './new-draft-client'
 
 export default async function NewDraftPage() {
-  const supabase = await createClient()
-  
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  // Der Resolver hat Nutzer und Firma bereits aufgelöst und leitet selbst nach
+  // /login bzw. /onboarding um, wenn eines davon fehlt.
+  const { companyId } = await getAppSession()
 
-  if (!user) {
-    redirect('/login')
-  }
-
-  const { data: companyUser } = await supabase
-    .from('company_users')
-    .select('company_id')
-    .eq('user_id', user.id)
-    .limit(1)
-    .single()
-
-  if (!companyUser) {
-    redirect('/onboarding')
-  }
-
-  return <NewDraftClient companyId={companyUser.company_id} />
+  return <NewDraftClient companyId={companyId} />
 }

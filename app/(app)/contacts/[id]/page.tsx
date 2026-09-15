@@ -1,17 +1,11 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
+import { getAppSession } from '@/lib/app-session'
 import ContactEditor from '@/components/contacts/contact-editor'
 
 export default async function ContactPage({ params }: { params: { id: string } }) {
+  const { companyIds } = await getAppSession()
   const supabase = await createClient()
-  
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
-    redirect('/login')
-  }
 
   const { data: contact, error } = await supabase
     .from('contacts')
@@ -23,15 +17,8 @@ export default async function ContactPage({ params }: { params: { id: string } }
     redirect('/contacts')
   }
 
-  // Check if user has access
-  const { data: companyUsers } = await supabase
-    .from('company_users')
-    .select('company_id')
-    .eq('user_id', user.id)
-    .eq('company_id', contact.company_id)
-    .single()
-
-  if (!companyUsers) {
+  // Zugriffsprüfung gegen die bereits geladenen Zugehörigkeiten.
+  if (!companyIds.includes(contact.company_id)) {
     redirect('/contacts')
   }
 

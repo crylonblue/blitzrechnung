@@ -1,20 +1,14 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
+import { getAppSession } from '@/lib/app-session'
 import InvoiceView from '@/components/invoices/invoice-view'
 import StatusUpdater from '@/components/invoices/status-updater'
 import InvoiceActions from '@/components/invoices/invoice-actions'
 import { getStatusLabel, getStatusClass } from '@/lib/invoice-utils'
 
 export default async function InvoicePage({ params }: { params: { id: string } }) {
+  const { companyIds } = await getAppSession()
   const supabase = await createClient()
-  
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
-    redirect('/login')
-  }
 
   const { data: invoice, error } = await supabase
     .from('invoices')
@@ -26,31 +20,24 @@ export default async function InvoicePage({ params }: { params: { id: string } }
     redirect('/invoices')
   }
 
-  // Check if user has access
-  const { data: companyUsers } = await supabase
-    .from('company_users')
-    .select('company_id')
-    .eq('user_id', user.id)
-    .eq('company_id', invoice.company_id)
-    .single()
-
-  if (!companyUsers) {
+  // Zugriffsprüfung gegen die bereits geladenen Zugehörigkeiten.
+  if (!companyIds.includes(invoice.company_id)) {
     redirect('/invoices')
   }
 
-  // Get company data
-  const { data: company } = await supabase
-    .from('companies')
-    .select('*')
-    .eq('id', invoice.company_id)
-    .single()
+  // Firmendaten und die Frage nach einer vorhandenen Stornorechnung hängen
+  // nicht voneinander ab — parallel statt nacheinander.
+  const [companyResult, cancellationResult] = await Promise.all([
+    supabase.from('companies').select('*').eq('id', invoice.company_id).single(),
+    supabase
+      .from('invoices')
+      .select('id')
+      .eq('cancelled_invoice_id', invoice.id)
+      .maybeSingle(),
+  ])
 
-  // Does a Stornorechnung already exist for this invoice?
-  const { data: existingCancellation } = await supabase
-    .from('invoices')
-    .select('id')
-    .eq('cancelled_invoice_id', invoice.id)
-    .maybeSingle()
+  const company = companyResult.data
+  const existingCancellation = cancellationResult.data
 
   return (
     <div className="mx-auto max-w-7xl px-6 py-12">
