@@ -500,6 +500,42 @@ const openApiSpec = {
         },
       },
     },
+    '/invoices/{id}/cancel': {
+      post: {
+        tags: ['Invoices'],
+        summary: 'Stornorechnung erstellen',
+        description:
+          'Erzeugt eine Stornorechnung zu einer finalisierten Rechnung. Die Stornorechnung erhält eine eigene Nummer aus dem Storno-Nummernkreis, PDF und XRechnung/ZUGFeRD-XML werden erzeugt, und die ursprüngliche Rechnung wechselt auf den Status "cancelled". Entwürfe können nicht storniert werden.',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          '200': {
+            description: 'Stornorechnung erstellt',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    data: { $ref: '#/components/schemas/Invoice' },
+                    pdf_url: { type: 'string', nullable: true },
+                    xml_url: { type: 'string', nullable: true },
+                    original_invoice: {
+                      type: 'object',
+                      properties: {
+                        id: { type: 'string', format: 'uuid' },
+                        invoice_number: { type: 'string' },
+                        status: { type: 'string', example: 'cancelled' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '400': { description: 'Storno nicht möglich (z.B. Entwurf oder bereits storniert)', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '404': { description: 'Nicht gefunden', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
     '/products': {
       get: {
         tags: ['Products'],
