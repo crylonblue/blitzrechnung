@@ -9,11 +9,22 @@ import Stripe from 'stripe'
  * env vars, which keeps the webhook honest about what someone actually bought.
  */
 
-export type Plan = 'basis' | 'pro'
-export type Interval = 'month' | 'year'
+export {
+  EARLY_BIRD_SLOTS,
+  earlyBirdApplies,
+  resolveDisplayPrice,
+  intervalSuffix,
+} from './plan-pricing'
+export type { Plan, Interval, PriceInfo, PlanPricing } from './plan-pricing'
 
-/** How many companies may claim the launch price. */
-export const EARLY_BIRD_SLOTS = 100
+import {
+  earlyBirdApplies,
+  EMPTY_PRICING,
+  type Plan,
+  type Interval,
+  type PriceInfo,
+  type PlanPricing,
+} from './plan-pricing'
 
 let cached: Stripe | null = null
 
@@ -89,29 +100,8 @@ export function appUrl(): string {
   return 'http://localhost:3000'
 }
 
-export interface PriceInfo {
-  id: string
-  /** Amount in cents the customer actually pays. No VAT is added or carved
-   *  out: the seller is a Kleinunternehmer nach § 19 UStG. */
-  unitAmount: number | null
-  currency: string
-}
 
-export interface PlanPricing {
-  basisMonthly: PriceInfo | null
-  basisYearly: PriceInfo | null
-  proMonthly: PriceInfo | null
-  proYearly: PriceInfo | null
-  proEarly: PriceInfo | null
-}
 
-const EMPTY_PRICING: PlanPricing = {
-  basisMonthly: null,
-  basisYearly: null,
-  proMonthly: null,
-  proYearly: null,
-  proEarly: null,
-}
 
 /**
  * Reads live amounts from Stripe so the settings screen can never advertise a
@@ -126,7 +116,19 @@ export async function loadPlanPricing(): Promise<PlanPricing> {
     if (!id) return null
     try {
       const price = await stripe.prices.retrieve(id)
-      return { id: price.id, unitAmount: price.unit_amount, currency: price.currency }
+      const recurring = price.recurring
+      return {
+        id: price.id,
+        unitAmount: price.unit_amount,
+        currency: price.currency,
+        interval:
+          recurring?.interval === 'month'
+            ? 'month'
+            : recurring?.interval === 'year'
+              ? 'year'
+              : null,
+        intervalCount: recurring?.interval_count ?? 1,
+      }
     } catch (err) {
       console.error(`Could not load Stripe price ${id}:`, err)
       return null
@@ -143,3 +145,22 @@ export async function loadPlanPricing(): Promise<PlanPricing> {
 
   return { basisMonthly, basisYearly, proMonthly, proYearly, proEarly }
 }
+
+
+/**
+ * The price id checkout should charge for a plan/interval.
+ * `earlyBirdAvailable` is the caller's answer to "are launch slots left?" —
+ * looking that up needs a service-role client, which is why it isn't done here.
+ */
+export function resolvePriceId(
+  plan: Plan,
+  interval: Interval,
+  earlyBirdAvailable: boolean
+): string | undefined {
+  if (earlyBirdApplies(plan, interval, earlyBirdAvailable)) {
+    const early = earlyBirdPriceId()
+    if (early) return early
+  }
+  return priceIdFor(plan, interval)
+}
+
