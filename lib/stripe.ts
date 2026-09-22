@@ -9,11 +9,22 @@ import Stripe from 'stripe'
  * env vars, which keeps the webhook honest about what someone actually bought.
  */
 
-export type Plan = 'basis' | 'pro'
-export type Interval = 'month' | 'year'
+export {
+  EARLY_BIRD_SLOTS,
+  earlyBirdApplies,
+  resolveDisplayPrice,
+  intervalSuffix,
+} from './plan-pricing'
+export type { Plan, Interval, PriceInfo, PlanPricing } from './plan-pricing'
 
-/** How many companies may claim the launch price. */
-export const EARLY_BIRD_SLOTS = 100
+import {
+  earlyBirdApplies,
+  EMPTY_PRICING,
+  type Plan,
+  type Interval,
+  type PriceInfo,
+  type PlanPricing,
+} from './plan-pricing'
 
 let cached: Stripe | null = null
 
@@ -47,8 +58,15 @@ export function priceIdFor(plan: Plan, interval: Interval): string | undefined {
     : env('STRIPE_PRICE_PRO_YEARLY')
 }
 
-export function earlyBirdPriceId(): string | undefined {
-  return env('STRIPE_PRICE_PRO_EARLY')
+/**
+ * The launch price for an interval. `STRIPE_PRICE_PRO_EARLY` is the monthly one
+ * and has existed since launch; the yearly counterpart is optional — leave it
+ * unset and the offer simply stays monthly-only.
+ */
+export function earlyBirdPriceId(interval: Interval): string | undefined {
+  return interval === 'year'
+    ? env('STRIPE_PRICE_PRO_EARLY_YEARLY')
+    : env('STRIPE_PRICE_PRO_EARLY')
 }
 
 /**
@@ -60,7 +78,8 @@ export function planForPriceId(priceId: string | null | undefined): Plan | null 
   if (
     priceId === env('STRIPE_PRICE_PRO_MONTHLY') ||
     priceId === env('STRIPE_PRICE_PRO_YEARLY') ||
-    priceId === env('STRIPE_PRICE_PRO_EARLY')
+    priceId === env('STRIPE_PRICE_PRO_EARLY') ||
+    priceId === env('STRIPE_PRICE_PRO_EARLY_YEARLY')
   ) {
     return 'pro'
   }
@@ -74,8 +93,12 @@ export function planForPriceId(priceId: string | null | undefined): Plan | null 
 }
 
 export function isEarlyBirdPrice(priceId: string | null | undefined): boolean {
-  const early = earlyBirdPriceId()
-  return Boolean(priceId && early && priceId === early)
+  if (!priceId) return false
+  // Both launch prices claim a slot — otherwise a yearly launch subscriber
+  // would take the offer without counting against the 100.
+  return (
+    priceId === earlyBirdPriceId('month') || priceId === earlyBirdPriceId('year')
+  )
 }
 
 /**
@@ -89,29 +112,8 @@ export function appUrl(): string {
   return 'http://localhost:3000'
 }
 
-export interface PriceInfo {
-  id: string
-  /** Amount in cents the customer actually pays. No VAT is added or carved
-   *  out: the seller is a Kleinunternehmer nach § 19 UStG. */
-  unitAmount: number | null
-  currency: string
-}
 
-export interface PlanPricing {
-  basisMonthly: PriceInfo | null
-  basisYearly: PriceInfo | null
-  proMonthly: PriceInfo | null
-  proYearly: PriceInfo | null
-  proEarly: PriceInfo | null
-}
 
-const EMPTY_PRICING: PlanPricing = {
-  basisMonthly: null,
-  basisYearly: null,
-  proMonthly: null,
-  proYearly: null,
-  proEarly: null,
-}
 
 /**
  * Reads live amounts from Stripe so the settings screen can never advertise a
@@ -126,20 +128,53 @@ export async function loadPlanPricing(): Promise<PlanPricing> {
     if (!id) return null
     try {
       const price = await stripe.prices.retrieve(id)
-      return { id: price.id, unitAmount: price.unit_amount, currency: price.currency }
+      const recurring = price.recurring
+      return {
+        id: price.id,
+        unitAmount: price.unit_amount,
+        currency: price.currency,
+        interval:
+          recurring?.interval === 'month'
+            ? 'month'
+            : recurring?.interval === 'year'
+              ? 'year'
+              : null,
+        intervalCount: recurring?.interval_count ?? 1,
+      }
     } catch (err) {
       console.error(`Could not load Stripe price ${id}:`, err)
       return null
     }
   }
 
-  const [basisMonthly, basisYearly, proMonthly, proYearly, proEarly] = await Promise.all([
-    fetchPrice(priceIdFor('basis', 'month')),
-    fetchPrice(priceIdFor('basis', 'year')),
-    fetchPrice(priceIdFor('pro', 'month')),
-    fetchPrice(priceIdFor('pro', 'year')),
-    fetchPrice(earlyBirdPriceId()),
-  ])
+  const [basisMonthly, basisYearly, proMonthly, proYearly, proEarly, proEarlyYearly] =
+    await Promise.all([
+      fetchPrice(priceIdFor('basis', 'month')),
+      fetchPrice(priceIdFor('basis', 'year')),
+      fetchPrice(priceIdFor('pro', 'month')),
+      fetchPrice(priceIdFor('pro', 'year')),
+      fetchPrice(earlyBirdPriceId('month')),
+      fetchPrice(earlyBirdPriceId('year')),
+    ])
 
-  return { basisMonthly, basisYearly, proMonthly, proYearly, proEarly }
+  return { basisMonthly, basisYearly, proMonthly, proYearly, proEarly, proEarlyYearly }
 }
+
+
+/**
+ * The price id checkout should charge for a plan/interval.
+ * `earlyBirdAvailable` is the caller's answer to "are launch slots left?" —
+ * looking that up needs a service-role client, which is why it isn't done here.
+ */
+export function resolvePriceId(
+  plan: Plan,
+  interval: Interval,
+  earlyBirdAvailable: boolean
+): string | undefined {
+  const early = earlyBirdPriceId(interval)
+  if (earlyBirdApplies(plan, interval, earlyBirdAvailable, Boolean(early))) {
+    return early
+  }
+  return priceIdFor(plan, interval)
+}
+

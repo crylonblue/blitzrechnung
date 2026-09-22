@@ -8,7 +8,13 @@ import { toast } from 'sonner'
 import { format } from 'date-fns'
 import { de } from 'date-fns/locale'
 // Type-only: keeps the Stripe SDK out of the client bundle.
-import type { PlanPricing, PriceInfo, Plan, Interval } from '@/lib/stripe'
+import {
+  earlyBirdApplies,
+  earlyBirdPrice,
+  resolveDisplayPrice,
+  intervalSuffix,
+} from '@/lib/plan-pricing'
+import type { PlanPricing, PriceInfo, Plan, Interval } from '@/lib/plan-pricing'
 import type { BillingState } from '@/lib/billing'
 
 interface BillingSectionProps {
@@ -126,13 +132,24 @@ export default function BillingSection({ billing, pricing, earlyBirdSlotsLeft }:
     )
   }
 
-  const proPrice = earlyBirdActive
-    ? pricing.proEarly
-    : interval === 'year'
-      ? pricing.proYearly
-      : pricing.proMonthly
-  const basisPrice = interval === 'year' ? pricing.basisYearly : pricing.basisMonthly
-  const suffix = interval === 'year' ? '/ Jahr' : '/ Monat'
+  // Dieselbe Regel, die der Checkout zum Abrechnen benutzt. Vorher entschied
+  // die Oberfläche eigenständig und zeigte den Launch-Preis auch bei
+  // Jahresauswahl an — berechnet wurde dann aber der reguläre Jahrespreis.
+  const proPrice = resolveDisplayPrice(pricing, 'pro', interval, earlyBirdActive)
+  const basisPrice = resolveDisplayPrice(pricing, 'basis', interval, earlyBirdActive)
+
+  // Das Suffix kommt aus dem, was Stripe wirklich abrechnet, nicht aus dem
+  // Umschalter — sonst kann ein Monatspreis als "/ Jahr" ausgewiesen werden.
+  const suffixFor = (price: PriceInfo | null) => intervalSuffix(price, interval)
+
+  // Der Launch-Hinweis erscheint genau dann, wenn der Launch-Preis für das
+  // gewählte Intervall auch wirklich abgerechnet wird.
+  const earlyBirdShown = earlyBirdApplies(
+    'pro',
+    interval,
+    earlyBirdActive,
+    Boolean(earlyBirdPrice(pricing, interval))
+  )
 
   return (
     <div>
@@ -170,7 +187,7 @@ export default function BillingSection({ billing, pricing, earlyBirdSlotsLeft }:
           <PlanCard
             title="Basis"
             price={formatNet(basisPrice)}
-            suffix={suffix}
+            suffix={suffixFor(basisPrice)}
             features={['Unbegrenzt viele Rechnungen', 'ZUGFeRD 2.3 & XRechnung', '1 Nutzer']}
             loading={pendingPlan === 'basis'}
             disabled={pendingPlan !== null || !basisPrice}
@@ -179,13 +196,12 @@ export default function BillingSection({ billing, pricing, earlyBirdSlotsLeft }:
           <PlanCard
             title="Pro"
             badge={
-              earlyBirdActive
+              earlyBirdShown
                 ? `Launch-Angebot · noch ${earlyBirdSlotsLeft} von 100`
                 : 'Empfohlen'
             }
             price={formatNet(proPrice)}
-            // The launch price is monthly-only, so don't imply a yearly term.
-            suffix={earlyBirdActive ? '/ Monat' : suffix}
+            suffix={suffixFor(proPrice)}
             features={['Alles aus Basis', 'API-Zugriff für alle Funktionen', 'Bis zu 5 Nutzer']}
             loading={pendingPlan === 'pro'}
             disabled={pendingPlan !== null || !proPrice}

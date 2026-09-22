@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server'
-import { getStripe, priceIdFor, earlyBirdPriceId, appUrl, type Plan, type Interval } from '@/lib/stripe'
+import { getStripe, resolvePriceId, earlyBirdPriceId, appUrl, type Plan, type Interval } from '@/lib/stripe'
 import { earlyBirdSlotsLeft } from '@/lib/billing'
 
 // Tags these sessions in the Dashboard so checkout flows stay comparable.
@@ -39,11 +39,15 @@ export async function POST(request: NextRequest) {
     // The launch offer replaces the Pro monthly price while slots remain. Using
     // a separate price rather than a coupon means the subscription carries the
     // 5,00 € forever on its own, with no discount line on the invoice.
-    let priceId = priceIdFor(plan, interval)
-    if (plan === 'pro' && interval === 'month') {
-      const early = earlyBirdPriceId()
-      if (early && (await earlyBirdSlotsLeft(service)) > 0) priceId = early
-    }
+    //
+    // resolvePriceId holds the rule; the plan picker calls the same one, so
+    // what is shown and what is charged cannot drift apart.
+    // Ob für dieses Intervall überhaupt ein Launch-Preis hinterlegt ist,
+    // entscheidet resolvePriceId selbst — hier zählt nur, ob noch Plätze frei
+    // sind. Der Slot-Zähler wird nur abgefragt, wenn ein Launch-Preis existiert.
+    const earlyBirdAvailable =
+      Boolean(earlyBirdPriceId(interval)) && (await earlyBirdSlotsLeft(service)) > 0
+    const priceId = resolvePriceId(plan, interval, earlyBirdAvailable)
     if (!priceId) {
       return NextResponse.json({ error: 'Dieser Tarif ist derzeit nicht verfügbar' }, { status: 400 })
     }
