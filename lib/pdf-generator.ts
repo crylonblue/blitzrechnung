@@ -1,4 +1,4 @@
-import { PDFDocument, rgb } from "pdf-lib";
+import { PDFDocument, rgb, type PDFPage } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -42,6 +42,12 @@ const FOOTER_Y = MARGIN_BOTTOM + 60;
 // length of the line-item table.
 const GIROCODE_SIZE = 72;
 const GIROCODE_BOTTOM = FOOTER_Y + 34;
+
+// Lowest baseline body content may occupy. Below it sits the footer rule, so
+// anything that would cross it belongs on the next page instead.
+const CONTENT_BOTTOM = FOOTER_Y + 40;
+// Vertical room the Girocode band claims, expressed in the content flow.
+const GIROCODE_BLOCK_HEIGHT = GIROCODE_BOTTOM + GIROCODE_SIZE + 10 - CONTENT_BOTTOM;
 
 // Colors
 const COLOR_BLACK = rgb(0, 0, 0);
@@ -150,7 +156,14 @@ export async function generateInvoicePDF(
   const { isCancellation = false, originalInvoiceNumber, showGirocode = true } = options;
   
   const pdfDoc = await PDFDocument.create();
-  const page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+
+  // Every page the invoice grows onto, in order. `page` is the one currently
+  // being drawn, and every helper below targets it — so a page break is just a
+  // reassignment. Footers and page numbers are drawn across `pages` at the very
+  // end, once the final count is known.
+  const pages: PDFPage[] = [];
+  let page: PDFPage = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+  pages.push(page);
   
   pdfDoc.registerFontkit(fontkit);
   const helvetica = await pdfDoc.embedFont(FONT_REGULAR, { subset: true });
@@ -404,6 +417,39 @@ export async function generateInvoicePDF(
   y -= 20;
 
   // ===========================================
+  // Pagination
+  // ===========================================
+
+  // A long invoice flows onto further pages instead of being drawn into — and
+  // eventually straight past — the footer. Continuation pages repeat a short
+  // header and the table head so a reader always knows what they are looking at.
+  let blocksOnPage = 1; // the letterhead already occupies page one
+
+  const startPage = () => {
+    page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+    pages.push(page);
+    y = PAGE_HEIGHT - MARGIN_TOP;
+    blocksOnPage = 0;
+
+    const continued =
+      language === 'de' ? `${invoiceTitle} - Fortsetzung` : `${invoiceTitle} - continued`;
+    drawText(continued, MARGIN_LEFT, y, { size: 8, color: COLOR_GRAY });
+    y -= 24;
+  };
+
+  /**
+   * Break to a new page when `needed` points of vertical space are no longer
+   * available, running `onNewPage` once the fresh page is open. Never breaks on
+   * a page that is still empty: a block taller than a whole page has to overflow
+   * somewhere, and an endless break loop is worse than one overlong row.
+   */
+  const ensureSpace = (needed: number, onNewPage?: () => void) => {
+    if (y - needed >= CONTENT_BOTTOM || blocksOnPage === 0) return;
+    startPage();
+    onNewPage?.();
+  };
+
+  // ===========================================
   // SECTION 5: Line Items Table
   // ===========================================
   
@@ -423,20 +469,24 @@ export async function generateInvoicePDF(
     ? { description: 'Beschreibung', quantity: 'Menge', unit: 'Einheit', unitPrice: 'Einzelpreis', total: 'Gesamtpreis' }
     : { description: 'Description', quantity: 'Qty', unit: 'Unit', unitPrice: 'Unit Price', total: 'Total' };
 
-  drawText(tableHeaders.description, col.description, y, { font: helveticaBold, size: 9 });
-  drawTextRight(tableHeaders.quantity, col.quantity + 40, y, { font: helveticaBold, size: 9 });
-  drawText(tableHeaders.unit, col.unit, y, { font: helveticaBold, size: 9 });
-  drawTextRight(tableHeaders.unitPrice, col.unitPrice + 55, y, { font: helveticaBold, size: 9 });
-  drawTextRight(tableHeaders.total, col.total, y, { font: helveticaBold, size: 9 });
+  // Drawn once at the top of the table and again on every continuation page.
+  const drawTableHeader = () => {
+    drawText(tableHeaders.description, col.description, y, { font: helveticaBold, size: 9 });
+    drawTextRight(tableHeaders.quantity, col.quantity + 40, y, { font: helveticaBold, size: 9 });
+    drawText(tableHeaders.unit, col.unit, y, { font: helveticaBold, size: 9 });
+    drawTextRight(tableHeaders.unitPrice, col.unitPrice + 55, y, { font: helveticaBold, size: 9 });
+    drawTextRight(tableHeaders.total, col.total, y, { font: helveticaBold, size: 9 });
 
-  // Header bottom border
-  y -= 5;
-  page.drawLine({
-    start: { x: tableLeft, y },
-    end: { x: tableRight, y },
-    thickness: 0.5,
-    color: COLOR_BLACK,
-  });
+    // Header bottom border
+    y -= 5;
+    page.drawLine({
+      start: { x: tableLeft, y },
+      end: { x: tableRight, y },
+      thickness: 0.5,
+      color: COLOR_BLACK,
+    });
+    y -= 18;
+  };
 
   // All amounts come from the shared EN 16931 calculator, so the PDF, the
   // embedded XRechnung and the stored totals are guaranteed identical.
@@ -450,14 +500,28 @@ export async function generateInvoicePDF(
     }))
   );
 
+  // The VAT breakdown is needed before the table is drawn: the height of the
+  // totals block decides whether the last row still fits on the current page.
+  const sortedBreakdown = [...totals.vatBreakdown].sort((a, b) => a.rate - b.rate);
+  // Mirrors the totals drawing below: leading gap, net line, one line per VAT
+  // group, separator, gross line.
+  const totalsBlockHeight = 44 + 16 * sortedBreakdown.length;
+
+  drawTableHeader();
+
   // Table rows
-  y -= 18;
   const maxDescWidth = CONTENT_WIDTH * 0.45;
   const descLineHeight = 14;
 
   invoice.items.forEach((item, index) => {
     const itemTotal = totals.lineNets[index];
     const descLines = wrapText(sanitizeText(item.description), maxDescWidth, helvetica, 10);
+    const rowHeight = Math.max(20, descLines.length * descLineHeight + 6);
+
+    // The totals block stays with the table: the last row reserves the space for
+    // both at once, so no page ends with the final position cut off from its sums.
+    const isLastRow = index === invoice.items.length - 1;
+    ensureSpace(rowHeight + (isLastRow ? totalsBlockHeight : 0), drawTableHeader);
 
     // Description wraps within its column; qty/price stay on the first line
     descLines.forEach((line, lineIndex) => {
@@ -477,8 +541,8 @@ export async function generateInvoicePDF(
     // Total
     drawTextRight(formatCurrency(itemTotal, language), col.total, y);
 
-    const rowHeight = Math.max(20, descLines.length * descLineHeight + 6);
     y -= rowHeight;
+    blocksOnPage++;
   });
 
   // ===========================================
@@ -500,7 +564,6 @@ export async function generateInvoicePDF(
   y -= 16;
 
   // VAT lines — one per (category, rate) breakdown, matching the XRechnung.
-  const sortedBreakdown = [...totals.vatBreakdown].sort((a, b) => a.rate - b.rate);
   for (const g of sortedBreakdown) {
     const vatLabel =
       g.category === 'E'
@@ -541,8 +604,10 @@ export async function generateInvoicePDF(
   ];
   for (const reason of exemptionReasons) {
     for (const wrapped of wrapText(sanitizeText(reason), CONTENT_WIDTH, helvetica, 9)) {
+      ensureSpace(12);
       drawText(wrapped, MARGIN_LEFT, y, { size: 9, color: COLOR_GRAY });
       y -= 12;
+      blocksOnPage++;
     }
   }
 
@@ -557,8 +622,10 @@ export async function generateInvoicePDF(
     for (const line of outroLines) {
       const wrappedLines = wrapText(sanitizeText(line), CONTENT_WIDTH, helvetica, 10);
       for (const wrappedLine of wrappedLines) {
+        ensureSpace(14);
         drawText(wrappedLine, MARGIN_LEFT, y);
         y -= 14;
+        blocksOnPage++;
       }
     }
   }
@@ -583,11 +650,13 @@ export async function generateInvoicePDF(
           : `Invoice ${invoice.invoiceNumber}`,
     });
 
-    // The generator emits a single page, so a long invoice can flow down into
-    // this band. Rather than overlap the payment note, the code steps aside.
-    const hasRoom = y > GIROCODE_BOTTOM + GIROCODE_SIZE + 10;
+    if (payload) {
+      // The code is anchored to a fixed band above the footer so it lands in the
+      // same place on every invoice. Should the content have flowed into that
+      // band, the code moves to a fresh page rather than being dropped: a
+      // missing Girocode means the customer retypes an IBAN by hand.
+      ensureSpace(GIROCODE_BLOCK_HEIGHT);
 
-    if (payload && hasRoom) {
       const matrix = encodeQrMatrix(payload);
       const runs = qrMatrixToRuns(matrix, GIROCODE_SIZE);
       const qrLeft = MARGIN_LEFT;
@@ -652,103 +721,113 @@ export async function generateInvoicePDF(
   // SECTION 8: Footer (4 Columns)
   // ===========================================
 
-  const footerY = FOOTER_Y;
-  const footerFontSize = 8;
-  const footerLineHeight = 11;
-  const footerColWidth = CONTENT_WIDTH / 4;
-  const footerCols = [
-    MARGIN_LEFT,
-    MARGIN_LEFT + footerColWidth,
-    MARGIN_LEFT + footerColWidth * 2,
-    MARGIN_LEFT + footerColWidth * 3,
-  ];
+  // Every page carries the footer; it is drawn at the end, when the page
+  // count that the page numbers need is finally known.
+  const drawFooter = () => {
+    const footerY = FOOTER_Y;
+    const footerFontSize = 8;
+    const footerLineHeight = 11;
+    const footerColWidth = CONTENT_WIDTH / 4;
+    const footerCols = [
+      MARGIN_LEFT,
+      MARGIN_LEFT + footerColWidth,
+      MARGIN_LEFT + footerColWidth * 2,
+      MARGIN_LEFT + footerColWidth * 3,
+    ];
 
-  // Separator line above footer
-  page.drawLine({
-    start: { x: MARGIN_LEFT, y: footerY + 20 },
-    end: { x: PAGE_WIDTH - MARGIN_RIGHT, y: footerY + 20 },
-    thickness: 0.5,
-    color: COLOR_LIGHT_GRAY,
-  });
+    // Separator line above footer
+    page.drawLine({
+      start: { x: MARGIN_LEFT, y: footerY + 20 },
+      end: { x: PAGE_WIDTH - MARGIN_RIGHT, y: footerY + 20 },
+      thickness: 0.5,
+      color: COLOR_LIGHT_GRAY,
+    });
 
-  // Helper to draw footer row - puts label and value on same line if they fit, otherwise breaks
-  const drawFooterRow = (label: string, value: string, x: number, yPos: number, maxWidth: number): number => {
-    const labelWidth = helvetica.widthOfTextAtSize(label + ' ', footerFontSize);
-    const valueWidth = helvetica.widthOfTextAtSize(value, footerFontSize);
-    const totalWidth = labelWidth + valueWidth;
+    // Helper to draw footer row - puts label and value on same line if they fit, otherwise breaks
+    const drawFooterRow = (label: string, value: string, x: number, yPos: number, maxWidth: number): number => {
+      const labelWidth = helvetica.widthOfTextAtSize(label + ' ', footerFontSize);
+      const valueWidth = helvetica.widthOfTextAtSize(value, footerFontSize);
+      const totalWidth = labelWidth + valueWidth;
     
-    if (totalWidth <= maxWidth) {
-      // Fits on one line
-      drawText(label, x, yPos, { size: footerFontSize, color: COLOR_GRAY });
-      drawText(value, x + labelWidth, yPos, { size: footerFontSize });
-      return yPos - footerLineHeight;
-    } else {
-      // Break to two lines
-      drawText(label, x, yPos, { size: footerFontSize, color: COLOR_GRAY });
-      yPos -= footerLineHeight;
+      if (totalWidth <= maxWidth) {
+        // Fits on one line
+        drawText(label, x, yPos, { size: footerFontSize, color: COLOR_GRAY });
+        drawText(value, x + labelWidth, yPos, { size: footerFontSize });
+        return yPos - footerLineHeight;
+      } else {
+        // Break to two lines
+        drawText(label, x, yPos, { size: footerFontSize, color: COLOR_GRAY });
+        yPos -= footerLineHeight;
+        drawText(value, x, yPos, { size: footerFontSize });
+        return yPos - footerLineHeight;
+      }
+    };
+
+    // Helper to draw footer value only (no label)
+    const drawFooterValue = (value: string, x: number, yPos: number) => {
       drawText(value, x, yPos, { size: footerFontSize });
-      return yPos - footerLineHeight;
-    }
-  };
+    };
 
-  // Helper to draw footer value only (no label)
-  const drawFooterValue = (value: string, x: number, yPos: number) => {
-    drawText(value, x, yPos, { size: footerFontSize });
-  };
-
-  // Column 1: Company Address (no labels, just values)
-  let col1Y = footerY;
-  drawFooterValue(invoice.seller.name, footerCols[0], col1Y);
-  col1Y -= footerLineHeight;
-  drawFooterValue(sellerAddress.streetLine, footerCols[0], col1Y);
-  col1Y -= footerLineHeight;
-  drawFooterValue(sellerAddress.cityLine, footerCols[0], col1Y);
-  if (invoice.seller.address.country) {
+    // Column 1: Company Address (no labels, just values)
+    let col1Y = footerY;
+    drawFooterValue(invoice.seller.name, footerCols[0], col1Y);
     col1Y -= footerLineHeight;
-    drawFooterValue(getCountryName(invoice.seller.address.country, language), footerCols[0], col1Y);
-  }
-
-  // Column 2: Contact Info
-  let col2Y = footerY;
-  if (invoice.seller.phoneNumber) {
-    col2Y = drawFooterRow('TEL.', invoice.seller.phoneNumber, footerCols[1], col2Y, footerColWidth - 5);
-  }
-  if (invoice.seller.email || invoice.seller.contact?.email) {
-    const email = invoice.seller.email || invoice.seller.contact?.email || '';
-    col2Y = drawFooterRow('E-MAIL', email, footerCols[1], col2Y, footerColWidth - 5);
-  }
-
-  // Column 3: Legal Info
-  let col3Y = footerY;
-  if (invoice.seller.court) {
-    col3Y = drawFooterRow('AMTSGERICHT', invoice.seller.court, footerCols[2], col3Y, footerColWidth - 5);
-  }
-  if (invoice.seller.registerNumber) {
-    col3Y = drawFooterRow('HR-NR.', invoice.seller.registerNumber, footerCols[2], col3Y, footerColWidth - 5);
-  }
-  if (invoice.seller.vatId) {
-    col3Y = drawFooterRow('UST.-ID', invoice.seller.vatId, footerCols[2], col3Y, footerColWidth - 5);
-  }
-  if (invoice.seller.taxNumber) {
-    col3Y = drawFooterRow('STEUER-NR.', invoice.seller.taxNumber, footerCols[2], col3Y, footerColWidth - 5);
-  }
-  if (invoice.seller.managingDirector) {
-    col3Y = drawFooterRow('GESCHÄFTSF.', invoice.seller.managingDirector, footerCols[2], col3Y, footerColWidth - 5);
-  }
-
-  // Column 4: Bank Details
-  let col4Y = footerY;
-  if (invoice.bankDetails) {
-    col4Y = drawFooterRow('BANK', invoice.bankDetails.bankName, footerCols[3], col4Y, footerColWidth - 5);
-    col4Y = drawFooterRow('IBAN', invoice.bankDetails.iban, footerCols[3], col4Y, footerColWidth - 5);
-    if (invoice.bankDetails.bic) {
-      col4Y = drawFooterRow('BIC', invoice.bankDetails.bic, footerCols[3], col4Y, footerColWidth - 5);
+    drawFooterValue(sellerAddress.streetLine, footerCols[0], col1Y);
+    col1Y -= footerLineHeight;
+    drawFooterValue(sellerAddress.cityLine, footerCols[0], col1Y);
+    if (invoice.seller.address.country) {
+      col1Y -= footerLineHeight;
+      drawFooterValue(getCountryName(invoice.seller.address.country, language), footerCols[0], col1Y);
     }
-  }
 
-  // Page number (bottom right)
-  const pageNumberText = '1/1';
-  drawTextRight(pageNumberText, PAGE_WIDTH - MARGIN_RIGHT, MARGIN_BOTTOM, { size: 8, color: COLOR_GRAY });
+    // Column 2: Contact Info
+    let col2Y = footerY;
+    if (invoice.seller.phoneNumber) {
+      col2Y = drawFooterRow('TEL.', invoice.seller.phoneNumber, footerCols[1], col2Y, footerColWidth - 5);
+    }
+    if (invoice.seller.email || invoice.seller.contact?.email) {
+      const email = invoice.seller.email || invoice.seller.contact?.email || '';
+      col2Y = drawFooterRow('E-MAIL', email, footerCols[1], col2Y, footerColWidth - 5);
+    }
+
+    // Column 3: Legal Info
+    let col3Y = footerY;
+    if (invoice.seller.court) {
+      col3Y = drawFooterRow('AMTSGERICHT', invoice.seller.court, footerCols[2], col3Y, footerColWidth - 5);
+    }
+    if (invoice.seller.registerNumber) {
+      col3Y = drawFooterRow('HR-NR.', invoice.seller.registerNumber, footerCols[2], col3Y, footerColWidth - 5);
+    }
+    if (invoice.seller.vatId) {
+      col3Y = drawFooterRow('UST.-ID', invoice.seller.vatId, footerCols[2], col3Y, footerColWidth - 5);
+    }
+    if (invoice.seller.taxNumber) {
+      col3Y = drawFooterRow('STEUER-NR.', invoice.seller.taxNumber, footerCols[2], col3Y, footerColWidth - 5);
+    }
+    if (invoice.seller.managingDirector) {
+      col3Y = drawFooterRow('GESCHÄFTSF.', invoice.seller.managingDirector, footerCols[2], col3Y, footerColWidth - 5);
+    }
+
+    // Column 4: Bank Details
+    let col4Y = footerY;
+    if (invoice.bankDetails) {
+      col4Y = drawFooterRow('BANK', invoice.bankDetails.bankName, footerCols[3], col4Y, footerColWidth - 5);
+      col4Y = drawFooterRow('IBAN', invoice.bankDetails.iban, footerCols[3], col4Y, footerColWidth - 5);
+      if (invoice.bankDetails.bic) {
+        col4Y = drawFooterRow('BIC', invoice.bankDetails.bic, footerCols[3], col4Y, footerColWidth - 5);
+      }
+    }
+  };
+
+  const totalPages = pages.length;
+  pages.forEach((footerPage, index) => {
+    page = footerPage;
+    drawFooter();
+    drawTextRight(`${index + 1}/${totalPages}`, PAGE_WIDTH - MARGIN_RIGHT, MARGIN_BOTTOM, {
+      size: 8,
+      color: COLOR_GRAY,
+    });
+  });
 
   // Set document metadata
   let invoiceLabel: string;
