@@ -58,8 +58,15 @@ export function priceIdFor(plan: Plan, interval: Interval): string | undefined {
     : env('STRIPE_PRICE_PRO_YEARLY')
 }
 
-export function earlyBirdPriceId(): string | undefined {
-  return env('STRIPE_PRICE_PRO_EARLY')
+/**
+ * The launch price for an interval. `STRIPE_PRICE_PRO_EARLY` is the monthly one
+ * and has existed since launch; the yearly counterpart is optional — leave it
+ * unset and the offer simply stays monthly-only.
+ */
+export function earlyBirdPriceId(interval: Interval): string | undefined {
+  return interval === 'year'
+    ? env('STRIPE_PRICE_PRO_EARLY_YEARLY')
+    : env('STRIPE_PRICE_PRO_EARLY')
 }
 
 /**
@@ -71,7 +78,8 @@ export function planForPriceId(priceId: string | null | undefined): Plan | null 
   if (
     priceId === env('STRIPE_PRICE_PRO_MONTHLY') ||
     priceId === env('STRIPE_PRICE_PRO_YEARLY') ||
-    priceId === env('STRIPE_PRICE_PRO_EARLY')
+    priceId === env('STRIPE_PRICE_PRO_EARLY') ||
+    priceId === env('STRIPE_PRICE_PRO_EARLY_YEARLY')
   ) {
     return 'pro'
   }
@@ -85,8 +93,12 @@ export function planForPriceId(priceId: string | null | undefined): Plan | null 
 }
 
 export function isEarlyBirdPrice(priceId: string | null | undefined): boolean {
-  const early = earlyBirdPriceId()
-  return Boolean(priceId && early && priceId === early)
+  if (!priceId) return false
+  // Both launch prices claim a slot — otherwise a yearly launch subscriber
+  // would take the offer without counting against the 100.
+  return (
+    priceId === earlyBirdPriceId('month') || priceId === earlyBirdPriceId('year')
+  )
 }
 
 /**
@@ -135,15 +147,17 @@ export async function loadPlanPricing(): Promise<PlanPricing> {
     }
   }
 
-  const [basisMonthly, basisYearly, proMonthly, proYearly, proEarly] = await Promise.all([
-    fetchPrice(priceIdFor('basis', 'month')),
-    fetchPrice(priceIdFor('basis', 'year')),
-    fetchPrice(priceIdFor('pro', 'month')),
-    fetchPrice(priceIdFor('pro', 'year')),
-    fetchPrice(earlyBirdPriceId()),
-  ])
+  const [basisMonthly, basisYearly, proMonthly, proYearly, proEarly, proEarlyYearly] =
+    await Promise.all([
+      fetchPrice(priceIdFor('basis', 'month')),
+      fetchPrice(priceIdFor('basis', 'year')),
+      fetchPrice(priceIdFor('pro', 'month')),
+      fetchPrice(priceIdFor('pro', 'year')),
+      fetchPrice(earlyBirdPriceId('month')),
+      fetchPrice(earlyBirdPriceId('year')),
+    ])
 
-  return { basisMonthly, basisYearly, proMonthly, proYearly, proEarly }
+  return { basisMonthly, basisYearly, proMonthly, proYearly, proEarly, proEarlyYearly }
 }
 
 
@@ -157,9 +171,9 @@ export function resolvePriceId(
   interval: Interval,
   earlyBirdAvailable: boolean
 ): string | undefined {
-  if (earlyBirdApplies(plan, interval, earlyBirdAvailable)) {
-    const early = earlyBirdPriceId()
-    if (early) return early
+  const early = earlyBirdPriceId(interval)
+  if (earlyBirdApplies(plan, interval, earlyBirdAvailable, Boolean(early))) {
+    return early
   }
   return priceIdFor(plan, interval)
 }

@@ -34,7 +34,10 @@ export interface PlanPricing {
   basisYearly: PriceInfo | null
   proMonthly: PriceInfo | null
   proYearly: PriceInfo | null
+  /** Launch price, monthly. */
   proEarly: PriceInfo | null
+  /** Launch price, yearly. Null until one is configured in Stripe. */
+  proEarlyYearly: PriceInfo | null
 }
 
 export const EMPTY_PRICING: PlanPricing = {
@@ -43,13 +46,17 @@ export const EMPTY_PRICING: PlanPricing = {
   proMonthly: null,
   proYearly: null,
   proEarly: null,
+  proEarlyYearly: null,
 }
 
 /**
  * Whether the launch price applies to a given plan and interval.
  *
- * The launch offer is a monthly price (5,00 €) and there is no yearly
- * counterpart, so it can only ever replace Pro monthly.
+ * The launch offer is Pro-only and lasts while slots remain. Which billing
+ * intervals it covers is not hard-coded but follows from what is configured in
+ * Stripe: `hasLaunchPrice` says whether a launch price exists for this
+ * interval. Configure only the monthly one and the offer is monthly-only;
+ * add a yearly one and it covers both, with no code change.
  *
  * This rule used to live in two places — the checkout route decided what to
  * charge, the plan picker decided what to show — and they disagreed: the picker
@@ -61,9 +68,18 @@ export const EMPTY_PRICING: PlanPricing = {
 export function earlyBirdApplies(
   plan: Plan,
   interval: Interval,
-  earlyBirdAvailable: boolean
+  earlyBirdAvailable: boolean,
+  hasLaunchPrice: boolean
 ): boolean {
-  return plan === 'pro' && interval === 'month' && earlyBirdAvailable
+  return plan === 'pro' && earlyBirdAvailable && hasLaunchPrice
+}
+
+/** The launch price for a billing interval, or null if none is configured. */
+export function earlyBirdPrice(
+  pricing: PlanPricing,
+  interval: Interval
+): PriceInfo | null {
+  return interval === 'year' ? pricing.proEarlyYearly : pricing.proEarly
 }
 
 /**
@@ -76,8 +92,9 @@ export function resolveDisplayPrice(
   interval: Interval,
   earlyBirdAvailable: boolean
 ): PriceInfo | null {
-  if (earlyBirdApplies(plan, interval, earlyBirdAvailable) && pricing.proEarly) {
-    return pricing.proEarly
+  const launch = earlyBirdPrice(pricing, interval)
+  if (earlyBirdApplies(plan, interval, earlyBirdAvailable, Boolean(launch))) {
+    return launch
   }
   if (plan === 'basis') {
     return interval === 'year' ? pricing.basisYearly : pricing.basisMonthly

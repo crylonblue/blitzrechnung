@@ -8,7 +8,12 @@ import { toast } from 'sonner'
 import { format } from 'date-fns'
 import { de } from 'date-fns/locale'
 // Type-only: keeps the Stripe SDK out of the client bundle.
-import { earlyBirdApplies, resolveDisplayPrice, intervalSuffix } from '@/lib/plan-pricing'
+import {
+  earlyBirdApplies,
+  earlyBirdPrice,
+  resolveDisplayPrice,
+  intervalSuffix,
+} from '@/lib/plan-pricing'
 import type { PlanPricing, PriceInfo, Plan, Interval } from '@/lib/plan-pricing'
 import type { BillingState } from '@/lib/billing'
 
@@ -137,9 +142,14 @@ export default function BillingSection({ billing, pricing, earlyBirdSlotsLeft }:
   // Umschalter — sonst kann ein Monatspreis als "/ Jahr" ausgewiesen werden.
   const suffixFor = (price: PriceInfo | null) => intervalSuffix(price, interval)
 
-  // Das Launch-Angebot gilt nur monatlich. Bei Jahresauswahl ist der reguläre
-  // Jahrespreis zu sehen, also darf dort auch kein Launch-Hinweis stehen.
-  const earlyBirdShown = earlyBirdApplies('pro', interval, earlyBirdActive)
+  // Der Launch-Hinweis erscheint genau dann, wenn der Launch-Preis für das
+  // gewählte Intervall auch wirklich abgerechnet wird.
+  const earlyBirdShown = earlyBirdApplies(
+    'pro',
+    interval,
+    earlyBirdActive,
+    Boolean(earlyBirdPrice(pricing, interval))
+  )
 
   return (
     <div>
