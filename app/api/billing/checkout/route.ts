@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server'
-import { getStripe, resolvePriceId, earlyBirdPriceId, appUrl, type Plan, type Interval } from '@/lib/stripe'
-import { earlyBirdSlotsLeft } from '@/lib/billing'
+import { getStripe, resolvePriceId, appUrl, type Plan, type Interval } from '@/lib/stripe'
 
 // Tags these sessions in the Dashboard so checkout flows stay comparable.
 const INTEGRATION_ID = 'blitzrechnung-subscription-kvxmrtwd'
@@ -36,18 +35,9 @@ export async function POST(request: NextRequest) {
 
     const service = createServiceRoleClient()
 
-    // The launch offer replaces the Pro monthly price while slots remain. Using
-    // a separate price rather than a coupon means the subscription carries the
-    // 5,00 € forever on its own, with no discount line on the invoice.
-    //
-    // resolvePriceId holds the rule; the plan picker calls the same one, so
-    // what is shown and what is charged cannot drift apart.
-    // Ob für dieses Intervall überhaupt ein Launch-Preis hinterlegt ist,
-    // entscheidet resolvePriceId selbst — hier zählt nur, ob noch Plätze frei
-    // sind. Der Slot-Zähler wird nur abgefragt, wenn ein Launch-Preis existiert.
-    const earlyBirdAvailable =
-      Boolean(earlyBirdPriceId(interval)) && (await earlyBirdSlotsLeft(service)) > 0
-    const priceId = resolvePriceId(plan, interval, earlyBirdAvailable)
+    // Dieselbe Funktion, die die Tarifauswahl zum Anzeigen benutzt — so kann
+    // Angezeigtes und Abgerechnetes nicht auseinanderlaufen.
+    const priceId = resolvePriceId(plan, interval)
     if (!priceId) {
       return NextResponse.json({ error: 'Dieser Tarif ist derzeit nicht verfügbar' }, { status: 400 })
     }

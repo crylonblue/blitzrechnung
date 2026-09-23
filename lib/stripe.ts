@@ -9,16 +9,10 @@ import Stripe from 'stripe'
  * env vars, which keeps the webhook honest about what someone actually bought.
  */
 
-export {
-  EARLY_BIRD_SLOTS,
-  earlyBirdApplies,
-  resolveDisplayPrice,
-  intervalSuffix,
-} from './plan-pricing'
+export { resolveDisplayPrice, intervalSuffix } from './plan-pricing'
 export type { Plan, Interval, PriceInfo, PlanPricing } from './plan-pricing'
 
 import {
-  earlyBirdApplies,
   EMPTY_PRICING,
   type Plan,
   type Interval,
@@ -58,16 +52,6 @@ export function priceIdFor(plan: Plan, interval: Interval): string | undefined {
     : env('STRIPE_PRICE_PRO_YEARLY')
 }
 
-/**
- * The launch price for an interval. `STRIPE_PRICE_PRO_EARLY` is the monthly one
- * and has existed since launch; the yearly counterpart is optional — leave it
- * unset and the offer simply stays monthly-only.
- */
-export function earlyBirdPriceId(interval: Interval): string | undefined {
-  return interval === 'year'
-    ? env('STRIPE_PRICE_PRO_EARLY_YEARLY')
-    : env('STRIPE_PRICE_PRO_EARLY')
-}
 
 /**
  * Which plan a Stripe price grants. Returns null for a price we don't know,
@@ -77,9 +61,7 @@ export function planForPriceId(priceId: string | null | undefined): Plan | null 
   if (!priceId) return null
   if (
     priceId === env('STRIPE_PRICE_PRO_MONTHLY') ||
-    priceId === env('STRIPE_PRICE_PRO_YEARLY') ||
-    priceId === env('STRIPE_PRICE_PRO_EARLY') ||
-    priceId === env('STRIPE_PRICE_PRO_EARLY_YEARLY')
+    priceId === env('STRIPE_PRICE_PRO_YEARLY')
   ) {
     return 'pro'
   }
@@ -92,14 +74,6 @@ export function planForPriceId(priceId: string | null | undefined): Plan | null 
   return null
 }
 
-export function isEarlyBirdPrice(priceId: string | null | undefined): boolean {
-  if (!priceId) return false
-  // Both launch prices claim a slot — otherwise a yearly launch subscriber
-  // would take the offer without counting against the 100.
-  return (
-    priceId === earlyBirdPriceId('month') || priceId === earlyBirdPriceId('year')
-  )
-}
 
 /**
  * Base URL for Checkout return links. Falls back to the Vercel-provided host so
@@ -147,34 +121,25 @@ export async function loadPlanPricing(): Promise<PlanPricing> {
     }
   }
 
-  const [basisMonthly, basisYearly, proMonthly, proYearly, proEarly, proEarlyYearly] =
-    await Promise.all([
-      fetchPrice(priceIdFor('basis', 'month')),
-      fetchPrice(priceIdFor('basis', 'year')),
-      fetchPrice(priceIdFor('pro', 'month')),
-      fetchPrice(priceIdFor('pro', 'year')),
-      fetchPrice(earlyBirdPriceId('month')),
-      fetchPrice(earlyBirdPriceId('year')),
-    ])
+  const [basisMonthly, basisYearly, proMonthly, proYearly] = await Promise.all([
+    fetchPrice(priceIdFor('basis', 'month')),
+    fetchPrice(priceIdFor('basis', 'year')),
+    fetchPrice(priceIdFor('pro', 'month')),
+    fetchPrice(priceIdFor('pro', 'year')),
+  ])
 
-  return { basisMonthly, basisYearly, proMonthly, proYearly, proEarly, proEarlyYearly }
+  return { basisMonthly, basisYearly, proMonthly, proYearly }
 }
 
 
 /**
  * The price id checkout should charge for a plan/interval.
- * `earlyBirdAvailable` is the caller's answer to "are launch slots left?" —
- * looking that up needs a service-role client, which is why it isn't done here.
+ *
+ * Deckungsgleich mit `resolveDisplayPrice` in plan-pricing.ts, das dieselbe
+ * Entscheidung für die Anzeige trifft. Ein Test vergleicht beide, damit
+ * Angezeigtes und Abgerechnetes nicht wieder auseinanderlaufen.
  */
-export function resolvePriceId(
-  plan: Plan,
-  interval: Interval,
-  earlyBirdAvailable: boolean
-): string | undefined {
-  const early = earlyBirdPriceId(interval)
-  if (earlyBirdApplies(plan, interval, earlyBirdAvailable, Boolean(early))) {
-    return early
-  }
+export function resolvePriceId(plan: Plan, interval: Interval): string | undefined {
   return priceIdFor(plan, interval)
 }
 

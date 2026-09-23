@@ -1,8 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  earlyBirdApplies,
-  earlyBirdPrice,
   resolveDisplayPrice,
   intervalSuffix,
   type PlanPricing,
@@ -14,15 +12,16 @@ import {
 /**
  * Tarifauswahl — angezeigter und abgerechneter Preis müssen übereinstimmen.
  *
- * Hintergrund: Das Launch-Angebot war ein reiner Monatspreis (5,00 €). Die
- * Tarifauswahl zeigte es trotzdem an, wenn "Jährlich" gewählt war, während der
- * Checkout den regulären Jahrespreis abrechnete. Ein Kunde las 5,00 €/Monat,
- * erwartete 60,00 € fürs Jahr und zahlte 96,00 €.
+ * Hintergrund: Bis September 2026 lag über den Pro-Preisen ein Launch-Angebot
+ * mit 100 Plätzen. Die Tarifauswahl zeigte es auch bei Jahresauswahl an,
+ * während der Checkout den regulären Jahrespreis abrechnete — ein Kunde las
+ * 5,00 €/Monat, erwartete 60,00 € fürs Jahr und zahlte 96,00 €.
  *
- * Welche Intervalle das Angebot abdeckt, steht seitdem nicht mehr im Code,
- * sondern folgt daraus, welche Launch-Preise in Stripe hinterlegt sind.
+ * Das Angebot ist inzwischen der reguläre Preis, die Sonderregel entfallen.
+ * Der Kreuzvergleich unten bleibt: Er ist der Schutz davor, dass Anzeige und
+ * Abrechnung je wieder getrennte Wege gehen, egal aus welchem Anlass.
  *
- * Die Beträge unten sind die echten aus dem Stripe-Konto.
+ * Die Beträge sind die echten aus dem Stripe-Konto.
  */
 
 const preis = (
@@ -38,129 +37,77 @@ const preis = (
   intervalCount,
 });
 
-/** Launch-Angebot nur monatlich — der Stand vor dem Jahrespreis. */
-const NUR_MONATLICH: PlanPricing = {
+const PRICING: PlanPricing = {
   basisMonthly: preis("price_basis_m", 4, "month"),
   basisYearly: preis("price_basis_y", 38.4, "year"),
-  proMonthly: preis("price_pro_m", 10, "month"),
-  proYearly: preis("price_pro_y", 96, "year"),
-  proEarly: preis("price_pro_early", 5, "month"),
-  proEarlyYearly: null,
+  proMonthly: preis("price_pro_m", 5, "month"),
+  proYearly: preis("price_pro_y", 60, "year"),
 };
 
-/** Launch-Angebot für beide Intervalle. */
-const BEIDE: PlanPricing = {
-  ...NUR_MONATLICH,
-  proEarlyYearly: preis("price_pro_early_y", 60, "year"),
-};
+// --- Preisauswahl ----------------------------------------------------------
 
-// --- Wann das Launch-Angebot gilt ------------------------------------------
-
-test("Launch-Angebot gilt für Pro monatlich", () => {
-  assert.equal(earlyBirdApplies("pro", "month", true, true), true);
+test("jeder Tarif folgt dem gewählten Intervall", () => {
+  assert.equal(resolveDisplayPrice(PRICING, "basis", "month")?.id, "price_basis_m");
+  assert.equal(resolveDisplayPrice(PRICING, "basis", "year")?.id, "price_basis_y");
+  assert.equal(resolveDisplayPrice(PRICING, "pro", "month")?.id, "price_pro_m");
+  assert.equal(resolveDisplayPrice(PRICING, "pro", "year")?.id, "price_pro_y");
 });
 
-test("ohne Launch-Preis für das Intervall gilt es nicht", () => {
-  // Der ursprüngliche Fehlerfall: jährlich gewählt, aber kein Jahres-Launchpreis.
-  assert.equal(earlyBirdApplies("pro", "year", true, false), false);
+test("Pro jährlich zeigt 60,00 €", () => {
+  // Der Betrag, den Kunden vor der Umstellung erwartet und nicht bekommen haben.
+  assert.equal(resolveDisplayPrice(PRICING, "pro", "year")?.unitAmount, 6000);
 });
 
-test("mit Jahres-Launchpreis gilt es auch jährlich", () => {
-  assert.equal(earlyBirdApplies("pro", "year", true, true), true);
-});
-
-test("Launch-Angebot gilt nie für Basis", () => {
-  assert.equal(earlyBirdApplies("basis", "month", true, true), false);
-  assert.equal(earlyBirdApplies("basis", "year", true, true), false);
-});
-
-test("ohne freie Plätze gilt das Launch-Angebot nirgends", () => {
-  assert.equal(earlyBirdApplies("pro", "month", false, true), false);
-  assert.equal(earlyBirdApplies("pro", "year", false, true), false);
-});
-
-// --- Der ursprüngliche Regressionsfall -------------------------------------
-
-test("ohne Jahres-Launchpreis zeigt Pro jährlich 96,00 € statt 5,00 €", () => {
-  const price = resolveDisplayPrice(NUR_MONATLICH, "pro", "year", true);
-  assert.equal(price?.id, "price_pro_y");
-  assert.equal(price?.unitAmount, 9600);
-});
-
-// --- Das neue Verhalten ----------------------------------------------------
-
-test("mit Jahres-Launchpreis zeigt Pro jährlich 60,00 €", () => {
-  const price = resolveDisplayPrice(BEIDE, "pro", "year", true);
-  assert.equal(price?.id, "price_pro_early_y");
-  assert.equal(price?.unitAmount, 6000);
-});
-
-test("Pro monatlich zeigt weiterhin den monatlichen Launch-Preis", () => {
-  assert.equal(resolveDisplayPrice(BEIDE, "pro", "month", true)?.id, "price_pro_early");
-});
-
-test("sind die Plätze weg, gilt überall der reguläre Preis", () => {
-  assert.equal(resolveDisplayPrice(BEIDE, "pro", "month", false)?.id, "price_pro_m");
-  assert.equal(resolveDisplayPrice(BEIDE, "pro", "year", false)?.id, "price_pro_y");
-});
-
-test("Basis folgt immer dem gewählten Intervall", () => {
-  for (const pricing of [NUR_MONATLICH, BEIDE]) {
-    assert.equal(resolveDisplayPrice(pricing, "basis", "month", true)?.id, "price_basis_m");
-    assert.equal(resolveDisplayPrice(pricing, "basis", "year", true)?.id, "price_basis_y");
-  }
-});
-
-test("earlyBirdPrice liefert den Launch-Preis des Intervalls", () => {
-  assert.equal(earlyBirdPrice(BEIDE, "month")?.id, "price_pro_early");
-  assert.equal(earlyBirdPrice(BEIDE, "year")?.id, "price_pro_early_y");
-  assert.equal(earlyBirdPrice(NUR_MONATLICH, "year"), null);
+test("fehlt ein Preis, wird nichts erfunden", () => {
+  const luecke: PlanPricing = { ...PRICING, proYearly: null };
+  assert.equal(resolveDisplayPrice(luecke, "pro", "year"), null);
 });
 
 // --- Anzeige und Abrechnung dürfen nie auseinanderlaufen -------------------
 
 /**
  * Der eigentliche Schutz: Was die Tarifauswahl anzeigt, muss exakt der Preis
- * sein, den der Checkout belastet — über alle Kombinationen hinweg, und in
- * beiden Ausbaustufen des Launch-Angebots.
+ * sein, den der Checkout belastet — über alle Kombinationen hinweg.
  */
 test("die angezeigte Preis-ID ist die, die der Checkout abrechnet", async () => {
+  process.env.STRIPE_PRICE_BASIS_MONTHLY = "price_basis_m";
+  process.env.STRIPE_PRICE_BASIS_YEARLY = "price_basis_y";
+  process.env.STRIPE_PRICE_PRO_MONTHLY = "price_pro_m";
+  process.env.STRIPE_PRICE_PRO_YEARLY = "price_pro_y";
+
+  const { resolvePriceId } = await import("../lib/stripe");
+
   const plans: Plan[] = ["basis", "pro"];
   const intervals: Interval[] = ["month", "year"];
 
-  const szenarien: Array<[string, PlanPricing, string | undefined]> = [
-    ["nur monatliches Launch-Angebot", NUR_MONATLICH, undefined],
-    ["Launch-Angebot für beide Intervalle", BEIDE, "price_pro_early_y"],
-  ];
-
-  for (const [name, pricing, jahresLaunchId] of szenarien) {
-    process.env.STRIPE_PRICE_BASIS_MONTHLY = "price_basis_m";
-    process.env.STRIPE_PRICE_BASIS_YEARLY = "price_basis_y";
-    process.env.STRIPE_PRICE_PRO_MONTHLY = "price_pro_m";
-    process.env.STRIPE_PRICE_PRO_YEARLY = "price_pro_y";
-    process.env.STRIPE_PRICE_PRO_EARLY = "price_pro_early";
-    if (jahresLaunchId) {
-      process.env.STRIPE_PRICE_PRO_EARLY_YEARLY = jahresLaunchId;
-    } else {
-      delete process.env.STRIPE_PRICE_PRO_EARLY_YEARLY;
+  for (const plan of plans) {
+    for (const interval of intervals) {
+      const angezeigt = resolveDisplayPrice(PRICING, plan, interval);
+      const abgerechnet = resolvePriceId(plan, interval);
+      assert.equal(
+        angezeigt?.id,
+        abgerechnet,
+        `${plan}/${interval}: angezeigt ${angezeigt?.id}, abgerechnet ${abgerechnet}`
+      );
     }
+  }
+});
 
-    // Frisch importieren, damit die Umgebung je Szenario neu gelesen wird.
-    const { resolvePriceId } = await import(`../lib/stripe?szenario=${encodeURIComponent(name)}`);
+test("jeder abrechenbare Preis gewährt auch einen Tarif", async () => {
+  // Erkennt der Webhook eine Preis-ID nicht, schreibt er plan='none' — der
+  // Kunde hätte bezahlt und keinen Zugang. Das darf für keinen Preis gelten,
+  // den der Checkout überhaupt anbieten kann.
+  process.env.STRIPE_PRICE_BASIS_MONTHLY = "price_basis_m";
+  process.env.STRIPE_PRICE_BASIS_YEARLY = "price_basis_y";
+  process.env.STRIPE_PRICE_PRO_MONTHLY = "price_pro_m";
+  process.env.STRIPE_PRICE_PRO_YEARLY = "price_pro_y";
 
-    for (const plan of plans) {
-      for (const interval of intervals) {
-        for (const slotsLeft of [true, false]) {
-          const launchVorhanden = Boolean(earlyBirdPrice(pricing, interval));
-          const angezeigt = resolveDisplayPrice(pricing, plan, interval, slotsLeft && launchVorhanden);
-          const abgerechnet = resolvePriceId(plan, interval, slotsLeft);
-          assert.equal(
-            angezeigt?.id,
-            abgerechnet,
-            `${name} — ${plan}/${interval}/Plätze=${slotsLeft}: angezeigt ${angezeigt?.id}, abgerechnet ${abgerechnet}`
-          );
-        }
-      }
+  const { resolvePriceId, planForPriceId } = await import("../lib/stripe");
+
+  for (const plan of ["basis", "pro"] as Plan[]) {
+    for (const interval of ["month", "year"] as Interval[]) {
+      const id = resolvePriceId(plan, interval);
+      assert.equal(planForPriceId(id), plan, `${plan}/${interval} (${id})`);
     }
   }
 });
@@ -174,9 +121,8 @@ test("ein Monatspreis wird nie als Jahrespreis beschriftet", () => {
 });
 
 test("Beschriftung folgt dem echten Intervall", () => {
-  assert.equal(intervalSuffix(BEIDE.proYearly, "month"), "/ Jahr");
-  assert.equal(intervalSuffix(BEIDE.proMonthly, "year"), "/ Monat");
-  assert.equal(intervalSuffix(BEIDE.proEarlyYearly, "month"), "/ Jahr");
+  assert.equal(intervalSuffix(PRICING.proYearly, "month"), "/ Jahr");
+  assert.equal(intervalSuffix(PRICING.proMonthly, "year"), "/ Monat");
 });
 
 test("mehrperiodige Preise werden korrekt benannt", () => {

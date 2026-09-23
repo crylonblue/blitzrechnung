@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import type Stripe from 'stripe'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createServiceRoleClient } from '@/lib/supabase/server'
-import { getStripe, planForPriceId, isEarlyBirdPrice } from '@/lib/stripe'
+import { getStripe, planForPriceId } from '@/lib/stripe'
 
 /**
  * The only writer of subscription state. The browser is never trusted for this:
@@ -118,10 +118,6 @@ async function syncSubscription(
     cancel_at_period_end: subscription.cancel_at_period_end,
     updated_at: new Date().toISOString(),
   }
-
-  // Only ever set, never cleared: a churned early adopter keeps their claim on
-  // the slot instead of handing it back to the next signup.
-  if (isEarlyBirdPrice(priceId)) row.early_bird = true
 
   const { error } = await service.from('subscriptions').upsert(row, { onConflict: 'company_id' })
   if (error) throw new Error(`Failed to persist subscription ${subscription.id}: ${error.message}`)
