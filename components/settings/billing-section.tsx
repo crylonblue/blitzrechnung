@@ -8,19 +8,13 @@ import { toast } from 'sonner'
 import { format } from 'date-fns'
 import { de } from 'date-fns/locale'
 // Type-only: keeps the Stripe SDK out of the client bundle.
-import {
-  earlyBirdApplies,
-  earlyBirdPrice,
-  resolveDisplayPrice,
-  intervalSuffix,
-} from '@/lib/plan-pricing'
+import { resolveDisplayPrice, intervalSuffix } from '@/lib/plan-pricing'
 import type { PlanPricing, PriceInfo, Plan, Interval } from '@/lib/plan-pricing'
 import type { BillingState } from '@/lib/billing'
 
 interface BillingSectionProps {
   billing: BillingState
   pricing: PlanPricing
-  earlyBirdSlotsLeft: number
 }
 
 const PLAN_LABELS: Record<string, string> = { basis: 'Basis', pro: 'Pro' }
@@ -49,13 +43,12 @@ function formatDate(value: string | null): string | null {
   return format(new Date(value), 'd. MMMM yyyy', { locale: de })
 }
 
-export default function BillingSection({ billing, pricing, earlyBirdSlotsLeft }: BillingSectionProps) {
+export default function BillingSection({ billing, pricing }: BillingSectionProps) {
   const [interval, setInterval] = useState<Interval>('month')
   const [pendingPlan, setPendingPlan] = useState<Plan | null>(null)
   const [openingPortal, setOpeningPortal] = useState(false)
 
   const yearlyAvailable = Boolean(pricing.basisYearly || pricing.proYearly)
-  const earlyBirdActive = earlyBirdSlotsLeft > 0 && Boolean(pricing.proEarly)
 
   const startCheckout = async (plan: Plan) => {
     setPendingPlan(plan)
@@ -132,24 +125,14 @@ export default function BillingSection({ billing, pricing, earlyBirdSlotsLeft }:
     )
   }
 
-  // Dieselbe Regel, die der Checkout zum Abrechnen benutzt. Vorher entschied
-  // die Oberfläche eigenständig und zeigte den Launch-Preis auch bei
-  // Jahresauswahl an — berechnet wurde dann aber der reguläre Jahrespreis.
-  const proPrice = resolveDisplayPrice(pricing, 'pro', interval, earlyBirdActive)
-  const basisPrice = resolveDisplayPrice(pricing, 'basis', interval, earlyBirdActive)
+  // Dieselbe Funktion, die der Checkout zum Abrechnen benutzt — Angezeigtes
+  // und Abgerechnetes können so nicht auseinanderlaufen.
+  const proPrice = resolveDisplayPrice(pricing, 'pro', interval)
+  const basisPrice = resolveDisplayPrice(pricing, 'basis', interval)
 
   // Das Suffix kommt aus dem, was Stripe wirklich abrechnet, nicht aus dem
   // Umschalter — sonst kann ein Monatspreis als "/ Jahr" ausgewiesen werden.
   const suffixFor = (price: PriceInfo | null) => intervalSuffix(price, interval)
-
-  // Der Launch-Hinweis erscheint genau dann, wenn der Launch-Preis für das
-  // gewählte Intervall auch wirklich abgerechnet wird.
-  const earlyBirdShown = earlyBirdApplies(
-    'pro',
-    interval,
-    earlyBirdActive,
-    Boolean(earlyBirdPrice(pricing, interval))
-  )
 
   return (
     <div>
@@ -195,11 +178,7 @@ export default function BillingSection({ billing, pricing, earlyBirdSlotsLeft }:
           />
           <PlanCard
             title="Pro"
-            badge={
-              earlyBirdShown
-                ? `Launch-Angebot · noch ${earlyBirdSlotsLeft} von 100`
-                : 'Empfohlen'
-            }
+            badge="Empfohlen"
             price={formatNet(proPrice)}
             suffix={suffixFor(proPrice)}
             features={['Alles aus Basis', 'API-Zugriff für alle Funktionen', 'Bis zu 5 Nutzer']}

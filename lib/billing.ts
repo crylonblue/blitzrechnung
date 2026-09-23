@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { EARLY_BIRD_SLOTS, type Plan } from './stripe'
+import { type Plan } from './stripe'
 
 /**
  * Entitlement logic, shared by the session API, the public API-key API and the
@@ -86,17 +86,6 @@ export async function getBillingState(supabase: Db, companyId: string): Promise<
   }
 }
 
-/**
- * How many of the 100 launch slots are gone. Needs a service-role client: RLS
- * only lets a company see its own subscription row.
- */
-export async function earlyBirdSlotsLeft(serviceRole: Db): Promise<number> {
-  const { count } = await serviceRole
-    .from('subscriptions')
-    .select('company_id', { count: 'exact', head: true })
-    .eq('early_bird', true)
-  return Math.max(0, EARLY_BIRD_SLOTS - (count ?? 0))
-}
 
 export const TRIAL_EXPIRED_MESSAGE = 'Testphase abgelaufen'
 export const TRIAL_EXPIRED_DETAILS =
