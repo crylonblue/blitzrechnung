@@ -4,6 +4,7 @@ import { generateInvoicePDF } from '@/lib/pdf-generator'
 import { mapDBInvoiceToPDFInvoice } from '@/lib/invoice-mapper'
 import { computeInvoiceTotals } from '@/lib/invoice-totals'
 import type { Invoice as DBInvoice, PartySnapshot, LineItem } from '@/types'
+import { resolveInvoiceTexts } from '@/lib/invoice-texts'
 
 interface PreviewRequest {
   companyId: string
@@ -139,8 +140,7 @@ export async function POST(request: NextRequest) {
     const totalAmount = totals.grossTotal
 
     // Get intro/outro text from company settings
-    const introText = company.default_intro_text || null
-    const outroText = company.default_outro_text || null
+    const { introText, outroText } = resolveInvoiceTexts(company, language || 'de')
     const buyerReference = providedBuyerReference || null
 
     // Create a mock DB invoice for the mapper

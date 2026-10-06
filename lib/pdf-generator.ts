@@ -533,7 +533,7 @@ export async function generateInvoicePDF(
     drawTextRight(qtyText, col.quantity + 40, y);
 
     // Unit
-    drawText(getUnitLabel(item.unit), col.unit, y);
+    drawText(getUnitLabel(item.unit, language), col.unit, y);
 
     // Unit price
     drawTextRight(formatCurrency(item.unitPrice, language), col.unitPrice + 55, y);
@@ -735,6 +735,10 @@ export async function generateInvoicePDF(
       MARGIN_LEFT + footerColWidth * 3,
     ];
 
+    const footerLabels = language === 'de'
+      ? { phone: 'TEL.', email: 'E-MAIL', court: 'AMTSGERICHT', register: 'HR-NR.', vatId: 'UST.-ID', taxNumber: 'STEUER-NR.', director: 'GESCHÄFTSF.', bank: 'BANK', accountHolder: 'KONTOINHABER' }
+      : { phone: 'PHONE', email: 'E-MAIL', court: 'REG. COURT', register: 'REG. NO.', vatId: 'VAT ID', taxNumber: 'TAX NO.', director: 'MANAGING DIR.', bank: 'BANK', accountHolder: 'ACCOUNT HOLDER' };
+
     // Separator line above footer
     page.drawLine({
       start: { x: MARGIN_LEFT, y: footerY + 20 },
@@ -780,47 +784,60 @@ export async function generateInvoicePDF(
     // Column 2: Contact Info
     let col2Y = footerY;
     if (invoice.seller.phoneNumber) {
-      col2Y = drawFooterRow('TEL.', invoice.seller.phoneNumber, footerCols[1], col2Y, footerColWidth - 5);
+      col2Y = drawFooterRow(footerLabels.phone, invoice.seller.phoneNumber, footerCols[1], col2Y, footerColWidth - 5);
     }
     if (invoice.seller.email || invoice.seller.contact?.email) {
       const email = invoice.seller.email || invoice.seller.contact?.email || '';
-      col2Y = drawFooterRow('E-MAIL', email, footerCols[1], col2Y, footerColWidth - 5);
+      col2Y = drawFooterRow(footerLabels.email, email, footerCols[1], col2Y, footerColWidth - 5);
     }
 
     // Column 3: Legal Info
     let col3Y = footerY;
     if (invoice.seller.court) {
-      col3Y = drawFooterRow('AMTSGERICHT', invoice.seller.court, footerCols[2], col3Y, footerColWidth - 5);
+      col3Y = drawFooterRow(footerLabels.court, invoice.seller.court, footerCols[2], col3Y, footerColWidth - 5);
     }
     if (invoice.seller.registerNumber) {
-      col3Y = drawFooterRow('HR-NR.', invoice.seller.registerNumber, footerCols[2], col3Y, footerColWidth - 5);
+      col3Y = drawFooterRow(footerLabels.register, invoice.seller.registerNumber, footerCols[2], col3Y, footerColWidth - 5);
     }
     if (invoice.seller.vatId) {
-      col3Y = drawFooterRow('UST.-ID', invoice.seller.vatId, footerCols[2], col3Y, footerColWidth - 5);
+      col3Y = drawFooterRow(footerLabels.vatId, invoice.seller.vatId, footerCols[2], col3Y, footerColWidth - 5);
     }
     if (invoice.seller.taxNumber) {
-      col3Y = drawFooterRow('STEUER-NR.', invoice.seller.taxNumber, footerCols[2], col3Y, footerColWidth - 5);
+      col3Y = drawFooterRow(footerLabels.taxNumber, invoice.seller.taxNumber, footerCols[2], col3Y, footerColWidth - 5);
     }
     if (invoice.seller.managingDirector) {
-      col3Y = drawFooterRow('GESCHÄFTSF.', invoice.seller.managingDirector, footerCols[2], col3Y, footerColWidth - 5);
+      col3Y = drawFooterRow(footerLabels.director, invoice.seller.managingDirector, footerCols[2], col3Y, footerColWidth - 5);
     }
 
     // Column 4: Bank Details
     let col4Y = footerY;
     if (invoice.bankDetails) {
-      col4Y = drawFooterRow('BANK', invoice.bankDetails.bankName, footerCols[3], col4Y, footerColWidth - 5);
+      // Banks match the payee name against the IBAN; when the account is held
+      // under a different (e.g. shortened) name than the company, customers
+      // need to see it, or their transfer gets flagged.
+      const accountHolder = invoice.bankDetails.accountHolder?.trim();
+      if (accountHolder && accountHolder !== invoice.seller.name.trim()) {
+        col4Y = drawFooterRow(footerLabels.accountHolder, accountHolder, footerCols[3], col4Y, footerColWidth - 5);
+      }
+      col4Y = drawFooterRow(footerLabels.bank, invoice.bankDetails.bankName, footerCols[3], col4Y, footerColWidth - 5);
       col4Y = drawFooterRow('IBAN', invoice.bankDetails.iban, footerCols[3], col4Y, footerColWidth - 5);
       if (invoice.bankDetails.bic) {
         col4Y = drawFooterRow('BIC', invoice.bankDetails.bic, footerCols[3], col4Y, footerColWidth - 5);
       }
     }
+
+    // Next free baseline below the bank column, which shares the right edge
+    // with the page number.
+    return col4Y;
   };
 
   const totalPages = pages.length;
   pages.forEach((footerPage, index) => {
     page = footerPage;
-    drawFooter();
-    drawTextRight(`${index + 1}/${totalPages}`, PAGE_WIDTH - MARGIN_RIGHT, MARGIN_BOTTOM, {
+    const bankColumnBottom = drawFooter();
+    // Drops below the bank column when it runs long (e.g. a separate account holder).
+    const pageNumberY = Math.min(MARGIN_BOTTOM, bankColumnBottom);
+    drawTextRight(`${index + 1}/${totalPages}`, PAGE_WIDTH - MARGIN_RIGHT, pageNumberY, {
       size: 8,
       color: COLOR_GRAY,
     });
