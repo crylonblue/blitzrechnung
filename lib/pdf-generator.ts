@@ -743,41 +743,38 @@ export async function generateInvoicePDF(
       color: COLOR_LIGHT_GRAY,
     });
 
-    // Helper to draw footer row - puts label and value on same line if they fit, otherwise breaks
+    // Helper to draw footer row - puts label and value on same line if they fit,
+    // otherwise breaks and wraps the value so it never runs into the next column
     const drawFooterRow = (label: string, value: string, x: number, yPos: number, maxWidth: number): number => {
       const labelWidth = helvetica.widthOfTextAtSize(label + ' ', footerFontSize);
-      const valueWidth = helvetica.widthOfTextAtSize(value, footerFontSize);
-      const totalWidth = labelWidth + valueWidth;
-    
-      if (totalWidth <= maxWidth) {
-        // Fits on one line
-        drawText(label, x, yPos, { size: footerFontSize, color: COLOR_GRAY });
+      const valueWidth = helvetica.widthOfTextAtSize(sanitizeText(value), footerFontSize);
+
+      drawText(label, x, yPos, { size: footerFontSize, color: COLOR_GRAY });
+      if (labelWidth + valueWidth <= maxWidth) {
         drawText(value, x + labelWidth, yPos, { size: footerFontSize });
         return yPos - footerLineHeight;
-      } else {
-        // Break to two lines
-        drawText(label, x, yPos, { size: footerFontSize, color: COLOR_GRAY });
-        yPos -= footerLineHeight;
-        drawText(value, x, yPos, { size: footerFontSize });
-        return yPos - footerLineHeight;
       }
+      yPos -= footerLineHeight;
+      return drawFooterValue(value, x, yPos, maxWidth);
     };
 
-    // Helper to draw footer value only (no label)
-    const drawFooterValue = (value: string, x: number, yPos: number) => {
-      drawText(value, x, yPos, { size: footerFontSize });
+    // Helper to draw a footer value (no label), wrapped to the column width
+    const drawFooterValue = (value: string, x: number, yPos: number, maxWidth: number): number => {
+      for (const line of wrapText(sanitizeText(value), maxWidth, helvetica, footerFontSize)) {
+        drawText(line, x, yPos, { size: footerFontSize });
+        yPos -= footerLineHeight;
+      }
+      return yPos;
     };
 
     // Column 1: Company Address (no labels, just values)
+    const col1Width = footerColWidth - 5;
     let col1Y = footerY;
-    drawFooterValue(invoice.seller.name, footerCols[0], col1Y);
-    col1Y -= footerLineHeight;
-    drawFooterValue(sellerAddress.streetLine, footerCols[0], col1Y);
-    col1Y -= footerLineHeight;
-    drawFooterValue(sellerAddress.cityLine, footerCols[0], col1Y);
+    col1Y = drawFooterValue(invoice.seller.name, footerCols[0], col1Y, col1Width);
+    col1Y = drawFooterValue(sellerAddress.streetLine, footerCols[0], col1Y, col1Width);
+    col1Y = drawFooterValue(sellerAddress.cityLine, footerCols[0], col1Y, col1Width);
     if (invoice.seller.address.country) {
-      col1Y -= footerLineHeight;
-      drawFooterValue(getCountryName(invoice.seller.address.country, language), footerCols[0], col1Y);
+      drawFooterValue(getCountryName(invoice.seller.address.country, language), footerCols[0], col1Y, col1Width);
     }
 
     // Column 2: Contact Info
