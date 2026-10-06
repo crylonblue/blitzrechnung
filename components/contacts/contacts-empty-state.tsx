@@ -3,6 +3,7 @@
 import { Button } from '@/components/ui/button'
 import { Plus } from 'lucide-react'
 import { useContactEditDrawer } from '@/contexts/contact-edit-drawer-context'
+import ContactImportButton from './contact-import-button'
 
 export default function ContactsEmptyState() {
   const { openDrawer } = useContactEditDrawer()
@@ -13,7 +14,8 @@ export default function ContactsEmptyState() {
       <p className="mt-2 text-sm text-meta">
         Kontakte können auch beim Erstellen einer Rechnung angelegt werden.
       </p>
-      <div className="mt-6">
+      <div className="mt-6 flex items-center justify-center gap-2">
+        <ContactImportButton existingContacts={[]} />
         <Button
           onClick={() => openDrawer(null)}
           className="text-sm"

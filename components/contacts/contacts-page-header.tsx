@@ -3,8 +3,13 @@
 import { Button } from '@/components/ui/button'
 import { Plus } from 'lucide-react'
 import { useContactEditDrawer } from '@/contexts/contact-edit-drawer-context'
+import ContactImportButton from './contact-import-button'
 
-export default function ContactsPageHeader() {
+interface ContactsPageHeaderProps {
+  existingContacts: { name: string; zip: string }[]
+}
+
+export default function ContactsPageHeader({ existingContacts }: ContactsPageHeaderProps) {
   const { openDrawer } = useContactEditDrawer()
 
   return (
@@ -15,13 +20,16 @@ export default function ContactsPageHeader() {
           Verwaltung Ihrer Kontakte (Kunden, Lieferanten, Partner)
         </p>
       </div>
-      <Button
-        onClick={() => openDrawer(null)}
-        className="text-sm"
-      >
-        <Plus className="h-4 w-4 mr-2" />
-        Neuer Kontakt
-      </Button>
+      <div className="flex items-center gap-2">
+        <ContactImportButton existingContacts={existingContacts} />
+        <Button
+          onClick={() => openDrawer(null)}
+          className="text-sm"
+        >
+          <Plus className="h-4 w-4 mr-2" />
+          Neuer Kontakt
+        </Button>
+      </div>
     </div>
   )
 }

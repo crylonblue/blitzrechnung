@@ -25,9 +25,15 @@ export default async function ContactsPage() {
     )
   }
 
+  // Für die Duplikat-Hinweise in der Import-Vorschau.
+  const existingContacts = (contacts || []).map((c) => ({
+    name: c.name,
+    zip: (c.address as { zip?: string } | null)?.zip || '',
+  }))
+
   return (
     <div className="mx-auto max-w-7xl px-6 py-12">
-      <ContactsPageHeader />
+      <ContactsPageHeader existingContacts={existingContacts} />
 
       {contacts && contacts.length === 0 ? (
         <ContactsEmptyState />
