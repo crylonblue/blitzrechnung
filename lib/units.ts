@@ -1,26 +1,29 @@
 /**
- * Unit definitions with German labels and ZUGFeRD/UN/ECE Recommendation 20 codes
+ * Unit definitions with German and English labels and ZUGFeRD/UN/ECE Recommendation 20 codes
  */
 export const UNITS = [
-  { value: 'hour', label: 'Stunde', code: 'HUR' },
-  { value: 'day', label: 'Tag', code: 'DAY' },
-  { value: 'piece', label: 'Stück', code: 'C62' },
-  { value: 'km', label: 'Kilometer', code: 'KMT' },
-  { value: 'kg', label: 'Kilogramm', code: 'KGM' },
-  { value: 'month', label: 'Monat', code: 'MON' },
-  { value: 'meter', label: 'Meter', code: 'MTR' },
-  { value: 'liter', label: 'Liter', code: 'LTR' },
-  { value: 'gram', label: 'Gramm', code: 'GRM' },
+  { value: 'hour', label: 'Stunde', labelEn: 'Hour', code: 'HUR' },
+  { value: 'day', label: 'Tag', labelEn: 'Day', code: 'DAY' },
+  { value: 'piece', label: 'Stück', labelEn: 'Piece', code: 'C62' },
+  { value: 'km', label: 'Kilometer', labelEn: 'Kilometre', code: 'KMT' },
+  { value: 'kg', label: 'Kilogramm', labelEn: 'Kilogram', code: 'KGM' },
+  { value: 'month', label: 'Monat', labelEn: 'Month', code: 'MON' },
+  { value: 'meter', label: 'Meter', labelEn: 'Metre', code: 'MTR' },
+  { value: 'liter', label: 'Liter', labelEn: 'Litre', code: 'LTR' },
+  { value: 'gram', label: 'Gramm', labelEn: 'Gram', code: 'GRM' },
 ] as const
 
 export type UnitValue = typeof UNITS[number]['value']
 
 /**
- * Get the German label for a unit value
+ * Get the label for a unit value in the invoice language. Also accepts a German
+ * label (older line items stored "Stück" instead of "piece"); free-text units
+ * are returned unchanged.
  */
-export function getUnitLabel(value: string): string {
-  const unit = UNITS.find(u => u.value === value)
-  return unit?.label ?? value
+export function getUnitLabel(value: string, language: 'de' | 'en' = 'de'): string {
+  const unit = UNITS.find(u => u.value === value || u.label === value)
+  if (!unit) return value
+  return language === 'en' ? unit.labelEn : unit.label
 }
 
 /**

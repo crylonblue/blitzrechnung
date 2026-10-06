@@ -29,6 +29,7 @@ import { toast } from 'sonner'
 import ApiKeysSection from './api-keys-section'
 import DatevExportButton from '@/components/invoices/datev-export-button'
 import { DEFAULT_INVOICE_EMAIL_SUBJECT, DEFAULT_INVOICE_EMAIL_BODY, EMAIL_PLACEHOLDERS } from '@/lib/email-templates'
+import { DEFAULT_INVOICE_TEXTS } from '@/lib/invoice-texts'
 import LogoUpload from './logo-upload'
 
 interface CompanySettingsProps {
@@ -90,8 +91,10 @@ export default function CompanySettings({ company: initialCompany, billing }: Co
     // Girocode on invoice PDFs — on unless the company opted out
     invoice_show_girocode: initialCompany.invoice_show_girocode !== false,
     // Invoice text settings
-    default_intro_text: initialCompany.default_intro_text || 'Vielen Dank für Ihr Vertrauen. Bitte überweisen Sie den Rechnungsbetrag innerhalb der angegebenen Zahlungsfrist.',
-    default_outro_text: initialCompany.default_outro_text || 'Vielen Dank für Ihren Auftrag. Bei Fragen zu dieser Rechnung stehen wir Ihnen gerne zur Verfügung.',
+    default_intro_text: initialCompany.default_intro_text || DEFAULT_INVOICE_TEXTS.de.intro,
+    default_outro_text: initialCompany.default_outro_text || DEFAULT_INVOICE_TEXTS.de.outro,
+    default_intro_text_en: initialCompany.default_intro_text_en || DEFAULT_INVOICE_TEXTS.en.intro,
+    default_outro_text_en: initialCompany.default_outro_text_en || DEFAULT_INVOICE_TEXTS.en.outro,
     // Legal information for footer
     court: (initialCompany as any).court || '',
     register_number: (initialCompany as any).register_number || '',
@@ -163,6 +166,8 @@ export default function CompanySettings({ company: initialCompany, billing }: Co
           invoice_show_girocode: company.invoice_show_girocode,
           default_intro_text: company.default_intro_text || null,
           default_outro_text: company.default_outro_text || null,
+          default_intro_text_en: company.default_intro_text_en || null,
+          default_outro_text_en: company.default_outro_text_en || null,
           // Legal information for footer
           court: company.court || null,
           register_number: company.register_number || null,
@@ -833,7 +838,7 @@ export default function CompanySettings({ company: initialCompany, billing }: Co
                         value={company.default_intro_text}
                         onChange={(e) => setCompany({ ...company, default_intro_text: e.target.value })}
                         className="mt-1.5 w-full min-h-[80px] rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800"
-                        placeholder="Vielen Dank für Ihr Vertrauen. Bitte überweisen Sie den Rechnungsbetrag innerhalb der angegebenen Zahlungsfrist."
+                        placeholder={DEFAULT_INVOICE_TEXTS.de.intro}
                       />
                       <p className="mt-1.5 text-xs text-meta">
                         Dieser Text erscheint auf jeder Rechnung unter der Überschrift.
@@ -847,7 +852,7 @@ export default function CompanySettings({ company: initialCompany, billing }: Co
                         value={company.default_outro_text}
                         onChange={(e) => setCompany({ ...company, default_outro_text: e.target.value })}
                         className="mt-1.5 w-full min-h-[80px] rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800"
-                        placeholder="Vielen Dank für Ihren Auftrag. Bei Fragen zu dieser Rechnung stehen wir Ihnen gerne zur Verfügung."
+                        placeholder={DEFAULT_INVOICE_TEXTS.de.outro}
                       />
                       <p className="mt-1.5 text-xs text-meta">
                         Dieser Text erscheint auf jeder Rechnung am Ende, nach den Bankdaten.
@@ -877,6 +882,35 @@ export default function CompanySettings({ company: initialCompany, billing }: Co
                       onCheckedChange={(checked) => setCompany({ ...company, enable_english_invoices: checked })}
                     />
                   </div>
+
+                  {company.enable_english_invoices && (
+                    <div className="mt-6 space-y-6">
+                      <div>
+                        <Label htmlFor="default_intro_text_en">Einleitungstext (Englisch)</Label>
+                        <textarea
+                          id="default_intro_text_en"
+                          value={company.default_intro_text_en}
+                          onChange={(e) => setCompany({ ...company, default_intro_text_en: e.target.value })}
+                          className="mt-1.5 w-full min-h-[80px] rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800"
+                          placeholder={DEFAULT_INVOICE_TEXTS.en.intro}
+                        />
+                      </div>
+
+                      <div>
+                        <Label htmlFor="default_outro_text_en">Schlusstext (Englisch)</Label>
+                        <textarea
+                          id="default_outro_text_en"
+                          value={company.default_outro_text_en}
+                          onChange={(e) => setCompany({ ...company, default_outro_text_en: e.target.value })}
+                          className="mt-1.5 w-full min-h-[80px] rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800"
+                          placeholder={DEFAULT_INVOICE_TEXTS.en.outro}
+                        />
+                        <p className="mt-1.5 text-xs text-meta">
+                          Diese Texte erscheinen auf Rechnungen, die auf Englisch erstellt werden.
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Email Template Section */}

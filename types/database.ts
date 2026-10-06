@@ -35,6 +35,8 @@ export interface Database {
           invoice_show_girocode: boolean
           default_intro_text: string | null
           default_outro_text: string | null
+          default_intro_text_en: string | null
+          default_outro_text_en: string | null
           court: string | null
           register_number: string | null
           managing_director: string | null
@@ -67,6 +69,8 @@ export interface Database {
           invoice_show_girocode?: boolean
           default_intro_text?: string | null
           default_outro_text?: string | null
+          default_intro_text_en?: string | null
+          default_outro_text_en?: string | null
           court?: string | null
           register_number?: string | null
           managing_director?: string | null
@@ -99,6 +103,8 @@ export interface Database {
           invoice_show_girocode?: boolean
           default_intro_text?: string | null
           default_outro_text?: string | null
+          default_intro_text_en?: string | null
+          default_outro_text_en?: string | null
           court?: string | null
           register_number?: string | null
           managing_director?: string | null

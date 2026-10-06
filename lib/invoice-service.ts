@@ -8,6 +8,7 @@ import { validateXRechnungInvoice } from './schema'
 import { sendEmail, getDefaultFromEmail } from './email'
 import { textToHtml, generateEmailSubject, generateEmailBody } from './email-templates'
 import { getBillingState, TRIAL_EXPIRED_MESSAGE, TRIAL_EXPIRED_DETAILS } from './billing'
+import { resolveInvoiceTexts } from './invoice-texts'
 
 /**
  * Shared invoice business logic, used by both the session API (app/api/*) and
@@ -146,8 +147,10 @@ export async function finalizeInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: 
     ? { name: company.name, address: company.address as any, vat_id: company.vat_id || undefined }
     : buyerSnapshot!
 
-  const introText = dbInvoice.intro_text || (company as any).default_intro_text || null
-  const outroText = dbInvoice.outro_text || (company as any).default_outro_text || null
+  const language = (dbInvoice.language as 'de' | 'en') || 'de'
+  const defaultTexts = resolveInvoiceTexts(company, language)
+  const introText = dbInvoice.intro_text || defaultTexts.introText
+  const outroText = dbInvoice.outro_text || defaultTexts.outroText
   const buyerReference = (dbInvoice as any).buyer_reference || null
 
   // Assign an atomic invoice number if the draft doesn't have one yet.
@@ -172,7 +175,6 @@ export async function finalizeInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: 
     throw new InvoiceServiceError(400, 'VALIDATION_ERROR', 'XRechnung-Validierung fehlgeschlagen', validation.errors)
   }
 
-  const language = (dbInvoice.language as 'de' | 'en') || 'de'
   let pdfBuffer: Uint8Array
   let xmlString: string
   try {
