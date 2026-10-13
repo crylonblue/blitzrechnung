@@ -33,6 +33,7 @@ export interface Database {
           contact_email: string | null
           enable_english_invoices: boolean
           invoice_show_girocode: boolean
+          additional_contacts: Json
           default_intro_text: string | null
           default_outro_text: string | null
           default_intro_text_en: string | null
@@ -67,6 +68,7 @@ export interface Database {
           contact_email?: string | null
           enable_english_invoices?: boolean
           invoice_show_girocode?: boolean
+          additional_contacts?: Json
           default_intro_text?: string | null
           default_outro_text?: string | null
           default_intro_text_en?: string | null
@@ -101,6 +103,7 @@ export interface Database {
           contact_email?: string | null
           enable_english_invoices?: boolean
           invoice_show_girocode?: boolean
+          additional_contacts?: Json
           default_intro_text?: string | null
           default_outro_text?: string | null
           default_intro_text_en?: string | null
@@ -299,6 +302,7 @@ export interface Database {
           intro_text: string | null
           outro_text: string | null
           buyer_reference: string | null
+          contact_person_id: string | null
           cancelled_invoice_id: string | null
           created_at: string
           updated_at: string
@@ -331,6 +335,7 @@ export interface Database {
           intro_text?: string | null
           outro_text?: string | null
           buyer_reference?: string | null
+          contact_person_id?: string | null
           cancelled_invoice_id?: string | null
           created_at?: string
           updated_at?: string
@@ -363,6 +368,7 @@ export interface Database {
           intro_text?: string | null
           outro_text?: string | null
           buyer_reference?: string | null
+          contact_person_id?: string | null
           cancelled_invoice_id?: string | null
           created_at?: string
           updated_at?: string

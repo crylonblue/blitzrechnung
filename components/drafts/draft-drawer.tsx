@@ -104,6 +104,7 @@ export default function DraftDrawer() {
         intro_text: null,
         outro_text: null,
         buyer_reference: null,
+        contact_person_id: null,
         cancelled_invoice_id: null,
         finalized_at: null,
         created_at: new Date().toISOString(),
