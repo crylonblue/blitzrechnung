@@ -9,6 +9,7 @@ import { sendEmail, getDefaultFromEmail } from './email'
 import { textToHtml, generateEmailSubject, generateEmailBody } from './email-templates'
 import { getBillingState, TRIAL_EXPIRED_MESSAGE, TRIAL_EXPIRED_DETAILS } from './billing'
 import { resolveInvoiceTexts } from './invoice-texts'
+import { getAdditionalContacts, resolveSellerContact, resolveReplyTo } from './contact-persons'
 
 /**
  * Shared invoice business logic, used by both the session API (app/api/*) and
@@ -70,9 +71,7 @@ function buildSellerSnapshot(dbInvoice: DBInvoice, company: any): PartySnapshot 
       bank_details: bankDetails
         ? { bank_name: bankDetails.bank_name, iban: bankDetails.iban, bic: bankDetails.bic, account_holder: bankDetails.account_holder }
         : undefined,
-      contact: company.contact_name || company.contact_phone || company.contact_email
-        ? { name: company.contact_name || undefined, phone: company.contact_phone || undefined, email: company.contact_email || undefined }
-        : undefined,
+      contact: resolveSellerContact(company, dbInvoice.contact_person_id),
       // Legal info for the PDF footer (XRechnung-relevant for companies)
       court: company.court || undefined,
       register_number: company.register_number || undefined,
@@ -205,6 +204,12 @@ export async function finalizeInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: 
     intro_text: introText,
     outro_text: outroText,
     buyer_reference: buyerReference,
+    // A contact person deleted since the draft was saved falls back to the
+    // default, so the reply-to must fall back with it.
+    contact_person_id:
+      dbInvoice.seller_is_self && getAdditionalContacts(company).some((c) => c.id === dbInvoice.contact_person_id)
+        ? dbInvoice.contact_person_id
+        : null,
     finalized_at: new Date().toISOString(),
   }
   if (!dbInvoice.recipient_email && finalBuyerSnapshot?.email) {
@@ -294,6 +299,7 @@ export async function cancelInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: st
     seller_is_self: dbInvoice.seller_is_self,
     seller_contact_id: dbInvoice.seller_contact_id,
     seller_snapshot: dbInvoice.seller_snapshot,
+    contact_person_id: dbInvoice.contact_person_id,
     buyer_is_self: dbInvoice.buyer_is_self,
     buyer_contact_id: dbInvoice.buyer_contact_id,
     buyer_snapshot: dbInvoice.buyer_snapshot,
@@ -413,11 +419,7 @@ export async function sendInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: stri
   const fromEmail = useCustomDomain ? emailSettings.from_email! : getDefaultFromEmail()
   const fromName = useCustomDomain ? emailSettings.from_name : (company as any).name
   const from = fromName ? `${fromName} <${fromEmail}>` : fromEmail
-  const replyTo = emailSettings.reply_to_email
-    ? emailSettings.reply_to_name
-      ? `${emailSettings.reply_to_name} <${emailSettings.reply_to_email}>`
-      : emailSettings.reply_to_email
-    : undefined
+  const replyTo = resolveReplyTo(invoice, emailSettings)
   // Attachments (PDF required, XML if present); legacy invoice_file_reference fallback.
   const attachments: Array<{ name: string; content: string; contentType: string }> = []
   const downloadErrors: string[] = []

@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/dialog'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
-import { Check, ChevronsUpDown, LoaderCircle, Copy, CheckCircle, XCircle, AlertCircle } from 'lucide-react'
+import { Check, ChevronsUpDown, LoaderCircle, Copy, CheckCircle, XCircle, AlertCircle, Plus, X } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import { COUNTRIES } from '@/lib/countries'
@@ -31,6 +31,7 @@ import DatevExportButton from '@/components/invoices/datev-export-button'
 import { DEFAULT_INVOICE_EMAIL_SUBJECT, DEFAULT_INVOICE_EMAIL_BODY, EMAIL_PLACEHOLDERS } from '@/lib/email-templates'
 import { DEFAULT_INVOICE_TEXTS } from '@/lib/invoice-texts'
 import LogoUpload from './logo-upload'
+import { getAdditionalContacts, type AdditionalContact } from '@/lib/contact-persons'
 
 interface CompanySettingsProps {
   company: Company
@@ -101,6 +102,13 @@ export default function CompanySettings({ company: initialCompany, billing }: Co
     managing_director: (initialCompany as any).managing_director || '',
   })
 
+  // Weitere Ansprechpartner (zusätzlich zum Standard oben)
+  const [additionalContacts, setAdditionalContacts] = useState<AdditionalContact[]>(() =>
+    getAdditionalContacts(initialCompany)
+  )
+  const updateAdditionalContact = (id: string, patch: Partial<AdditionalContact>) =>
+    setAdditionalContacts((list) => list.map((c) => (c.id === id ? { ...c, ...patch } : c)))
+
   // DATEV / Buchhaltung
   const SKR_DEFAULTS = {
     SKR03: { standard19: '8400', standard7: '8300', steuerfrei: '8100', nullsatz: '8200' },
@@ -131,6 +139,18 @@ export default function CompanySettings({ company: initialCompany, billing }: Co
   const [deleteDomainDialogOpen, setDeleteDomainDialogOpen] = useState(false)
 
   const handleSave = async () => {
+    // Drop untouched empty rows. A filled row needs a name to be selectable and
+    // an e-mail: it becomes the reply-to and the seller address of the e-invoice.
+    const contactsToSave = additionalContacts
+      .map((c) => ({ id: c.id, name: c.name.trim(), phone: c.phone?.trim() || undefined, email: c.email?.trim() || undefined }))
+      .filter((c) => c.name || c.phone || c.email)
+    if (contactsToSave.some((c) => !c.name || !c.email)) {
+      const message = 'Bitte geben Sie für jeden weiteren Ansprechpartner Name und E-Mail an.'
+      setError(message)
+      toast.error(message)
+      return
+    }
+
     setIsSaving(true)
     setError(null)
 
@@ -162,6 +182,7 @@ export default function CompanySettings({ company: initialCompany, billing }: Co
           contact_name: company.contact_name || null,
           contact_phone: company.contact_phone || null,
           contact_email: company.contact_email || null,
+          additional_contacts: contactsToSave,
           enable_english_invoices: company.enable_english_invoices,
           invoice_show_girocode: company.invoice_show_girocode,
           default_intro_text: company.default_intro_text || null,
@@ -715,6 +736,75 @@ export default function CompanySettings({ company: initialCompany, billing }: Co
                       />
                     </div>
                   </div>
+
+                  {additionalContacts.map((contact) => (
+                    <div
+                      key={contact.id}
+                      className="relative mt-6 pt-6 space-y-4 border-t border-dashed"
+                      style={{ borderColor: 'var(--border-default)' }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setAdditionalContacts((list) => list.filter((c) => c.id !== contact.id))}
+                        className="absolute right-0 top-5 p-1 rounded hover:opacity-70"
+                        style={{ color: 'var(--text-meta)' }}
+                        aria-label="Ansprechpartner entfernen"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                      <div>
+                        <Label htmlFor={`contact_name_${contact.id}`}>Name</Label>
+                        <Input
+                          id={`contact_name_${contact.id}`}
+                          type="text"
+                          value={contact.name}
+                          onChange={(e) => updateAdditionalContact(contact.id, { name: e.target.value })}
+                          className="mt-1.5"
+                          placeholder="Vertrieb – Erika Musterfrau"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor={`contact_phone_${contact.id}`}>Telefon</Label>
+                        <Input
+                          id={`contact_phone_${contact.id}`}
+                          type="tel"
+                          value={contact.phone || ''}
+                          onChange={(e) => updateAdditionalContact(contact.id, { phone: e.target.value })}
+                          className="mt-1.5"
+                          placeholder="+49 30 123457"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor={`contact_email_${contact.id}`}>E-Mail</Label>
+                        <Input
+                          id={`contact_email_${contact.id}`}
+                          type="email"
+                          value={contact.email || ''}
+                          onChange={(e) => updateAdditionalContact(contact.id, { email: e.target.value })}
+                          className="mt-1.5"
+                          placeholder="vertrieb@firma.de"
+                        />
+                      </div>
+                    </div>
+                  ))}
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setAdditionalContacts((list) => [...list, { id: crypto.randomUUID(), name: '', phone: '', email: '' }])
+                    }
+                    className="mt-4 inline-flex items-center gap-1.5 text-sm hover:underline"
+                    style={{ color: 'var(--text-secondary)' }}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Weiteren Ansprechpartner hinzufügen
+                  </button>
+                  {additionalContacts.length > 0 && (
+                    <p className="mt-2 text-xs" style={{ color: 'var(--text-meta)' }}>
+                      Beim Erstellen einer Rechnung wählen Sie den Ansprechpartner aus. Antworten auf die
+                      Rechnungs-E-Mail gehen dann an dessen E-Mail-Adresse.
+                    </p>
+                  )}
                 </div>
 
                 {/* Legal Information Section for PDF Footer */}

@@ -20,6 +20,7 @@ import {
   generateEmailSubject,
   generateEmailBody,
 } from '@/lib/email-templates'
+import { resolveReplyTo } from '@/lib/contact-persons'
 
 interface SendInvoiceModalProps {
   invoice: Invoice
@@ -131,6 +132,10 @@ export default function SendInvoiceModal({
   }
 
   const hasAttachments = invoice.pdf_url || invoice.xml_url
+  // Only worth pointing out when a non-default Ansprechpartner redirects replies
+  const contactReplyTo = invoice.contact_person_id
+    ? resolveReplyTo(invoice, { mode: 'default' })
+    : undefined
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -187,6 +192,12 @@ export default function SendInvoiceModal({
                   className="mt-1.5 w-full min-h-[120px] rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800"
                 />
               </div>
+
+              {contactReplyTo && (
+                <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                  Antworten gehen an: {contactReplyTo}
+                </p>
+              )}
 
               {hasAttachments && (
                 <div>

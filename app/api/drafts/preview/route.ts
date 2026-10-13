@@ -5,6 +5,7 @@ import { mapDBInvoiceToPDFInvoice } from '@/lib/invoice-mapper'
 import { computeInvoiceTotals } from '@/lib/invoice-totals'
 import type { Invoice as DBInvoice, PartySnapshot, LineItem } from '@/types'
 import { resolveInvoiceTexts } from '@/lib/invoice-texts'
+import { resolveSellerContact } from '@/lib/contact-persons'
 
 interface PreviewRequest {
   companyId: string
@@ -18,6 +19,7 @@ interface PreviewRequest {
   serviceDate?: string | null
   language: 'de' | 'en'
   buyerReference?: string
+  contactPersonId?: string | null
 }
 
 /**
@@ -46,6 +48,7 @@ export async function POST(request: NextRequest) {
       invoiceDate, 
       language,
       buyerReference: providedBuyerReference,
+      contactPersonId,
     } = body
 
     if (!companyId) {
@@ -92,11 +95,7 @@ export async function POST(request: NextRequest) {
           bic: bankDetails.bic,
           account_holder: bankDetails.account_holder,
         } : undefined,
-        contact: (company.contact_name || company.contact_phone || company.contact_email) ? {
-          name: company.contact_name || undefined,
-          phone: company.contact_phone || undefined,
-          email: company.contact_email || undefined,
-        } : undefined,
+        contact: resolveSellerContact(company, contactPersonId),
         // Legal info for PDF footer
         court: (company as any).court || undefined,
         register_number: (company as any).register_number || undefined,
@@ -167,6 +166,7 @@ export async function POST(request: NextRequest) {
       intro_text: introText,
       outro_text: outroText,
       buyer_reference: buyerReference,
+      contact_person_id: contactPersonId ?? null,
       cancelled_invoice_id: null,
       pdf_url: null,
       xml_url: null,

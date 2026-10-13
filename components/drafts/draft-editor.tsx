@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/dialog'
 import { toast } from 'sonner'
 import { validateInvoiceForFinalization, formatValidationErrors } from '@/lib/invoice-validation'
+import { getAdditionalContacts } from '@/lib/contact-persons'
 
 interface DraftEditorProps {
   draft: Invoice
@@ -66,6 +67,11 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
   
   // Text fields state
   const [buyerReference, setBuyerReference] = useState(draft.buyer_reference || '')
+
+  // Contact person: null = the company's default Ansprechpartner
+  const [contactPersonId, setContactPersonId] = useState<string | null>(draft.contact_person_id ?? null)
+  const additionalContacts = getAdditionalContacts(company)
+  const selectedContactPerson = additionalContacts.find((c) => c.id === contactPersonId)
 
   // Load company data
   useEffect(() => {
@@ -115,6 +121,7 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
           total_amount: totalAmount,
           language: language,
           buyer_reference: buyerReference || null,
+          contact_person_id: sellerIsSelf ? contactPersonId : null,
         })
         .eq('id', draft.id)
         .select()
@@ -149,6 +156,7 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
           total_amount: totalAmount,
           language: language,
           buyer_reference: buyerReference || null,
+          contact_person_id: sellerIsSelf ? contactPersonId : null,
         })
         .select()
         .single()
@@ -190,6 +198,27 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
   const handleBuyerSelect = (contact: PartySnapshot | null, isSelf: boolean) => {
     setBuyerIsSelf(isSelf)
     setBuyerSnapshot(contact)
+    if (!isSelf && contact?.id) preselectLastContactPerson(contact.id)
+  }
+
+  // Departments usually serve the same customers, so preselect whichever
+  // Ansprechpartner was used on the last invoice to this customer.
+  const preselectLastContactPerson = async (buyerContactId: string) => {
+    if (additionalContacts.length === 0) return
+    let query = supabase
+      .from('invoices')
+      .select('contact_person_id')
+      .eq('company_id', draft.company_id)
+      .eq('buyer_contact_id', buyerContactId)
+      .eq('seller_is_self', true)
+      .order('created_at', { ascending: false })
+      .limit(1)
+    if (draft.id) query = query.neq('id', draft.id)
+    const { data } = await query
+    const lastId = data?.[0]?.contact_person_id ?? null
+    if (data?.length && (lastId === null || additionalContacts.some((c) => c.id === lastId))) {
+      setContactPersonId(lastId)
+    }
   }
 
   const handleLineItemsChange = (items: LineItem[]) => {
@@ -329,6 +358,7 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
             total_amount: totalAmount,
             language: language,
             buyer_reference: buyerReference || null,
+            contact_person_id: sellerIsSelf ? contactPersonId : null,
           })
           .eq('id', draft.id)
           .eq('status', 'draft')
@@ -364,6 +394,7 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
             total_amount: totalAmount,
             language: language,
             buyer_reference: buyerReference || null,
+            contact_person_id: sellerIsSelf ? contactPersonId : null,
           })
           .select()
           .single()
@@ -451,6 +482,7 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
           serviceDate: draft.service_date,
           language,
           buyerReference,
+          contactPersonId: sellerIsSelf ? contactPersonId : null,
         }),
       })
 
@@ -537,6 +569,32 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
                 label="Absender auswählen..."
                 onSelect={handleSellerSelect}
               />
+
+              {/* Only shown once the company has more than one Ansprechpartner */}
+              {sellerIsSelf && additionalContacts.length > 0 && (
+                <div className="mt-4">
+                  <Label htmlFor="contact_person">Ansprechpartner</Label>
+                  <Select
+                    value={selectedContactPerson?.id ?? 'default'}
+                    onValueChange={(value) => setContactPersonId(value === 'default' ? null : value)}
+                  >
+                    <SelectTrigger id="contact_person" className="mt-1.5">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="default">{company?.contact_name || 'Standard'}</SelectItem>
+                      {additionalContacts.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {selectedContactPerson && (
+                    <p className="mt-1.5 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                      Steht auf der Rechnung; Antworten auf die Rechnungs-E-Mail gehen an diesen Ansprechpartner.
+                    </p>
+                  )}
+                </div>
+              )}
 
               <div className="pt-6 mt-6 border-t" style={{ borderColor: 'var(--border-default)' }}>
                 <h2 className="mb-4 text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--text-primary)' }}>An (Empfänger)</h2>
