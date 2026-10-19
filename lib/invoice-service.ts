@@ -166,7 +166,8 @@ export async function finalizeInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: 
     dbInvoice.seller_is_self ? (company as any).logo_url : null,
     introText,
     outroText,
-    buyerReference
+    buyerReference,
+    { kleinunternehmer: (company as any)?.kleinunternehmer === true }
   )
 
   const validation = validateXRechnungInvoice(pdfInvoice)
@@ -326,7 +327,8 @@ export async function cancelInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: st
     dbInvoice.seller_is_self ? (company as any).logo_url : null,
     dbInvoice.intro_text,
     dbInvoice.outro_text,
-    (dbInvoice as any).buyer_reference
+    (dbInvoice as any).buyer_reference,
+    { kleinunternehmer: (company as any)?.kleinunternehmer === true }
   )
   const language = (dbInvoice.language as 'de' | 'en') || 'de'
   const options = { isCancellation: true, originalInvoiceNumber: dbInvoice.invoice_number || undefined }

@@ -1,4 +1,5 @@
 import type { Invoice as PDFInvoice } from './schema'
+import { alsKleinunternehmerRechnung } from './kleinunternehmer'
 import type { Invoice as DBInvoice, PartySnapshot, LineItem } from '@/types'
 
 /**
@@ -22,7 +23,12 @@ export function mapDBInvoiceToPDFInvoice(
   companyLogoUrl?: string | null,
   introText?: string | null,
   outroText?: string | null,
-  buyerReference?: string | null
+  buyerReference?: string | null,
+  /**
+   * Firmenbezogene Regeln, die erst beim Abbilden greifen. Hier zentral statt
+   * an drei Aufrufstellen, damit PDF und XRechnung garantiert dasselbe sehen.
+   */
+  options?: { kleinunternehmer?: boolean }
 ): PDFInvoice {
   const lineItems = (dbInvoice.line_items as unknown as LineItem[]) || []
   
@@ -116,7 +122,7 @@ export function mapDBInvoiceToPDFInvoice(
       }
     : undefined
 
-  return {
+  const abgebildet: PDFInvoice = {
     invoiceNumber: dbInvoice.invoice_number || '',
     invoiceDate: dbInvoice.invoice_date || new Date().toISOString().split('T')[0],
     serviceDate: dbInvoice.service_date || dbInvoice.invoice_date || new Date().toISOString().split('T')[0], // Leistungsdatum (BT-72); falls back to invoice date
@@ -134,5 +140,9 @@ export function mapDBInvoiceToPDFInvoice(
     // XRechnung BR-DE-15: Buyer Reference (uses provided value or falls back to invoice number)
     buyerReference: buyerReference || dbInvoice.invoice_number || undefined,
   }
+
+  // § 19 UStG überschreibt jede Positionsangabe. Bewusst zuletzt, damit keine
+  // frühere Zuweisung die Regel wieder aushebelt.
+  return options?.kleinunternehmer ? alsKleinunternehmerRechnung(abgebildet) : abgebildet
 }
 

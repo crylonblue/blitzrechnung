@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { finalizeInvoice, assertCompanyMembership, InvoiceServiceError } from '@/lib/invoice-service'
+import { meldeFehler } from '@/lib/observability'
 
 export async function POST(request: NextRequest) {
   try {
@@ -28,7 +29,7 @@ export async function POST(request: NextRequest) {
     if (err instanceof InvoiceServiceError) {
       return NextResponse.json({ error: err.message, details: err.details }, { status: err.status })
     }
-    console.error('Error finalizing invoice:', err)
+    meldeFehler(err, { bereich: 'invoice.finalize' })
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
