@@ -33,6 +33,7 @@ export interface Database {
           contact_email: string | null
           enable_english_invoices: boolean
           invoice_show_girocode: boolean
+          kleinunternehmer: boolean
           additional_contacts: Json
           default_intro_text: string | null
           default_outro_text: string | null
@@ -68,6 +69,7 @@ export interface Database {
           contact_email?: string | null
           enable_english_invoices?: boolean
           invoice_show_girocode?: boolean
+          kleinunternehmer?: boolean
           additional_contacts?: Json
           default_intro_text?: string | null
           default_outro_text?: string | null
@@ -103,6 +105,7 @@ export interface Database {
           contact_email?: string | null
           enable_english_invoices?: boolean
           invoice_show_girocode?: boolean
+          kleinunternehmer?: boolean
           additional_contacts?: Json
           default_intro_text?: string | null
           default_outro_text?: string | null

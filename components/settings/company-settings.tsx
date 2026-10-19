@@ -91,6 +91,7 @@ export default function CompanySettings({ company: initialCompany, billing }: Co
     enable_english_invoices: initialCompany.enable_english_invoices || false,
     // Girocode on invoice PDFs — on unless the company opted out
     invoice_show_girocode: initialCompany.invoice_show_girocode !== false,
+    kleinunternehmer: (initialCompany as any).kleinunternehmer === true,
     // Invoice text settings
     default_intro_text: initialCompany.default_intro_text || DEFAULT_INVOICE_TEXTS.de.intro,
     default_outro_text: initialCompany.default_outro_text || DEFAULT_INVOICE_TEXTS.de.outro,
@@ -185,6 +186,7 @@ export default function CompanySettings({ company: initialCompany, billing }: Co
           additional_contacts: contactsToSave,
           enable_english_invoices: company.enable_english_invoices,
           invoice_show_girocode: company.invoice_show_girocode,
+          kleinunternehmer: company.kleinunternehmer,
           default_intro_text: company.default_intro_text || null,
           default_outro_text: company.default_outro_text || null,
           default_intro_text_en: company.default_intro_text_en || null,
@@ -664,6 +666,25 @@ export default function CompanySettings({ company: initialCompany, billing }: Co
                       />
                     </div>
 
+                    <div className="flex items-center justify-between pt-2">
+                      <div className="space-y-0.5 pr-6">
+                        <Label htmlFor="kleinunternehmer" className="text-base">
+                          Kleinunternehmer nach § 19 UStG
+                        </Label>
+                        <p className="text-xs text-meta">
+                          Ihre Rechnungen weisen dann keine Umsatzsteuer aus. Alle Positionen werden
+                          automatisch als steuerbefreit gekennzeichnet, und der gesetzlich vorgeschriebene
+                          Hinweis erscheint auf der Rechnung — auch in der XRechnung. Ein Steuersatz lässt
+                          sich dann nicht mehr versehentlich ausweisen.
+                        </p>
+                      </div>
+                      <Switch
+                        id="kleinunternehmer"
+                        checked={company.kleinunternehmer}
+                        onCheckedChange={(checked) => setCompany({ ...company, kleinunternehmer: checked })}
+                      />
+                    </div>
+                    
                     <div className="flex items-center justify-between pt-2">
                       <div className="space-y-0.5 pr-6">
                         <Label htmlFor="invoice_show_girocode" className="text-base">

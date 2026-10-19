@@ -3,6 +3,7 @@ import type Stripe from 'stripe'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createServiceRoleClient } from '@/lib/supabase/server'
 import { getStripe, planForPriceId } from '@/lib/stripe'
+import { meldeFehler, meldeWarnung } from '@/lib/observability'
 
 /**
  * The only writer of subscription state. The browser is never trusted for this:
@@ -19,7 +20,7 @@ export const dynamic = 'force-dynamic'
 export async function POST(request: NextRequest) {
   const secret = process.env.STRIPE_WEBHOOK_SECRET
   if (!secret) {
-    console.error('STRIPE_WEBHOOK_SECRET is not set')
+    meldeFehler(new Error('STRIPE_WEBHOOK_SECRET ist nicht gesetzt'), { bereich: 'billing.webhook' })
     return NextResponse.json({ error: 'Webhook not configured' }, { status: 500 })
   }
 
@@ -34,7 +35,7 @@ export async function POST(request: NextRequest) {
   try {
     event = await stripe.webhooks.constructEventAsync(payload, signature, secret)
   } catch (err) {
-    console.error('Stripe webhook signature verification failed:', err)
+    meldeFehler(err, { bereich: 'billing.webhook.signatur' })
     return NextResponse.json({ error: 'Invalid signature' }, { status: 400 })
   }
 
@@ -62,7 +63,7 @@ export async function POST(request: NextRequest) {
     }
   } catch (err) {
     // Return 500 so Stripe retries rather than dropping the event.
-    console.error(`Error handling Stripe event ${event.type}:`, err)
+    meldeFehler(err, { bereich: 'billing.webhook.verarbeitung', extra: { event: event.type } })
     return NextResponse.json({ error: 'Handler failed' }, { status: 500 })
   }
 
@@ -91,7 +92,10 @@ async function syncSubscription(
     companyId = data?.company_id ?? null
   }
   if (!companyId) {
-    console.error(`No company for Stripe subscription ${subscription.id} (customer ${customerId})`)
+    meldeWarnung('Stripe-Abo ohne zugeordnete Firma', {
+      bereich: 'billing.webhook.zuordnung',
+      extra: { subscription: subscription.id, customer: customerId },
+    })
     return
   }
 

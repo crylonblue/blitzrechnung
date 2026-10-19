@@ -185,7 +185,8 @@ export async function POST(request: NextRequest) {
       sellerIsSelf ? company?.logo_url : null,
       introText,
       outroText,
-      buyerReference || 'VORSCHAU' // Use provided reference or show preview indicator
+      buyerReference || 'VORSCHAU', // Use provided reference or show preview indicator
+      { kleinunternehmer: (company as any)?.kleinunternehmer === true }
     )
 
     // Generate PDF. The preview must show the Girocode exactly as the finalized
