@@ -3,7 +3,11 @@ import { Invoice } from '@/types'
 export function isOverdue(invoice: Invoice): boolean {
   if (!invoice.due_date) return false
   if (['paid', 'cancelled', 'draft'].includes(invoice.status)) return false
-  
+  // Ein Storno-Beleg erbt Status 'created' und das Fälligkeitsdatum der
+  // Ursprungsrechnung, ist aber eine Gutschrift — aus ihm wird nie eine
+  // überfällige Forderung.
+  if (invoice.invoice_type === 'cancellation') return false
+
   const today = new Date()
   today.setHours(0, 0, 0, 0)
   

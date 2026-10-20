@@ -4,6 +4,7 @@ import { format } from 'date-fns'
 import { de } from 'date-fns/locale'
 import type { Address, BankDetails } from '@/types'
 import { getBillingState } from '@/lib/billing'
+import { computeDashboardMetrics } from '@/lib/dashboard-metrics'
 import { getAppSession } from '@/lib/app-session'
 import TrialConversionBanner from '@/components/dashboard/trial-conversion-banner'
 import NewDraftButton from '@/components/drafts/new-draft-button'
@@ -92,7 +93,7 @@ export default async function DashboardPage() {
       .limit(5),
     supabase
       .from('invoices')
-      .select('status, due_date, invoice_date, total_amount, subtotal')
+      .select('id, status, invoice_type, due_date, invoice_date, total_amount, subtotal, cancelled_invoice_id')
       .in('company_id', companyIds)
       .neq('status', 'draft'),
   ])
@@ -103,37 +104,14 @@ export default async function DashboardPage() {
   const recentInvoices = recentInvoicesResult.data || []
 
   // Cash-flow KPIs — what a business actually needs at a glance.
-  const UNPAID = new Set(['created', 'sent', 'reminded'])
-  const startOfToday = new Date()
-  startOfToday.setHours(0, 0, 0, 0)
-  const currentYear = startOfToday.getFullYear()
-
-  let openAmount = 0 // gross owed by customers (issued, not yet paid)
-  let overdueAmount = 0 // of the open amount, past the due date
-  let overdueCount = 0
-  let revenueYearNet = 0 // net revenue invoiced in the current year
-
-  for (const inv of issuedInvoicesResult.data || []) {
-    const gross = inv.total_amount || 0
-    if (UNPAID.has(inv.status)) {
-      openAmount += gross
-      if (inv.due_date) {
-        const due = new Date(inv.due_date)
-        due.setHours(0, 0, 0, 0)
-        if (due < startOfToday) {
-          overdueAmount += gross
-          overdueCount += 1
-        }
-      }
-    }
-    if (
-      inv.status !== 'cancelled' &&
-      inv.invoice_date &&
-      new Date(inv.invoice_date).getFullYear() === currentYear
-    ) {
-      revenueYearNet += inv.subtotal || 0
-    }
-  }
+  // Die Rechnung selbst liegt in lib/dashboard-metrics, damit sie testbar ist.
+  const {
+    openAmount,
+    overdueAmount,
+    overdueCount,
+    revenueYearNet,
+    year: currentYear,
+  } = computeDashboardMetrics(issuedInvoicesResult.data || [])
 
   const eur = (value: number) =>
     new Intl.NumberFormat('de-DE', {
