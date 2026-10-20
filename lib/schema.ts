@@ -3,6 +3,12 @@ import { z } from "zod";
 export const AddressSchema = z.object({
   street: z.string().min(1, "Street is required"),
   streetNumber: z.string().min(1, "Street number is required"),
+  /**
+   * Zusatzzeile unter der Straße — Abteilung, Gebäude, c/o, Postfach oder was
+   * bei internationalen Anschriften sonst zwischen Straße und Ort gehört.
+   * In EN 16931 ist das BT-51 bzw. die zweite Adresszeile (line2).
+   */
+  addressLine2: z.string().optional(),
   postalCode: z.string().min(1, "Postal code is required"),
   city: z.string().min(1, "City is required"),
   country: z.string().length(2, "Country code must be ISO 3166-1 alpha-2 format (e.g., 'DE', 'FR')").default("DE"),

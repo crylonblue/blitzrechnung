@@ -37,6 +37,7 @@ export default function ContactEditForm({ contact: initialContact, onClose }: Co
     name: initialContact?.name || '',
     street: address?.street || '',
     streetnumber: address?.streetnumber || '',
+    addressline2: address?.addressline2 || '',
     city: address?.city || '',
     zip: address?.zip || '',
     country: address?.country || 'DE',
@@ -75,6 +76,7 @@ export default function ContactEditForm({ contact: initialContact, onClose }: Co
         name: initialContact.name || '',
         street: addr?.street || '',
         streetnumber: addr?.streetnumber || '',
+        addressline2: addr?.addressline2 || '',
         city: addr?.city || '',
         zip: addr?.zip || '',
         country: addr?.country || 'DE',
@@ -98,6 +100,7 @@ export default function ContactEditForm({ contact: initialContact, onClose }: Co
         name: '',
         street: '',
         streetnumber: '',
+        addressline2: '',
         city: '',
         zip: '',
         country: 'DE',
@@ -156,6 +159,7 @@ export default function ContactEditForm({ contact: initialContact, onClose }: Co
             address: {
               street: contact.street,
               streetnumber: contact.streetnumber,
+              addressline2: contact.addressline2 || undefined,
               city: contact.city,
               zip: contact.zip,
               country: contact.country,
@@ -216,6 +220,7 @@ export default function ContactEditForm({ contact: initialContact, onClose }: Co
             address: {
               street: contact.street,
               streetnumber: contact.streetnumber,
+              addressline2: contact.addressline2 || undefined,
               city: contact.city,
               zip: contact.zip,
               country: contact.country,
@@ -353,6 +358,20 @@ export default function ContactEditForm({ contact: initialContact, onClose }: Co
                 className="mt-1"
                 autoComplete="off"
                 required
+              />
+            </div>
+            <div className="col-span-2">
+              <Label htmlFor="addressline2" className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                Adresszusatz
+              </Label>
+              <Input
+                id="addressline2"
+                type="text"
+                value={contact.addressline2}
+                onChange={(e) => setContact({ ...contact, addressline2: e.target.value })}
+                placeholder="Abteilung, Gebäude, c/o …"
+                className="mt-1"
+                autoComplete="off"
               />
             </div>
           </div>

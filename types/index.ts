@@ -32,6 +32,8 @@ export type ProductUpdate = Database['public']['Tables']['products']['Update']
 export interface Address {
   street: string
   streetnumber: string
+  /** Zusatzzeile: Abteilung, Gebäude, c/o. Optional, weil Bestandsdaten sie nicht haben. */
+  addressline2?: string
   city: string
   zip: string
   country: string
