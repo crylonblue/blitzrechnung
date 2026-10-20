@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { Invoice, LineItem, PartySnapshot, Address, Company } from '@/types'
 import { createClient } from '@/lib/supabase/client'
@@ -23,7 +23,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { toast } from 'sonner'
-import { validateInvoiceForFinalization, formatValidationErrors } from '@/lib/invoice-validation'
+import { validateInvoiceForFinalization, formatValidationErrors, type ValidationError } from '@/lib/invoice-validation'
 import { getAdditionalContacts } from '@/lib/contact-persons'
 
 interface DraftEditorProps {
@@ -43,6 +43,9 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
   const [finalizeConfirmOpen, setFinalizeConfirmOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [company, setCompany] = useState<Company | null>(null)
+  // Solange die Firmendaten laden, wissen wir noch nicht, was wirklich fehlt —
+  // dann zeigen wir keinen Hinweis, statt einen falschen aufblitzen zu lassen.
+  const [isCompanyLoading, setIsCompanyLoading] = useState(true)
   const [isPreviewLoading, setIsPreviewLoading] = useState(false)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false)
@@ -59,7 +62,12 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
     (draft.buyer_snapshot as PartySnapshot | null) || null
   )
 
-  const lineItems = (draft.line_items as unknown as LineItem[]) || []
+  // Das `|| []` erzeugt sonst bei jedem Rendern ein neues Array und lässt die
+  // Fertigstellungs-Prüfung weiter unten unnötig immer wieder laufen.
+  const lineItems = useMemo(
+    () => (draft.line_items as unknown as LineItem[]) || [],
+    [draft.line_items]
+  )
   const [isSaved, setIsSaved] = useState(!!draft.id && draft.status === 'draft')
   
   // Language state
@@ -85,10 +93,93 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
       if (!error && data) {
         setCompany(data)
       }
+      setIsCompanyLoading(false)
     }
 
     loadCompany()
   }, [draft.company_id])
+
+  // Fertigstellen ist der einzige unumkehrbare Schritt der Anwendung: Es vergibt
+  // atomar eine fortlaufende Rechnungsnummer, die sich nicht zurücknehmen lässt —
+  // eine falsch fertiggestellte Rechnung muss storniert werden. Deshalb prüfen wir
+  // die Pflichtangaben nach § 14 UStG schon vor dem Klick und nicht erst im
+  // Bestätigungsdialog, damit der Knopf nicht "bereit" aussieht, wenn er es nicht ist.
+  // Es ist exakt dieselbe Prüfung, die handleFinalize ohnehin fährt — ein Entwurf,
+  // der bisher fertiggestellt werden konnte, kann es damit unverändert.
+  const finalizeValidation = useMemo(() => {
+    // Absender: entweder die eigene Firma oder ein ausgewählter Kontakt
+    let validationSellerSnapshot: PartySnapshot | null = null
+    if (sellerIsSelf && company) {
+      const companyAddress = company.address as unknown as Address
+      const bankDetails = company.bank_details as any
+      validationSellerSnapshot = {
+        name: company.name,
+        address: companyAddress,
+        vat_id: company.vat_id || undefined,
+        tax_id: company.tax_id || undefined,
+        bank_details: bankDetails ? {
+          bank_name: bankDetails.bank_name,
+          iban: bankDetails.iban,
+          bic: bankDetails.bic,
+          account_holder: bankDetails.account_holder,
+        } : undefined,
+      }
+    } else if (!sellerIsSelf && sellerSnapshot) {
+      validationSellerSnapshot = sellerSnapshot
+    }
+
+    // Empfänger: eigene Firma (Gutschrift an sich selbst) oder ausgewählter Kontakt
+    let validationBuyerSnapshot: PartySnapshot | null = null
+    if (buyerIsSelf && company) {
+      const companyAddress = company.address as unknown as Address
+      validationBuyerSnapshot = {
+        name: company.name,
+        address: companyAddress,
+        vat_id: company.vat_id || undefined,
+      }
+    } else {
+      validationBuyerSnapshot = buyerSnapshot
+    }
+
+    const result = validateInvoiceForFinalization({
+      company,
+      issuerSnapshot: sellerIsSelf ? null : validationSellerSnapshot,
+      customerSnapshot: validationBuyerSnapshot,
+      lineItems,
+      invoiceDate: draft.invoice_date,
+      useDefaultIssuer: sellerIsSelf,
+    })
+
+    // Fehlende Kontakt-IDs laufen sonst erst in die Datenbank-Constraints —
+    // sie gehören deshalb in dieselbe Vorab-Prüfung.
+    const errors: ValidationError[] = [...result.errors]
+    if (!sellerIsSelf && !sellerSnapshot?.id) {
+      errors.push({
+        field: 'issuer.id',
+        message: 'Der ausgewählte Absender hat keine gültige ID. Bitte wählen Sie einen anderen Absender aus.',
+      })
+    }
+    if (!buyerIsSelf && !buyerSnapshot?.id) {
+      errors.push({
+        field: 'customer.id',
+        message: 'Der ausgewählte Empfänger hat keine gültige ID. Bitte wählen Sie einen anderen Empfänger aus.',
+      })
+    }
+
+    return { isValid: errors.length === 0, errors }
+  }, [company, sellerIsSelf, sellerSnapshot, buyerIsSelf, buyerSnapshot, lineItems, draft.invoice_date])
+
+  // Kurzfassung für den Hinweis in der Aktionsleiste: ein ausgegrauter Knopf ohne
+  // Erklärung ist eine Sackgasse. Die Details stehen im title-Attribut.
+  const missingSections = useMemo(() => {
+    const hasError = (prefix: string) => finalizeValidation.errors.some((e) => e.field.startsWith(prefix))
+    const sections: string[] = []
+    if (hasError('issuer')) sections.push(sellerIsSelf ? 'Firmendaten (Einstellungen)' : 'Absender')
+    if (hasError('customer')) sections.push('Empfänger')
+    if (hasError('lineItems')) sections.push('Positionen')
+    if (hasError('invoiceDate')) sections.push('Rechnungsdatum')
+    return sections
+  }, [finalizeValidation, sellerIsSelf])
 
   const saveDraft = async () => {
     setIsSaving(true)
@@ -268,62 +359,11 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
   const handleFinalize = async () => {
     setError(null)
 
-    // Build seller snapshot for validation
-    let validationSellerSnapshot: PartySnapshot | null = null
-    if (sellerIsSelf && company) {
-      const companyAddress = company.address as unknown as Address
-      const bankDetails = company.bank_details as any
-      validationSellerSnapshot = {
-        name: company.name,
-        address: companyAddress,
-        vat_id: company.vat_id || undefined,
-        tax_id: company.tax_id || undefined,
-        bank_details: bankDetails ? {
-          bank_name: bankDetails.bank_name,
-          iban: bankDetails.iban,
-          bic: bankDetails.bic,
-          account_holder: bankDetails.account_holder,
-        } : undefined,
-      }
-    } else if (!sellerIsSelf && sellerSnapshot) {
-      validationSellerSnapshot = sellerSnapshot
-    }
-
-    // Get buyer snapshot for validation
-    let validationBuyerSnapshot: PartySnapshot | null = null
-    if (buyerIsSelf && company) {
-      const companyAddress = company.address as unknown as Address
-      validationBuyerSnapshot = {
-        name: company.name,
-        address: companyAddress,
-        vat_id: company.vat_id || undefined,
-      }
-    } else {
-      validationBuyerSnapshot = buyerSnapshot
-    }
-
-    // Comprehensive validation according to §14 UStG
-    const validationResult = validateInvoiceForFinalization({
-      company,
-      issuerSnapshot: sellerIsSelf ? null : validationSellerSnapshot,
-      customerSnapshot: validationBuyerSnapshot,
-      lineItems,
-      invoiceDate: draft.invoice_date,
-      useDefaultIssuer: sellerIsSelf,
-    })
-
-    if (!validationResult.isValid) {
-      setError(formatValidationErrors(validationResult.errors))
-      return
-    }
-
-    // Additional check: ensure contact IDs are available for database constraints
-    if (!sellerIsSelf && !sellerSnapshot?.id) {
-      setError('Der ausgewählte Absender hat keine gültige ID. Bitte wählen Sie einen anderen Absender aus.')
-      return
-    }
-    if (!buyerIsSelf && !buyerSnapshot?.id) {
-      setError('Der ausgewählte Empfänger hat keine gültige ID. Bitte wählen Sie einen anderen Empfänger aus.')
+    // Vollständige Prüfung nach § 14 UStG. Der Knopf ist zwar schon gesperrt,
+    // solange sie fehlschlägt — die Prüfung bleibt hier aber als letzte
+    // Client-Absicherung stehen (die eigentliche liegt ohnehin auf dem Server).
+    if (!finalizeValidation.isValid) {
+      setError(formatValidationErrors(finalizeValidation.errors))
       return
     }
 
@@ -779,6 +819,17 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
 
         {/* Actions Footer */}
         <div className="flex-shrink-0 border-t px-6 py-4" style={{ borderColor: 'var(--border-default)' }}>
+          {/* Erklärt den gesperrten Knopf — zurückhaltend und erst, wenn die
+              Firmendaten geladen sind. Volltext der Fehler im title-Attribut. */}
+          {!isCompanyLoading && !finalizeValidation.isValid && missingSections.length > 0 && (
+            <p
+              className="mb-3 text-xs"
+              style={{ color: 'var(--text-secondary)' }}
+              title={formatValidationErrors(finalizeValidation.errors)}
+            >
+              Zum Fertigstellen fehlt noch: {missingSections.join(', ')}.
+            </p>
+          )}
           <div className="flex items-center justify-between">
             {draft.id && isSaved ? (
               <Button
@@ -818,7 +869,7 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
               </Button>
               <Button
                 onClick={() => setFinalizeConfirmOpen(true)}
-                disabled={isFinalizing || isSaving || isDeleting}
+                disabled={isFinalizing || isSaving || isDeleting || !finalizeValidation.isValid}
                 className="text-sm"
               >
                 {isFinalizing ? (

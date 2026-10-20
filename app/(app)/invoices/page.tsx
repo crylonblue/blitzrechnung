@@ -1,8 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { getAppSession } from '@/lib/app-session'
 import { INVOICE_LIST_COLUMNS } from '@/lib/list-columns'
-import Link from 'next/link'
 import InvoicesTable from '@/components/invoices/invoices-table'
+import NewDraftButton from '@/components/drafts/new-draft-button'
 import DatevExportButton from '@/components/invoices/datev-export-button'
 
 export default async function InvoicesPage() {
@@ -43,13 +43,12 @@ export default async function InvoicesPage() {
       {invoices && invoices.length === 0 ? (
         <div className="card card-subtle p-16 text-center">
           <p className="text-secondary">Noch keine Rechnungen vorhanden.</p>
-          <Link
-            href="/drafts/new"
+          <NewDraftButton
             className="mt-4 inline-block text-sm font-medium"
             style={{ color: 'var(--accent)' }}
           >
             Erste Rechnung erstellen →
-          </Link>
+          </NewDraftButton>
         </div>
       ) : (
         <InvoicesTable invoices={(invoices as never) || []} companyNames={companyNames} />

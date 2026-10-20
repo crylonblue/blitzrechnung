@@ -6,6 +6,7 @@ import type { Address, BankDetails } from '@/types'
 import { getBillingState } from '@/lib/billing'
 import { getAppSession } from '@/lib/app-session'
 import TrialConversionBanner from '@/components/dashboard/trial-conversion-banner'
+import NewDraftButton from '@/components/drafts/new-draft-button'
 
 interface MissingCompanyData {
   hasMissingData: boolean
@@ -315,13 +316,12 @@ export default async function DashboardPage() {
           {recentInvoices.length === 0 ? (
             <div className="card card-subtle p-8 text-center">
               <p className="text-secondary">Noch keine Rechnungen vorhanden.</p>
-              <Link
-                href="/drafts/new"
+              <NewDraftButton
                 className="mt-4 inline-block text-sm font-medium transition-colors hover:opacity-80"
                 style={{ color: 'var(--accent)' }}
               >
                 Erste Rechnung erstellen →
-              </Link>
+              </NewDraftButton>
             </div>
           ) : (
             <div className="space-y-3">
@@ -374,9 +374,10 @@ export default async function DashboardPage() {
           </div>
 
           <div className="space-y-3">
-            <Link
-              href="/drafts/new"
-              className="card block transition-colors hover:border-[var(--border-strong)]"
+            {/* w-full/text-left gleichen aus, dass ein <button> anders als ein
+                <a> nicht automatisch die volle Breite füllt und zentriert. */}
+            <NewDraftButton
+              className="card block w-full text-left transition-colors hover:border-[var(--border-strong)]"
               style={{ textDecoration: 'none' }}
             >
               <div>
@@ -387,7 +388,7 @@ export default async function DashboardPage() {
                   Rechnung erstellen
                 </p>
               </div>
-            </Link>
+            </NewDraftButton>
 
             <Link
               href="/contacts"

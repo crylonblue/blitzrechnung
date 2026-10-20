@@ -162,13 +162,26 @@ export default function Sidebar({ companyName, userEmail, userName }: SidebarPro
 
         {/* Bottom Section: User Info & Logout */}
         <div className="border-t px-8 py-6" style={{ borderColor: 'var(--border-default)' }}>
-          <div className="mb-4">
-            <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+          {/*
+            Bei der Registrierung wird kein Name erhoben, `userName` ist dann leer.
+            Vorher fiel die fette Zeile auf die E-Mail zurück und die graue Zeile
+            zeigte dieselbe Adresse gleich noch einmal. Deshalb steht die Adresse
+            jetzt genau einmal: als Zweitzeile, wenn es einen Namen gibt, sonst
+            als alleinige Hauptzeile. `min-h-10` hält die Höhe der beiden Fälle
+            gleich, damit die Fußzeile nicht springt, sobald ein Nutzer später
+            einen Namen hinterlegt.
+            `truncate` + `title`, weil lange Adressen die 320px breite
+            Seitenleiste sonst umbrechen oder überlaufen lassen.
+          */}
+          <div className="mb-4 min-h-10">
+            <p className="truncate text-sm font-medium" style={{ color: 'var(--text-primary)' }} title={userName || userEmail}>
               {userName || userEmail}
             </p>
-            <p className="mt-1 text-xs" style={{ color: 'var(--text-meta)' }}>
-              {userEmail}
-            </p>
+            {userName && (
+              <p className="mt-1 truncate text-xs" style={{ color: 'var(--text-meta)' }} title={userEmail}>
+                {userEmail}
+              </p>
+            )}
           </div>
           <button
             onClick={handleLogout}
