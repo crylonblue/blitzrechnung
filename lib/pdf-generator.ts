@@ -115,6 +115,21 @@ function sanitizeText(text: string): string {
   return text.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * Wie sanitizeText, aber Absätze bleiben erhalten.
+ *
+ * Für Felder, in denen der Nutzer bewusst umbricht — etwa eine
+ * Positionsbeschreibung über mehrere Zeilen. Jeder Absatz wird für sich
+ * bereinigt und einzeln umbrochen; leere Absätze fallen weg, damit ein
+ * versehentlicher Doppelumbruch keine Lücke ins Layout reisst.
+ */
+export function sanitizeParagraphs(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((absatz) => absatz.replace(/\s+/g, ' ').trim())
+    .filter((absatz) => absatz.length > 0);
+}
+
 // Get country name from country code
 function getCountryName(countryCode: string, language: InvoiceLanguage = 'de'): string {
   const countryNames: Record<string, { de: string; en: string }> = {
@@ -305,16 +320,26 @@ export async function generateInvoicePDF(
 
   // LEFT COLUMN: Recipient Address Block
   const customerAddress = formatAddress(invoice.customer.address);
-  
-  drawText(invoice.customer.name, MARGIN_LEFT, y, { font: helveticaBold });
-  y -= 14;
-  drawText(customerAddress.streetLine, MARGIN_LEFT, y);
-  y -= 14;
-  drawText(customerAddress.cityLine, MARGIN_LEFT, y);
-  y -= 14;
+
+  // Der Block endet dort, wo rechts die Rechnungsdaten beginnen. Ohne diese
+  // Grenze lief eine lange Firmierung oder Anschrift quer in die
+  // Metadaten-Spalte — bei internationalen Adressen und Abteilungszusätzen
+  // ist das der Regelfall, nicht die Ausnahme.
+  const addressMaxWidth = rightColumnX - MARGIN_LEFT - 16;
+
+  const drawAddressLine = (text: string, bold = false) => {
+    const font = bold ? helveticaBold : helvetica;
+    for (const line of wrapText(sanitizeText(text), addressMaxWidth, font, 10)) {
+      drawText(line, MARGIN_LEFT, y, bold ? { font: helveticaBold } : undefined);
+      y -= 14;
+    }
+  };
+
+  drawAddressLine(invoice.customer.name, true);
+  drawAddressLine(customerAddress.streetLine);
+  drawAddressLine(customerAddress.cityLine);
   if (invoice.customer.address.country && invoice.customer.address.country !== 'DE') {
-    drawText(getCountryName(invoice.customer.address.country, language), MARGIN_LEFT, y);
-    y -= 14;
+    drawAddressLine(getCountryName(invoice.customer.address.country, language));
   }
 
   // RIGHT COLUMN: Metadata Table
@@ -515,7 +540,9 @@ export async function generateInvoicePDF(
 
   invoice.items.forEach((item, index) => {
     const itemTotal = totals.lineNets[index];
-    const descLines = wrapText(sanitizeText(item.description), maxDescWidth, helvetica, 10);
+    const descLines = sanitizeParagraphs(item.description).flatMap((absatz) =>
+      wrapText(absatz, maxDescWidth, helvetica, 10)
+    );
     const rowHeight = Math.max(20, descLines.length * descLineHeight + 6);
 
     // The totals block stays with the table: the last row reserves the space for
@@ -880,3 +907,4 @@ export async function generateInvoicePDF(
 
   return result.pdf;
 }
+

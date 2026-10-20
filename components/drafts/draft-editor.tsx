@@ -343,6 +343,7 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
           .from('invoices')
           .update({
             status: 'draft', // Keep as draft until upload succeeds
+            invoice_number: draft.invoice_number || null,
             invoice_date: draft.invoice_date,
             due_date: draft.due_date,
             service_date: draft.service_date,
@@ -379,6 +380,7 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
           .insert({
             company_id: draft.company_id,
             status: 'draft', // Keep as draft until upload succeeds
+            invoice_number: draft.invoice_number || null,
             invoice_date: draft.invoice_date,
             due_date: draft.due_date,
             service_date: draft.service_date,
@@ -632,6 +634,25 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
             <div>
               <h2 className="mb-4 text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--text-primary)' }}>Datum</h2>
               <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-2">
+                  <Label htmlFor="invoice_number">
+                    Rechnungsnummer <span className="font-normal text-meta">(optional)</span>
+                  </Label>
+                  <Input
+                    id="invoice_number"
+                    type="text"
+                    value={draft.invoice_number || ''}
+                    onChange={(e) =>
+                      setDraft((prev) => ({ ...prev, invoice_number: e.target.value.trim() || null }))
+                    }
+                    placeholder="Leer lassen für automatische Vergabe"
+                    className="mt-1.5"
+                  />
+                  <p className="mt-1.5 text-xs text-meta">
+                    Tragen Sie hier eine Nummer ein, um einen bestehenden Nummernkreis fortzuführen.
+                    Der automatische Zähler bleibt dann unberührt und überspringt keine Nummer.
+                  </p>
+                </div>
                 <div>
                   <Label htmlFor="invoice_date">
                     Rechnungsdatum

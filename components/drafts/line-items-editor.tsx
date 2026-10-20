@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { LineItem, Product } from '@/types'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
@@ -271,11 +272,11 @@ function LineItemCard({ item, index, companyId, onUpdate, onTemplateSelect, onRe
           <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
             Beschreibung
           </label>
-          <Input
-            type="text"
+          <Textarea
             value={item.description}
             onChange={(e) => onUpdate({ description: e.target.value })}
-            placeholder="z.B. Beratungsleistung, Webentwicklung..."
+            placeholder="z.B. Beratungsleistung, Webentwicklung …"
+            rows={2}
             className="mt-1"
           />
         </div>

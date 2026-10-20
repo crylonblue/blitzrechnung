@@ -83,16 +83,28 @@ function buildSellerSnapshot(dbInvoice: DBInvoice, company: any): PartySnapshot 
   return existing
 }
 
+/**
+ * Das hinterlegte Präfix, so wie es die Datenbank erwartet.
+ *
+ * `null` bedeutet dort "nimm das gespeicherte", der Leerstring dagegen
+ * ausdrücklich "kein Präfix". Ein `|| 'INV'` würde die bewusste Leerung
+ * wieder in ein Präfix verwandeln — genau daran scheiterte bisher jeder
+ * Versuch, einen bestehenden Nummernkreis ohne Präfix fortzuführen.
+ */
+function praefixOder(gespeichert: string | null | undefined, standard = 'INV'): string {
+  return typeof gespeichert === 'string' ? gespeichert : standard
+}
+
 async function nextInvoiceNumber(supabase: Db, inv: DBInvoice, company: any): Promise<string> {
   if (inv.seller_is_self) {
     const { data, error } = (await supabase
-      .rpc('get_next_invoice_number', { p_seller_type: 'company', p_seller_id: inv.company_id, p_prefix: company.invoice_number_prefix || 'INV' })
+      .rpc('get_next_invoice_number', { p_seller_type: 'company', p_seller_id: inv.company_id, p_prefix: praefixOder(company.invoice_number_prefix) })
       .single()) as { data: NumberResult | null; error: any }
     if (error || !data) throw new InvoiceServiceError(500, 'SERVER_ERROR', 'Rechnungsnummer konnte nicht erzeugt werden')
     return data.formatted_number
   }
   const sellerContact = inv.seller_snapshot as PartySnapshot | null
-  if (sellerContact?.invoice_number_prefix && inv.seller_contact_id) {
+  if (typeof sellerContact?.invoice_number_prefix === 'string' && inv.seller_contact_id) {
     const { data, error } = (await supabase
       .rpc('get_next_invoice_number', { p_seller_type: 'contact', p_seller_id: inv.seller_contact_id, p_prefix: sellerContact.invoice_number_prefix })
       .single()) as { data: NumberResult | null; error: any }
@@ -225,7 +237,20 @@ export async function finalizeInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: 
     .in('status', ['draft', 'created'])
     .select()
     .single()
-  if (updErr) throw new InvoiceServiceError(500, 'SERVER_ERROR', 'Rechnung konnte nicht aktualisiert werden')
+  if (updErr) {
+    // Der Unique-Index idx_invoices_unique_number greift, wenn eine von Hand
+    // eingetragene Nummer bereits vergeben ist. Ohne eigene Behandlung bekäme
+    // der Nutzer einen Serverfehler und wüsste nicht, dass seine Nummer das
+    // Problem ist.
+    if ((updErr as { code?: string }).code === '23505') {
+      throw new InvoiceServiceError(
+        400,
+        'VALIDATION_ERROR',
+        `Die Rechnungsnummer ${invoiceNumber} ist in diesem Unternehmen bereits vergeben. Bitte tragen Sie eine andere ein oder lassen Sie das Feld leer.`
+      )
+    }
+    throw new InvoiceServiceError(500, 'SERVER_ERROR', 'Rechnung konnte nicht aktualisiert werden')
+  }
 
   return { invoice: updated as DBInvoice, pdfUrl, xmlUrl }
 }
@@ -268,7 +293,7 @@ export async function cancelInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: st
   let cancellationNumber: string
   if (dbInvoice.seller_is_self) {
     const { data, error: numErr } = (await supabase
-      .rpc('get_next_cancellation_invoice_number', { p_seller_type: 'company', p_seller_id: ctx.companyId, p_prefix: (company as any).cancellation_number_prefix || 'ST' })
+      .rpc('get_next_cancellation_invoice_number', { p_seller_type: 'company', p_seller_id: ctx.companyId, p_prefix: praefixOder((company as any).cancellation_number_prefix, 'ST') })
       .single()) as { data: NumberResult | null; error: any }
     if (numErr || !data) throw new InvoiceServiceError(500, 'SERVER_ERROR', 'Stornonummer konnte nicht erzeugt werden')
     cancellationNumber = data.formatted_number
