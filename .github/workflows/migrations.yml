@@ -1,8 +1,16 @@
 name: Datenbank-Migrationen
 
 # Wendet neue Migrationen automatisch auf das Supabase-Projekt an, sobald sie
-# auf main landen. Auf Pull Requests läuft stattdessen ein Trockenlauf, damit im
-# Review sichtbar ist, was der Merge mit der Datenbank machen wird.
+# auf main landen.
+#
+# Drei Stufen:
+#   probelauf    — baut eine leere Wegwerf-Datenbank auf und wendet die
+#                  komplette Migrationskette darauf an. Das ist die einzige
+#                  Stelle, an der die SQL tatsächlich geprüft wird.
+#   trockenlauf  — zeigt nur an, welche Migrationen gegen die Produktion
+#                  ausstehen. Er führt nichts aus und prüft nichts.
+#   anwenden     — schreibt gegen die Produktion, erst nachdem der probelauf
+#                  durch ist.
 #
 # WICHTIG — Verbindungsweg:
 # Die Direktverbindung (db.<ref>.supabase.co) hat nur einen AAAA-Record, ist
@@ -37,7 +45,43 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Auf Pull Requests: nur zeigen, was passieren würde.
+  # Die eigentliche Prüfung: eine leere Datenbank hochfahren und die gesamte
+  # Migrationskette von vorn anwenden. Ein Syntaxfehler, eine vertauschte
+  # Reihenfolge oder ein Verweis auf eine Spalte, die es noch nicht gibt, fällt
+  # hier auf — und nicht erst beim Schreiben gegen die Produktion.
+  #
+  # `supabase db start` fährt nur den Postgres-Container hoch (inklusive
+  # auth-Schema, das die Migrationen über auth.uid() brauchen).
+  # `supabase db reset` wendet danach alle Dateien aus supabase/migrations an.
+  #
+  # `db lint` setzt plpgsql_check auf die entstandenen Funktionen an. Das greift
+  # eine Stufe tiefer als das blosse Anlegen: Postgres prüft beim CREATE nur die
+  # Syntax eines plpgsql-Rumpfes, nicht die darin verwendeten Spalten. Genau
+  # diese Art Fehler findet der Linter. Gestoppt wird nur bei `error` —
+  # Warnungen werden ausgegeben, blockieren aber keinen Merge.
+  probelauf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.109.1
+
+      - name: Wegwerf-Datenbank starten
+        run: supabase db start
+
+      - name: Komplette Migrationskette anwenden
+        run: supabase db reset
+
+      - name: Funktionen auf Typfehler prüfen
+        run: supabase db lint --local --level warning --fail-on error
+
+  # Auf Pull Requests: zeigen, welche Migrationen gegen die Produktion
+  # ausstehen. ACHTUNG — `--dry-run` listet die Dateien nur auf; es parst die
+  # SQL nicht und führt sie nicht aus. Die inhaltliche Prüfung macht
+  # ausschliesslich der probelauf-Job darüber.
   trockenlauf:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -62,6 +106,10 @@ jobs:
   # Nach dem Merge auf main: tatsächlich anwenden.
   anwenden:
     if: github.event_name == 'push'
+    # Gegen die Produktion wird erst geschrieben, wenn dieselben Dateien auf
+    # einer leeren Datenbank sauber durchgelaufen sind. Das schützt auch den
+    # Fall, in dem jemand ohne Pull Request direkt auf main pusht.
+    needs: probelauf
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Gegen Produktion schreiben nur Jobs, die an diese Umgebung gebunden sind.
