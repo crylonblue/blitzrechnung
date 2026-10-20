@@ -2,17 +2,19 @@
 
 import * as React from "react"
 import { useState, useMemo, useCallback, useEffect } from "react"
-import { Search, X, ChevronDown, Calendar, Euro, Filter } from "lucide-react"
+import { Search, X } from "lucide-react"
 import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
-import { ToggleButton } from "@/components/ui/toggle-button"
 import { DatePicker } from "@/components/ui/date-picker"
+import {
+  FilterChip,
+  FilterChipMenu,
+  FilterChipOption,
+} from "@/components/ui/filter-chip"
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
-import { cn } from "@/lib/utils"
 import { Invoice } from "@/types"
 import { isOverdue } from "@/lib/invoice-utils"
 
@@ -26,6 +28,8 @@ const STATUS_CONFIG = {
 } as const
 
 type InvoiceStatus = keyof typeof STATUS_CONFIG
+
+const STATUS_ORDER = Object.keys(STATUS_CONFIG) as InvoiceStatus[]
 
 // Time period presets
 const TIME_PERIODS = [
@@ -42,6 +46,12 @@ type TimePeriod = (typeof TIME_PERIODS)[number]["id"]
 
 export interface InvoiceFilters {
   search: string
+  /**
+   * Leere Menge heißt „keine Einschränkung" — passend zum ruhenden Chip `⊕ Status`.
+   * Früher stand dafür „alle fünf ausgewählt"; beides zeigt dieselben Rechnungen,
+   * weil die Seite Entwürfe schon in der Abfrage ausschließt und damit nur diese
+   * fünf Status erreichen.
+   */
   statuses: Set<InvoiceStatus>
   showOverdue: boolean
   timePeriod: TimePeriod
@@ -53,7 +63,7 @@ export interface InvoiceFilters {
 
 const DEFAULT_FILTERS: InvoiceFilters = {
   search: "",
-  statuses: new Set(["created", "sent", "reminded", "paid", "cancelled"]),
+  statuses: new Set(),
   showOverdue: false,
   timePeriod: "all",
   dateFrom: null,
@@ -74,15 +84,27 @@ export function InvoiceFiltersToolbar({
   companyNames = {},
 }: InvoiceFiltersProps) {
   const [filters, setFilters] = useState<InvoiceFilters>(DEFAULT_FILTERS)
+  const [statusOpen, setStatusOpen] = useState(false)
   const [datePopoverOpen, setDatePopoverOpen] = useState(false)
   const [amountPopoverOpen, setAmountPopoverOpen] = useState(false)
+
+  // Entwurf je Menü: Angehaktes wirkt erst mit „Anwenden". Beim Öffnen wird der
+  // Entwurf aus dem angewendeten Stand neu gesetzt — wer ohne „Anwenden"
+  // schließt (Klick daneben, Escape), verwirft damit automatisch.
+  const [statusDraft, setStatusDraft] = useState<Set<InvoiceStatus>>(new Set())
+  const [periodDraft, setPeriodDraft] = useState({
+    timePeriod: "all" as TimePeriod,
+    dateFrom: null as string | null,
+    dateTo: null as string | null,
+  })
+  const [amountDraft, setAmountDraft] = useState({ min: "", max: "" })
 
   // Calculate date ranges for time periods
   const getDateRange = useCallback((period: TimePeriod): { from: Date | null; to: Date | null } => {
     const now = new Date()
     const year = now.getFullYear()
     const month = now.getMonth()
-    
+
     switch (period) {
       case "this_month":
         return {
@@ -124,8 +146,11 @@ export function InvoiceFiltersToolbar({
   // Filter invoices based on all criteria
   const filteredInvoices = useMemo(() => {
     return invoices.filter((invoice) => {
-      // Status filter
-      if (!filters.statuses.has(invoice.status as InvoiceStatus)) {
+      // Status filter (leere Auswahl = alle Status)
+      if (
+        filters.statuses.size > 0 &&
+        !filters.statuses.has(invoice.status as InvoiceStatus)
+      ) {
         return false
       }
 
@@ -141,7 +166,7 @@ export function InvoiceFiltersToolbar({
         const buyerName = invoice.buyer_is_self
           ? (companyNames[invoice.company_id] || "")
           : (buyerSnapshot?.name || "")
-        
+
         const searchableFields = [
           invoice.invoice_number,
           buyerName,
@@ -178,7 +203,7 @@ export function InvoiceFiltersToolbar({
       // Amount filter
       const minAmount = filters.amountMin ? parseFloat(filters.amountMin) : null
       const maxAmount = filters.amountMax ? parseFloat(filters.amountMax) : null
-      
+
       if (minAmount !== null && invoice.total_amount < minAmount) return false
       if (maxAmount !== null && invoice.total_amount > maxAmount) return false
 
@@ -191,24 +216,11 @@ export function InvoiceFiltersToolbar({
     onFilteredInvoicesChange(filteredInvoices)
   }, [filteredInvoices, onFilteredInvoicesChange])
 
-  // Toggle status
-  const toggleStatus = (status: InvoiceStatus) => {
-    setFilters((prev) => {
-      const newStatuses = new Set(prev.statuses)
-      if (newStatuses.has(status)) {
-        newStatuses.delete(status)
-      } else {
-        newStatuses.add(status)
-      }
-      return { ...prev, statuses: newStatuses }
-    })
-  }
-
   // Check if any filters are active
   const hasActiveFilters = useMemo(() => {
     return (
       filters.search !== "" ||
-      filters.statuses.size !== 5 ||
+      filters.statuses.size > 0 ||
       filters.showOverdue ||
       filters.timePeriod !== "all" ||
       filters.amountMin !== "" ||
@@ -216,39 +228,34 @@ export function InvoiceFiltersToolbar({
     )
   }, [filters])
 
-  // Active filter count
-  const activeFilterCount = useMemo(() => {
-    let count = 0
-    if (filters.statuses.size !== 5) count++
-    if (filters.showOverdue) count++
-    if (filters.timePeriod !== "all") count++
-    if (filters.amountMin || filters.amountMax) count++
-    return count
-  }, [filters])
-
-  // Reset all filters
-  const resetFilters = () => {
-    setFilters(DEFAULT_FILTERS)
-  }
-
-  // Get active time period label
-  const getTimePeriodLabel = () => {
-    const period = TIME_PERIODS.find((p) => p.id === filters.timePeriod)
-    if (filters.timePeriod === "custom" && (filters.dateFrom || filters.dateTo)) {
-      return "Benutzerdefiniert"
+  // Beschriftung des Status-Chips: erste Auswahl ausgeschrieben, der Rest als
+  // Zähler — fünf Beschriftungen nebeneinander würden die Leiste sprengen.
+  const statusChip = useMemo(() => {
+    const selected = STATUS_ORDER.filter((status) => filters.statuses.has(status))
+    if (selected.length === 0) return null
+    const [first, ...rest] = selected
+    return {
+      value:
+        rest.length > 0
+          ? `${STATUS_CONFIG[first].label} +${rest.length}`
+          : STATUS_CONFIG[first].label,
+      dotClass: STATUS_CONFIG[first].colorClass,
     }
-    return period?.label || "Zeitraum"
-  }
+  }, [filters.statuses])
 
-  // Get amount filter label
-  const getAmountLabel = () => {
+  const timePeriodValue =
+    filters.timePeriod === "all"
+      ? null
+      : TIME_PERIODS.find((p) => p.id === filters.timePeriod)?.label ?? null
+
+  const amountValue = useMemo(() => {
     if (filters.amountMin && filters.amountMax) {
-      return `${filters.amountMin}€ - ${filters.amountMax}€`
+      return `${filters.amountMin}€ – ${filters.amountMax}€`
     }
     if (filters.amountMin) return `ab ${filters.amountMin}€`
     if (filters.amountMax) return `bis ${filters.amountMax}€`
-    return "Betrag"
-  }
+    return null
+  }, [filters.amountMin, filters.amountMax])
 
   return (
     <div className="space-y-4 mb-6">
@@ -273,85 +280,138 @@ export function InvoiceFiltersToolbar({
 
       {/* Filter row */}
       <div className="flex flex-wrap items-center gap-2">
-        {/* Status toggles */}
-        <div className="flex flex-wrap items-center gap-1.5">
-          {(Object.entries(STATUS_CONFIG) as [InvoiceStatus, typeof STATUS_CONFIG[InvoiceStatus]][]).map(
-            ([status, config]) => (
-              <ToggleButton
-                key={status}
-                label={config.label}
-                checked={filters.statuses.has(status)}
-                onChange={() => toggleStatus(status)}
-                colorClass={config.colorClass}
-              />
-            )
-          )}
-        </div>
+        {/* Status */}
+        <Popover
+          open={statusOpen}
+          onOpenChange={(open) => {
+            if (open) setStatusDraft(new Set(filters.statuses))
+            setStatusOpen(open)
+          }}
+        >
+          <PopoverTrigger asChild>
+            <FilterChip
+              label="Status"
+              value={statusChip?.value}
+              dotClass={statusChip?.dotClass}
+              onClear={
+                statusChip
+                  ? () => setFilters((prev) => ({ ...prev, statuses: new Set() }))
+                  : undefined
+              }
+            />
+          </PopoverTrigger>
+          <PopoverContent className="w-56 p-2" align="start">
+            <FilterChipMenu
+              onApply={() => {
+                setFilters((prev) => ({ ...prev, statuses: new Set(statusDraft) }))
+                setStatusOpen(false)
+              }}
+            >
+              {STATUS_ORDER.map((status) => (
+                <FilterChipOption
+                  key={status}
+                  label={STATUS_CONFIG[status].label}
+                  dotClass={STATUS_CONFIG[status].colorClass}
+                  checked={statusDraft.has(status)}
+                  onSelect={() =>
+                    setStatusDraft((prev) => {
+                      const next = new Set(prev)
+                      if (next.has(status)) next.delete(status)
+                      else next.add(status)
+                      return next
+                    })
+                  }
+                />
+              ))}
+            </FilterChipMenu>
+          </PopoverContent>
+        </Popover>
 
-        <div className="h-6 w-px bg-neutral-200 mx-1" />
-
-        {/* Overdue toggle */}
-        <ToggleButton
+        {/* Überfällig — Ja/Nein, deshalb schaltet der Chip direkt um: ein Menü
+            mit einem einzigen Kästchen und „Anwenden" wäre ein Umweg. */}
+        <FilterChip
           label="Überfällig"
-          checked={filters.showOverdue}
-          onChange={(checked) => setFilters((prev) => ({ ...prev, showOverdue: checked }))}
-          colorClass="bg-red-500"
+          hideChevron
+          onClear={
+            filters.showOverdue
+              ? () => setFilters((prev) => ({ ...prev, showOverdue: false }))
+              : undefined
+          }
+          onClick={() =>
+            setFilters((prev) => ({ ...prev, showOverdue: !prev.showOverdue }))
+          }
+          aria-pressed={filters.showOverdue}
         />
 
-        <div className="h-6 w-px bg-neutral-200 mx-1" />
-
-        {/* Time period filter */}
-        <Popover open={datePopoverOpen} onOpenChange={setDatePopoverOpen}>
+        {/* Zeitraum */}
+        <Popover
+          open={datePopoverOpen}
+          onOpenChange={(open) => {
+            if (open) {
+              setPeriodDraft({
+                timePeriod: filters.timePeriod,
+                dateFrom: filters.dateFrom,
+                dateTo: filters.dateTo,
+              })
+            }
+            setDatePopoverOpen(open)
+          }}
+        >
           <PopoverTrigger asChild>
-            <Button
-              variant="outline"
-              size="sm"
-              className={cn(
-                "gap-1.5",
-                filters.timePeriod !== "all" && "border-neutral-900 bg-neutral-900 text-white hover:bg-neutral-800"
-              )}
-            >
-              <Calendar className="h-3.5 w-3.5" />
-              {getTimePeriodLabel()}
-              <ChevronDown className="h-3 w-3" />
-            </Button>
+            <FilterChip
+              label="Zeitraum"
+              value={timePeriodValue}
+              onClear={
+                filters.timePeriod !== "all"
+                  ? () =>
+                      setFilters((prev) => ({
+                        ...prev,
+                        timePeriod: "all",
+                        dateFrom: null,
+                        dateTo: null,
+                      }))
+                  : undefined
+              }
+            />
           </PopoverTrigger>
           <PopoverContent className="w-64 p-2" align="start">
-            <div className="space-y-1">
-              {TIME_PERIODS.filter((p) => p.id !== "custom").map((period) => (
-                <button
-                  key={period.id}
-                  onClick={() => {
-                    setFilters((prev) => ({
-                      ...prev,
-                      timePeriod: period.id,
-                      dateFrom: null,
-                      dateTo: null,
-                    }))
-                    setDatePopoverOpen(false)
-                  }}
-                  className={cn(
-                    "w-full text-left px-3 py-2 text-sm rounded-md transition-colors",
-                    filters.timePeriod === period.id
-                      ? "bg-neutral-100 font-medium"
-                      : "hover:bg-neutral-50"
-                  )}
-                >
-                  {period.label}
-                </button>
-              ))}
-              
-              <div className="border-t border-neutral-100 pt-2 mt-2">
-                <div className="px-3 py-1 text-xs font-medium text-neutral-500 uppercase">
+            <FilterChipMenu
+              onApply={() => {
+                setFilters((prev) => ({ ...prev, ...periodDraft }))
+                setDatePopoverOpen(false)
+              }}
+            >
+              <div role="radiogroup" aria-label="Zeitraum" className="space-y-0.5">
+                {TIME_PERIODS.filter((p) => p.id !== "custom").map((period) => (
+                  <FilterChipOption
+                    key={period.id}
+                    role="radio"
+                    label={period.label}
+                    checked={periodDraft.timePeriod === period.id}
+                    // Ein Vorgabezeitraum verwirft die eigenen Daten, sonst bliebe
+                    // beim Zurückschalten auf „Benutzerdefiniert" ein alter Rest stehen.
+                    onSelect={() =>
+                      setPeriodDraft({
+                        timePeriod: period.id,
+                        dateFrom: null,
+                        dateTo: null,
+                      })
+                    }
+                  />
+                ))}
+              </div>
+
+              <div className="mt-2 border-t border-neutral-100 pt-2">
+                <div className="px-2 py-1 text-xs font-medium uppercase text-neutral-500">
                   Benutzerdefiniert
                 </div>
                 <div className="space-y-2 p-2">
                   <div>
                     <label className="text-xs text-neutral-500 mb-1 block">Von</label>
                     <DatePicker
-                      value={filters.dateFrom}
+                      value={periodDraft.dateFrom}
                       onChange={(date) =>
-                        setFilters((prev) => ({
+                        setPeriodDraft((prev) => ({
                           ...prev,
                           timePeriod: "custom",
                           dateFrom: date,
@@ -363,9 +423,9 @@ export function InvoiceFiltersToolbar({
                   <div>
                     <label className="text-xs text-neutral-500 mb-1 block">Bis</label>
                     <DatePicker
-                      value={filters.dateTo}
+                      value={periodDraft.dateTo}
                       onChange={(date) =>
-                        setFilters((prev) => ({
+                        setPeriodDraft((prev) => ({
                           ...prev,
                           timePeriod: "custom",
                           dateTo: date,
@@ -376,104 +436,96 @@ export function InvoiceFiltersToolbar({
                   </div>
                 </div>
               </div>
-            </div>
+            </FilterChipMenu>
           </PopoverContent>
         </Popover>
 
-        {/* Amount filter */}
-        <Popover open={amountPopoverOpen} onOpenChange={setAmountPopoverOpen}>
+        {/* Betrag */}
+        <Popover
+          open={amountPopoverOpen}
+          onOpenChange={(open) => {
+            if (open) {
+              setAmountDraft({ min: filters.amountMin, max: filters.amountMax })
+            }
+            setAmountPopoverOpen(open)
+          }}
+        >
           <PopoverTrigger asChild>
-            <Button
-              variant="outline"
-              size="sm"
-              className={cn(
-                "gap-1.5",
-                (filters.amountMin || filters.amountMax) &&
-                  "border-neutral-900 bg-neutral-900 text-white hover:bg-neutral-800"
-              )}
-            >
-              <Euro className="h-3.5 w-3.5" />
-              {getAmountLabel()}
-              <ChevronDown className="h-3 w-3" />
-            </Button>
+            <FilterChip
+              label="Betrag"
+              value={amountValue}
+              onClear={
+                amountValue
+                  ? () =>
+                      setFilters((prev) => ({ ...prev, amountMin: "", amountMax: "" }))
+                  : undefined
+              }
+            />
           </PopoverTrigger>
-          <PopoverContent className="w-56 p-4" align="start">
-            <div className="space-y-3">
-              <div className="text-sm font-medium">Betragsbereich</div>
-              <div className="space-y-2">
-                <div>
-                  <label className="text-xs text-neutral-500 mb-1 block">Mindestens</label>
-                  <div className="relative">
-                    <Input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      placeholder="0,00"
-                      value={filters.amountMin}
-                      onChange={(e) =>
-                        setFilters((prev) => ({ ...prev, amountMin: e.target.value }))
-                      }
-                      className="pr-8"
-                    />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 text-sm">
-                      €
-                    </span>
-                  </div>
-                </div>
-                <div>
-                  <label className="text-xs text-neutral-500 mb-1 block">Höchstens</label>
-                  <div className="relative">
-                    <Input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      placeholder="∞"
-                      value={filters.amountMax}
-                      onChange={(e) =>
-                        setFilters((prev) => ({ ...prev, amountMax: e.target.value }))
-                      }
-                      className="pr-8"
-                    />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 text-sm">
-                      €
-                    </span>
-                  </div>
+          <PopoverContent className="w-60 p-3" align="start">
+            <FilterChipMenu
+              onApply={() => {
+                setFilters((prev) => ({
+                  ...prev,
+                  amountMin: amountDraft.min,
+                  amountMax: amountDraft.max,
+                }))
+                setAmountPopoverOpen(false)
+              }}
+            >
+              <div>
+                <label className="text-xs text-neutral-500 mb-1 block">Mindestens</label>
+                <div className="relative">
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="0,00"
+                    value={amountDraft.min}
+                    onChange={(e) =>
+                      setAmountDraft((prev) => ({ ...prev, min: e.target.value }))
+                    }
+                    className="pr-8"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 text-sm">
+                    €
+                  </span>
                 </div>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full"
-                onClick={() => {
-                  setFilters((prev) => ({ ...prev, amountMin: "", amountMax: "" }))
-                  setAmountPopoverOpen(false)
-                }}
-              >
-                Zurücksetzen
-              </Button>
-            </div>
+              <div className="pt-2">
+                <label className="text-xs text-neutral-500 mb-1 block">Höchstens</label>
+                <div className="relative">
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="∞"
+                    value={amountDraft.max}
+                    onChange={(e) =>
+                      setAmountDraft((prev) => ({ ...prev, max: e.target.value }))
+                    }
+                    className="pr-8"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 text-sm">
+                    €
+                  </span>
+                </div>
+              </div>
+            </FilterChipMenu>
           </PopoverContent>
         </Popover>
 
-        {/* Clear filters button */}
+        {/* Filter löschen */}
         {hasActiveFilters && (
-          <>
-            <div className="h-6 w-px bg-neutral-200 mx-1" />
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={resetFilters}
-              className="gap-1.5 text-neutral-500 hover:text-neutral-900"
-            >
-              <X className="h-3.5 w-3.5" />
-              Filter zurücksetzen
-              {activeFilterCount > 0 && (
-                <span className="ml-1 px-1.5 py-0.5 text-xs bg-neutral-200 rounded-full">
-                  {activeFilterCount}
-                </span>
-              )}
-            </Button>
-          </>
+          <button
+            type="button"
+            onClick={() => setFilters(DEFAULT_FILTERS)}
+            // Zusammen mit dem ml-auto der Trefferzahl rückt der Link ganz nach
+            // rechts und bleibt doch neben der Zahl stehen.
+            className="ml-auto px-1 text-sm text-neutral-500 underline-offset-4 hover:text-neutral-900 hover:underline"
+          >
+            Filter löschen
+          </button>
         )}
 
         {/* Results count */}
