@@ -51,7 +51,9 @@ export default function Loading() {
               </div>
             </div>
 
-            {/* Datum: zwei Felder nebeneinander, das dritte darunter */}
+            {/* Datum: zwei Felder nebeneinander, das dritte darunter.
+                Die Rechnungsnummer steht nicht mehr hier, sondern am Ende
+                des Formulars hinter einer eingeklappten Aufklappstelle. */}
             <div>
               <Skeleton className="mb-4 h-3 w-16" />
               <div className="grid grid-cols-2 gap-4">
@@ -76,12 +78,22 @@ export default function Loading() {
                 <Skeleton className="h-[38px] w-full" />
               </div>
             </div>
+
+            {/* Eingeklappte Zeile „Rechnungsnummer manuell vergeben“ —
+                im Editor eine <summary>-Zeile über einer Trennlinie */}
+            <div
+              className="border-t pt-6"
+              style={{ borderColor: 'var(--border-default)' }}
+            >
+              <Skeleton className="h-5 w-64" />
+            </div>
           </div>
         </div>
 
-        {/* Aktionsleiste: Löschen links, drei Knöpfe rechts */}
+        {/* Aktionsleiste: Löschen links, drei Knöpfe rechts — klebt wie im
+            Editor unten, damit beim Umschalten nichts springt */}
         <div
-          className="flex-shrink-0 border-t px-6 py-4"
+          className="sticky bottom-0 z-10 flex-shrink-0 border-t bg-background px-6 py-4"
           style={{ borderColor: 'var(--border-default)' }}
         >
           <div className="flex items-center justify-between">

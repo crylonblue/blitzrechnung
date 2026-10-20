@@ -10,7 +10,7 @@ import { DatePicker } from '@/components/ui/date-picker'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { LoaderCircle, Trash2, Check, Eye } from 'lucide-react'
+import { LoaderCircle, Trash2, Check, Eye, ChevronRight } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useDraftDrawer } from '@/contexts/draft-drawer-context'
 import { ContactDrawerProvider } from '@/contexts/contact-drawer-context'
@@ -75,6 +75,12 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
   
   // Text fields state
   const [buyerReference, setBuyerReference] = useState(draft.buyer_reference || '')
+
+  // Die manuelle Rechnungsnummer ist ein Notausgang für den Umstieg aus einem
+  // Altsystem — fast niemand braucht sie, deshalb startet der Bereich zu.
+  // Trägt der Entwurf aber schon eine Nummer, darf sie nicht hinter einer
+  // zugeklappten Zeile verschwinden: dann startet er offen.
+  const [invoiceNumberOpen, setInvoiceNumberOpen] = useState(!!initialDraft.invoice_number)
 
   // Contact person: null = the company's default Ansprechpartner
   const [contactPersonId, setContactPersonId] = useState<string | null>(draft.contact_person_id ?? null)
@@ -674,25 +680,6 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
             <div>
               <h2 className="mb-4 text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--text-primary)' }}>Datum</h2>
               <div className="grid grid-cols-2 gap-4">
-                <div className="col-span-2">
-                  <Label htmlFor="invoice_number">
-                    Rechnungsnummer <span className="font-normal text-meta">(optional)</span>
-                  </Label>
-                  <Input
-                    id="invoice_number"
-                    type="text"
-                    value={draft.invoice_number || ''}
-                    onChange={(e) =>
-                      setDraft((prev) => ({ ...prev, invoice_number: e.target.value.trim() || null }))
-                    }
-                    placeholder="Leer lassen für automatische Vergabe"
-                    className="mt-1.5"
-                  />
-                  <p className="mt-1.5 text-xs text-meta">
-                    Tragen Sie hier eine Nummer ein, um einen bestehenden Nummernkreis fortzuführen.
-                    Der automatische Zähler bleibt dann unberührt und überspringt keine Nummer.
-                  </p>
-                </div>
                 <div>
                   <Label htmlFor="invoice_date">
                     Rechnungsdatum
@@ -814,11 +801,62 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
               })()}
             </div>
 
+            {/* Kein eigenes Bauteil: components/ui/ hat weder Collapsible noch
+                Accordion, und <details>/<summary> bringt Tastaturbedienung und
+                die Zustandsansage (auf-/zugeklappt) ohne neue Abhängigkeit mit. */}
+            <details
+              open={invoiceNumberOpen}
+              onToggle={(e) => setInvoiceNumberOpen(e.currentTarget.open)}
+              className="border-t pt-6"
+              style={{ borderColor: 'var(--border-default)' }}
+            >
+              <summary className="flex cursor-pointer list-none items-center gap-2 text-sm [&::-webkit-details-marker]:hidden">
+                <ChevronRight
+                  className={`h-4 w-4 shrink-0 transition-transform ${invoiceNumberOpen ? 'rotate-90' : ''}`}
+                  style={{ color: 'var(--text-secondary)' }}
+                  aria-hidden="true"
+                />
+                <span style={{ color: 'var(--text-secondary)' }}>Rechnungsnummer manuell vergeben</span>
+                {/* Eine gesetzte Nummer muss auch zugeklappt sichtbar bleiben —
+                    sonst versteckt der Bereich genau das, was man wissen muss. */}
+                {!invoiceNumberOpen && draft.invoice_number && (
+                  <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
+                    {draft.invoice_number}
+                  </span>
+                )}
+              </summary>
+              <div className="mt-4">
+                <Label htmlFor="invoice_number">Rechnungsnummer</Label>
+                <Input
+                  id="invoice_number"
+                  type="text"
+                  value={draft.invoice_number || ''}
+                  onChange={(e) =>
+                    setDraft((prev) => ({ ...prev, invoice_number: e.target.value.trim() || null }))
+                  }
+                  placeholder="Leer lassen für automatische Vergabe"
+                  className="mt-1.5"
+                />
+                <p className="mt-1.5 text-xs text-meta">
+                  Tragen Sie hier eine Nummer ein, um einen bestehenden Nummernkreis fortzuführen.
+                  Der automatische Zähler bleibt dann unberührt und überspringt keine Nummer.
+                </p>
+              </div>
+            </details>
+
           </div>
         </div>
 
-        {/* Actions Footer */}
-        <div className="flex-shrink-0 border-t px-6 py-4" style={{ borderColor: 'var(--border-default)' }}>
+        {/* Aktionsleiste. In der Schublade sitzt sie durch flex-shrink-0 in einer
+            Hülle mit fester Höhe ohnehin unten; auf der eigenen Seite hat die Hülle
+            keine Höhe (h-full läuft dort ins Leere), weshalb sie zusätzlich sticky
+            am unteren Rand klebt. Die Schublade scrollt nicht, dort bleibt sticky
+            ohne Wirkung — der Hintergrund ist nötig, damit auf der Seite kein Inhalt
+            durchscheint (bg-background entspricht der Hintergrundfarbe beider Hüllen). */}
+        <div
+          className="sticky bottom-0 z-10 flex-shrink-0 border-t bg-background px-6 py-4"
+          style={{ borderColor: 'var(--border-default)' }}
+        >
           {/* Erklärt den gesperrten Knopf — zurückhaltend und erst, wenn die
               Firmendaten geladen sind. Volltext der Fehler im title-Attribut. */}
           {!isCompanyLoading && !finalizeValidation.isValid && missingSections.length > 0 && (

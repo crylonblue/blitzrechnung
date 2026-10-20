@@ -36,8 +36,12 @@ export default function StatusUpdater({ invoice }: StatusUpdaterProps) {
 
   return (
     <div className="flex flex-wrap gap-2">
-      {/* Zurück zu Versendet - von paid oder cancelled */}
-      {['paid', 'cancelled'].includes(invoice.status) && (
+      {/* Zurück zu Versendet — nur aus 'paid'. Eine stornierte Rechnung bleibt
+          storniert: Zu ihr existiert bereits eine Stornorechnung mit eigener
+          fortlaufender Nummer. Setzte man sie wieder auf 'sent' oder 'paid',
+          stünde diese Stornorechnung ohne Bezug da — ein Zustand, den die v1-API
+          aus gutem Grund verweigert ("Cancelled invoices cannot be modified"). */}
+      {invoice.status === 'paid' && (
         <Button
           onClick={() => handleStatusChange('sent')}
           disabled={isUpdating}
@@ -72,8 +76,9 @@ export default function StatusUpdater({ invoice }: StatusUpdaterProps) {
         </Button>
       )}
 
-      {/* Bezahlt - von created, sent, reminded oder cancelled */}
-      {['created', 'sent', 'reminded', 'cancelled'].includes(invoice.status) && (
+      {/* Bezahlt — aus jedem offenen Zustand, aber nicht aus 'cancelled'
+          (siehe oben). */}
+      {['created', 'sent', 'reminded'].includes(invoice.status) && (
         <Button
           onClick={() => handleStatusChange('paid')}
           disabled={isUpdating}

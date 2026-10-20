@@ -414,6 +414,26 @@ export interface SendOptions {
   body?: string
 }
 
+/**
+ * Statusentscheidung für den Versand.
+ *
+ * Der Versand darf eine Rechnung im Lebenszyklus nur vorwärts bewegen, nie
+ * zurück: `created` ist der einzige Zustand, in dem die Rechnung noch nie
+ * draussen war — nur dort ist `sent` ein echter Fortschritt. Jeder andere
+ * Zustand steht bereits gleich weit oder weiter, und ein erneuter Versand
+ * desselben Dokuments (Kunde hat die Mail verlegt, Beleg zur Dokumentation)
+ * sagt nichts darüber aus, dass eine Mahnung, eine Zahlung oder ein Storno
+ * nicht stattgefunden hätte. Eine gemahnte Rechnung bleibt also `reminded`,
+ * eine bezahlte `paid`, eine stornierte `cancelled`.
+ *
+ * `draft` erreicht diese Stelle nie — Entwürfe lehnt sendInvoice vorher ab.
+ *
+ * @returns den neuen Status oder `null`, wenn der Status unverändert bleibt.
+ */
+export function nextStatusAfterSend(currentStatus: string): 'sent' | null {
+  return currentStatus === 'created' ? 'sent' : null
+}
+
 export async function sendInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: string, opts: SendOptions = {}): Promise<{ recipientEmail: string }> {
   const { data: invoice, error } = await supabase.from('invoices').select('*').eq('id', invoiceId).eq('company_id', ctx.companyId).single()
   if (error || !invoice) throw new InvoiceServiceError(404, 'NOT_FOUND', 'Rechnung nicht gefunden')
@@ -484,7 +504,12 @@ export async function sendInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: stri
   }
 
   // Non-fatal: the email was sent even if the status update fails.
-  await supabase.from('invoices').update({ status: 'sent', recipient_email: recipientEmail }).eq('id', invoiceId)
+  // Die Empfängeradresse wird immer nachgezogen, der Status nur, wenn der
+  // Versand ihn tatsächlich weiterbewegt (siehe nextStatusAfterSend).
+  const nextStatus = nextStatusAfterSend(invoice.status)
+  const sendUpdate: Record<string, unknown> = { recipient_email: recipientEmail }
+  if (nextStatus) sendUpdate.status = nextStatus
+  await supabase.from('invoices').update(sendUpdate).eq('id', invoiceId)
 
   return { recipientEmail }
 }
