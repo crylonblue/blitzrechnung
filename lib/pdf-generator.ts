@@ -337,6 +337,10 @@ export async function generateInvoicePDF(
 
   drawAddressLine(invoice.customer.name, true);
   drawAddressLine(customerAddress.streetLine);
+  // Zusatzzeile zwischen Strasse und Ort — Abteilung, Gebaeude, c/o.
+  if (invoice.customer.address.addressLine2?.trim()) {
+    drawAddressLine(invoice.customer.address.addressLine2);
+  }
   drawAddressLine(customerAddress.cityLine);
   if (invoice.customer.address.country && invoice.customer.address.country !== 'DE') {
     drawAddressLine(getCountryName(invoice.customer.address.country, language));

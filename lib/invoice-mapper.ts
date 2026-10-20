@@ -58,6 +58,7 @@ export function mapDBInvoiceToPDFInvoice(
         address: {
           street: sellerSnapshot.address.street,
           streetNumber: sellerSnapshot.address.streetnumber,
+          addressLine2: sellerSnapshot.address.addressline2 || undefined,
           postalCode: sellerSnapshot.address.zip,
           city: sellerSnapshot.address.city,
           country: sellerSnapshot.address.country,
@@ -103,6 +104,7 @@ export function mapDBInvoiceToPDFInvoice(
     address: {
       street: buyerSnapshot.address.street,
       streetNumber: buyerSnapshot.address.streetnumber,
+      addressLine2: buyerSnapshot.address.addressline2 || undefined,
       postalCode: buyerSnapshot.address.zip,
       city: buyerSnapshot.address.city,
       country: buyerSnapshot.address.country,

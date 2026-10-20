@@ -146,6 +146,10 @@ function mapInvoiceToZugferdData(invoice: Invoice, options: ZugferdOptions = {})
               countryCode: invoice.seller.address.country as any,
               postCode: invoice.seller.address.postalCode,
               line1: `${invoice.seller.address.street} ${invoice.seller.address.streetNumber}`,
+              // BT-51 / BT-163: zweite Adresszeile, nur wenn gefuellt.
+              ...(invoice.seller.address.addressLine2?.trim()
+                ? { line2: invoice.seller.address.addressLine2.trim() }
+                : {}),
               city: invoice.seller.address.city,
             },
             // PEPPOL-EN16931-R020: Seller electronic address
@@ -166,6 +170,10 @@ function mapInvoiceToZugferdData(invoice: Invoice, options: ZugferdOptions = {})
               countryCode: invoice.customer.address.country as any,
               postCode: invoice.customer.address.postalCode,
               line1: `${invoice.customer.address.street} ${invoice.customer.address.streetNumber}`,
+              // BT-51: zweite Adresszeile des Käufers, nur wenn gefüllt.
+              ...(invoice.customer.address.addressLine2?.trim()
+                ? { line2: invoice.customer.address.addressLine2.trim() }
+                : {}),
               city: invoice.customer.address.city,
             },
             // PEPPOL-EN16931-R010: Buyer electronic address

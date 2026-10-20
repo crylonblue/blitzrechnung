@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { generateInvoicePDF, sanitizeParagraphs } from "../lib/pdf-generator";
 import { makeInvoice } from "./helpers";
 import { inflateSync } from "node:zlib";
+import { generateXRechnungXML } from "../lib/zugferd-generator";
 
 /**
  * Anforderungen aus der Rückmeldung eines Interessenten (Oktober 2026).
@@ -119,4 +120,47 @@ test("eine Beschreibung ohne Umbruch verhält sich unverändert", async () => {
     "de"
   );
   assert.ok(bytes.length > 1000);
+});
+
+test("der Adresszusatz erscheint im PDF als zusätzliche Zeile", async () => {
+  // Abteilung, Gebäude oder c/o — bei internationalen Anschriften der
+  // Regelfall. Vorher gab es dafür kein Feld.
+  const ohne = await zeichenOperationen(mitKunde("Meier GmbH"));
+
+  const basis = mitKunde("Meier GmbH");
+  const mitZusatz = {
+    ...basis,
+    customer: {
+      ...basis.customer,
+      address: { ...basis.customer.address, addressLine2: "Abteilung Lizenzen, Haus 4" },
+    },
+  };
+
+  assert.ok(
+    (await zeichenOperationen(mitZusatz)) > ohne,
+    "der Zusatz muss eine zusätzliche Zeile erzeugen"
+  );
+});
+
+test("der Adresszusatz landet als line2 in der XRechnung", async () => {
+  // Das ist der Teil, den ein Prüfprogramm beim Empfänger liest. Ohne BT-51
+  // ginge die Angabe auf dem Weg zur E-Rechnung verloren.
+  const basis = mitKunde("Meier GmbH");
+  const xml = await generateXRechnungXML({
+    ...basis,
+    customer: {
+      ...basis.customer,
+      address: { ...basis.customer.address, addressLine2: "Abteilung Lizenzen" },
+    },
+  });
+
+  assert.ok(xml.includes("Abteilung Lizenzen"), "Zusatzzeile fehlt im XML");
+  assert.ok(xml.includes("<ram:LineTwo>"), "LineTwo-Element fehlt");
+});
+
+test("ohne Zusatz entsteht kein leeres line2-Element", async () => {
+  // Ein leeres Pflichtfeld wäre schlechter als gar keines — manche Prüfer
+  // beanstanden leere Elemente.
+  const xml = await generateXRechnungXML(mitKunde("Meier GmbH"));
+  assert.ok(!xml.includes("<ram:LineTwo></ram:LineTwo>"), "leeres LineTwo im XML");
 });
