@@ -23,11 +23,33 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { toast } from 'sonner'
-import { validateInvoiceForFinalization, formatValidationErrors, type ValidationError } from '@/lib/invoice-validation'
+import {
+  validateInvoiceForFinalization,
+  validateInvoiceDates,
+  formatValidationErrors,
+  type ValidationError,
+} from '@/lib/invoice-validation'
 import { getAdditionalContacts } from '@/lib/contact-persons'
 
 interface DraftEditorProps {
   draft: Invoice
+}
+
+// Kurzbezeichnungen der Firmenangaben für den Hinweis über der Aktionsleiste.
+// Die vollen Sätze aus lib/invoice-validation.ts erklären zusätzlich das Warum
+// ("Für die E-Rechnung erforderlich") und sprengen die eine Zeile; hier zählt
+// nur, welches Feld in den Einstellungen anzufassen ist.
+const COMPANY_FIELD_LABELS: Record<string, string> = {
+  'issuer.name': 'Firmenname',
+  'issuer.address': 'Firmenadresse',
+  'issuer.address.street': 'Straße',
+  'issuer.address.streetnumber': 'Hausnummer',
+  'issuer.address.zip': 'PLZ',
+  'issuer.address.city': 'Stadt',
+  'issuer.address.country': 'Land',
+  'issuer.tax': 'Steuernummer oder USt-IdNr.',
+  'issuer.bank': 'IBAN',
+  'issuer.email': 'Kontakt-E-Mail',
 }
 
 export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
@@ -176,16 +198,58 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
   }, [company, sellerIsSelf, sellerSnapshot, buyerIsSelf, buyerSnapshot, lineItems, draft.invoice_date])
 
   // Kurzfassung für den Hinweis in der Aktionsleiste: ein ausgegrauter Knopf ohne
-  // Erklärung ist eine Sackgasse. Die Details stehen im title-Attribut.
+  // Erklärung ist eine Sackgasse.
+  //
+  // Bei Empfänger und Positionen genügt das Stichwort — die stehen im Formular
+  // direkt daneben. Bei den Firmendaten nicht: die liegen in einem langen
+  // Einstellungsformular in einem anderen Bereich, und welches Feld dort fehlt,
+  // stand bisher nur im title-Attribut. Ein title erscheint erst beim
+  // Darüberfahren mit der Maus und auf einem Tastgerät gar nicht. Deshalb werden
+  // die fehlenden Firmenangaben hier ausdrücklich benannt.
   const missingSections = useMemo(() => {
     const hasError = (prefix: string) => finalizeValidation.errors.some((e) => e.field.startsWith(prefix))
     const sections: string[] = []
-    if (hasError('issuer')) sections.push(sellerIsSelf ? 'Firmendaten (Einstellungen)' : 'Absender')
+
+    if (hasError('issuer')) {
+      if (sellerIsSelf) {
+        // 'issuer' selbst bleibt aussen vor: das ist der Fall "Firmendaten
+        // konnten nicht geladen werden" — da gibt es kein einzelnes Feld zu
+        // benennen. Ohne Kurzbezeichnung lieber den vollen Satz als gar nichts:
+        // käme in lib/invoice-validation.ts eine Prüfung hinzu, verschwände sie
+        // sonst stillschweigend aus der Zeile.
+        const fields = finalizeValidation.errors
+          .filter((e) => e.field.startsWith('issuer.'))
+          .map((e) => COMPANY_FIELD_LABELS[e.field] ?? e.message)
+        if (fields.length === 0) {
+          sections.push('Firmendaten (Einstellungen)')
+        } else {
+          // Die Zeile soll kurz bleiben: bei einer noch leeren Firma stünden hier
+          // sonst acht Angaben. Drei benennen reicht, um zu wissen, worum es geht.
+          const shown = fields.slice(0, 3).join(', ')
+          const rest = fields.length - 3
+          sections.push(`Firmendaten (${shown}${rest > 0 ? ` und ${rest} weitere Angaben` : ''})`)
+        }
+      } else {
+        sections.push('Absender')
+      }
+    }
     if (hasError('customer')) sections.push('Empfänger')
     if (hasError('lineItems')) sections.push('Positionen')
     if (hasError('invoiceDate')) sections.push('Rechnungsdatum')
     return sections
   }, [finalizeValidation, sellerIsSelf])
+
+  // Zeigt der Hinweis Firmenangaben, führt ein Verweis direkt dorthin — sonst
+  // muss man die Einstellungen selbst suchen (gleiches Muster wie beim
+  // Fehlerbanner weiter oben, neuer Tab, damit der Entwurf offen bleibt).
+  const missingCompanyData = sellerIsSelf && finalizeValidation.errors.some((e) => e.field.startsWith('issuer'))
+
+  // Plausibilität der Datumsangaben: ein Hinweis, kein Riegel. Begründung in
+  // lib/invoice-validation.ts bei validateInvoiceDates.
+  const dateWarnings = useMemo(
+    () => validateInvoiceDates({ invoiceDate: draft.invoice_date, dueDate: draft.due_date }),
+    [draft.invoice_date, draft.due_date]
+  )
 
   const saveDraft = async () => {
     setIsSaving(true)
@@ -866,6 +930,29 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
               title={formatValidationErrors(finalizeValidation.errors)}
             >
               Zum Fertigstellen fehlt noch: {missingSections.join(', ')}.
+              {missingCompanyData && (
+                <>
+                  {' '}
+                  <a
+                    href="/settings"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline"
+                  >
+                    Einstellungen öffnen →
+                  </a>
+                </>
+              )}
+            </p>
+          )}
+
+          {/* Plausibilitätshinweis, kein Riegel: Das Fertigstellen bleibt
+              möglich, der Fehler wird aber nicht stumm übernommen. Eigene Farbe,
+              damit er nicht als "fehlt noch" gelesen wird — gesperrt ist der
+              Knopf dadurch nämlich nicht. */}
+          {dateWarnings.length > 0 && (
+            <p className="mb-3 text-xs" style={{ color: 'var(--status-warning)' }}>
+              {dateWarnings.map((w) => w.message).join(' ')}
             </p>
           )}
           <div className="flex items-center justify-between">

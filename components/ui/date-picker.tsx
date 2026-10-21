@@ -57,6 +57,10 @@ export function DatePicker({ value, onChange, placeholder = "Datum auswählen", 
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-auto p-0 border-zinc-200 dark:border-zinc-700" align="start">
+        {/* Kein locale nötig: Calendar ist von sich aus deutsch (siehe die
+            Vorgabe locale={de} in components/ui/calendar.tsx). Hier eins
+            mitzugeben hiesse nur, die Sprache an zwei Stellen zu pflegen —
+            genau daran ist es vorher auseinandergelaufen. */}
         <Calendar
           mode="single"
           selected={date}

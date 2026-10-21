@@ -11,6 +11,11 @@ import {
   getDefaultClassNames,
   type DayButton,
 } from "react-day-picker"
+// Bewusst aus "react-day-picker/locale" und nicht aus "date-fns/locale": Dieses
+// de-Objekt ist das date-fns-Locale plus die übersetzten ARIA-Beschriftungen des
+// Kalenders ("Zum vorherigen Monat", "Heute, …", ", ausgewählt"). Die Vorlesehilfe
+// bleibt sonst englisch, auch wenn Monatsname und Wochentage schon deutsch sind.
+import { de } from "react-day-picker/locale"
 
 import { cn } from "@/lib/utils"
 import { Button, buttonVariants } from "@/components/ui/button"
@@ -21,6 +26,11 @@ function Calendar({
   showOutsideDays = true,
   captionLayout = "label",
   buttonVariant = "ghost",
+  // Die Anwendung ist durchgängig deutsch, also ist Deutsch hier die Vorgabe und
+  // nicht etwas, das jede Aufrufstelle einzeln mitgeben muss (genau das war der
+  // Fehler: der Knopf des DatePickers war deutsch, das Menü darin englisch).
+  // Als benannte Eigenschaft bleibt sie überschreibbar, etwa für Fremdsprachen.
+  locale = de,
   formatters,
   components,
   ...props
@@ -39,11 +49,16 @@ function Calendar({
         className
       )}
       captionLayout={captionLayout}
-      formatters={{
-        formatMonthDropdown: (date) =>
-          date.toLocaleString("default", { month: "short" }),
-        ...formatters,
-      }}
+      locale={locale}
+      // Hier stand ein eigenes formatMonthDropdown mit
+      // date.toLocaleString("default", …) — und "default" ist die Sprache des
+      // Browsers, nicht die der Anwendung: ein Kalender mit deutscher
+      // Überschrift hätte darin englische Monatsnamen gezeigt. Erreicht wurde
+      // die Stelle ohnehin nie (sie greift nur bei captionLayout="dropdown*",
+      // die Vorgabe ist "label"), und ihr einziger Zweck war die Kurzform des
+      // Monatsnamens. Das ist den Fehler nicht wert: react-day-picker
+      // formatiert den Monat von sich aus mit dem oben gesetzten Locale.
+      formatters={formatters}
       classNames={{
         root: cn("w-fit", defaultClassNames.root),
         months: cn(
