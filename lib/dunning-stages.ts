@@ -59,9 +59,14 @@ export const DEFAULT_DUNNING_STAGES: readonly DunningStageDefinition[] = [
   {
     position: 1,
     name: 'Zahlungserinnerung',
-    // Ein paar Tage Luft nach Fälligkeit: Überweisungen brauchen Valuta, und
-    // wer am Tag nach der Frist mahnt, verliert Kunden statt Geld.
-    days_after_previous: 3,
+    // Eine Woche Luft nach Fälligkeit. Drei Tage wären zu knapp: Eine
+    // Überweisung, die am Fälligkeitstag losgeschickt wurde, ist dann noch
+    // unterwegs — besonders über ein Wochenende. Die Software würde also
+    // regelmässig Leute erinnern, deren Geld bereits auf dem Weg ist, und das
+    // kostet beim allerersten Gebrauch das Vertrauen in die Funktion. Nach
+    // einer Woche ist jede normale Überweisung durch, und die Erinnerung wirkt
+    // aufmerksam statt ungeduldig.
+    days_after_previous: 7,
     grace_days: 7,
     // Vor Verzug ist nichts ersatzfähig — und Verzug begründet überhaupt erst
     // dieses Schreiben. Deshalb weder Gebühr noch Zinsen.

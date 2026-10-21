@@ -99,17 +99,22 @@ export interface BaseRatePeriod {
  * Abgeschnitten am 01.07.2016: die regelmäßige Verjährung beträgt drei Jahre,
  * ältere Sätze wären Dekoration. Ein Tag davor ist ein Fehler, keine Schätzung.
  *
- * ACHTUNG: Der Eintrag `2026-07-01 → 1,52` stammt aus dem Branch, konnte beim
- * Übernehmen aber **nicht** gegen die Bundesbank verifiziert werden. Er ist in
- * sich plausibel (der Basiszinssatz lag in allen hier gelisteten Perioden genau
- * 0,88 Punkte unter dem Hauptrefinanzierungssatz der EZB; 1,52 entspräche
- * 2,40 %), bleibt aber eine Annahme. Deshalb steht
- * BASE_RATES_PUBLISHED_THROUGH nur auf `2026-01-01` — alles ab dem 01.07.2026
- * wird als `stale` gemeldet, bis jemand den Wert geprüft und die Konstante
- * nachgezogen hat.
+ * Hier stehen nur geprüfte Sätze. Der Branch führte zusätzlich
+ * `2026-07-01 → 1,52`; dieser Wert liess sich nicht gegen die Bundesbank
+ * belegen (er wäre in sich plausibel — der Basiszinssatz lag in allen
+ * gelisteten Perioden genau 0,88 Punkte unter dem Hauptrefinanzierungssatz der
+ * EZB, 1,52 entspräche 2,40 % — bleibt aber eine Annahme) und wurde deshalb
+ * entfernt.
+ *
+ * Eine ungeprüfte Zahl in dieser Tabelle ist gefährlicher als eine Lücke: Sie
+ * sieht aus wie eine Tatsache, und wer das `stale`-Kennzeichen nicht liest,
+ * mahnt damit. Ohne den Eintrag schreibt `baseRateFor` den letzten geprüften
+ * Satz fort und meldet weiterhin `stale` — das fordert im Zweifel zu wenig
+ * statt zu viel, und genau in diese Richtung soll ein Irrtum ausfallen.
+ *
+ * `tests/dunning-basiszins-aktualitaet.test.ts` wacht über beides.
  */
 export const BASE_RATES: BaseRatePeriod[] = [
-  { from: "2026-07-01", rate: 1.52 }, // ungeprüft, siehe Hinweis oben
   { from: "2025-07-01", rate: 1.27 },
   { from: "2025-01-01", rate: 2.27 },
   { from: "2024-07-01", rate: 3.37 },

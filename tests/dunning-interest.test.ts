@@ -61,11 +61,22 @@ test("die 40-€-Pauschale nur gegen einen sicher nicht-Verbraucher", () => {
 });
 
 test("der Basiszinssatz wird für den am Tag geltenden Zeitraum genommen", () => {
-  assert.equal(baseRateFor("2026-08-14").rate, 1.52);
-  assert.equal(baseRateFor("2026-07-01").rate, 1.52); // erster Tag der Periode
+  assert.equal(baseRateFor("2025-07-01").rate, 1.27); // erster Tag der Periode
   assert.equal(baseRateFor("2026-06-30").rate, 1.27);
   assert.equal(baseRateFor("2025-03-01").rate, 2.27);
   assert.equal(baseRateFor("2020-01-01").rate, -0.88); // die lange flache Strecke
+});
+
+test("ein Tag nach dem letzten Eintrag schreibt den letzten Satz fort", () => {
+  // Die Tabelle endet beim letzten geprüften Satz. Ein späterer Tag bekommt
+  // deshalb diesen Satz — zusammen mit `stale`, damit der Aufrufer weiss, dass
+  // er auf einer Fortschreibung sitzt und nicht auf einer Feststellung.
+  // Fortschreiben fordert im Zweifel zu wenig; eine geratene Erhöhung in der
+  // Tabelle würde zu viel fordern, und das auf einem Mahnschreiben.
+  const spaet = baseRateFor("2026-08-14");
+  assert.equal(spaet.rate, 1.27);
+  assert.equal(spaet.from, "2025-07-01"); // zeigt ehrlich auf die geprüfte Periode
+  assert.equal(spaet.stale, true);
 });
 
 test("ein Tag vor Beginn der Tabelle ist ein Fehler, keine Schätzung", () => {
@@ -77,7 +88,7 @@ test("ein Tag vor Beginn der Tabelle ist ein Fehler, keine Schätzung", () => {
 test("ein Halbjahr nach dem geprüften Stand wird als stale gemeldet", () => {
   assert.equal(baseRateFor(BASE_RATES_PUBLISHED_THROUGH).stale, false);
   assert.equal(baseRateFor("2026-06-30").stale, false); // dasselbe Halbjahr
-  // Der Eintrag 2026-07-01 → 1,52 % ist fortgeschrieben, nicht verifiziert.
+  // Ab dem 01.07.2026 wird fortgeschrieben, nicht festgestellt.
   assert.equal(baseRateFor("2026-07-01").stale, true);
   assert.equal(baseRateFor("2027-01-01").stale, true);
 });
@@ -123,7 +134,7 @@ test("der Fälligkeitstag zählt nicht mit, der letzte Tag schon", () => {
   assert.equal(result.segments[0].to, "2026-08-31");
 });
 
-test("Unternehmen: Basis 1,52 + 9 Punkte über 31 Tage", () => {
+test("Unternehmen: Basis 1,27 + 9 Punkte über 31 Tage", () => {
   const result = computeDefaultInterest({
     principal: 1000,
     dueDate: "2026-07-31",
@@ -132,11 +143,11 @@ test("Unternehmen: Basis 1,52 + 9 Punkte über 31 Tage", () => {
   });
   assert.equal(result.days, 31);
   assert.equal(result.segments.length, 1);
-  assert.equal(result.effectiveRate, 1.52 + SURCHARGE_NO_CONSUMER); // 10,52
-  // 1000 × 10,52 % × 31/365 = 8,9348
-  assert.equal(result.amount, 8.93);
-  // Der Satz 1,52 % ist noch nicht gegen die Bundesbank geprüft, also meldet
-  // das Ergebnis stale und der Aufrufer muss ihn bestätigen lassen.
+  assert.equal(result.effectiveRate, 1.27 + SURCHARGE_NO_CONSUMER); // 10,27
+  // 1000 × 10,27 % × 31/365 = 8,7225
+  assert.equal(result.amount, 8.72);
+  // Der Satz für dieses Halbjahr ist nicht geprüft, sondern fortgeschrieben —
+  // das Ergebnis meldet stale, und der Aufrufer muss es bestätigen lassen.
   assert.equal(result.stale, true);
 });
 
@@ -147,41 +158,48 @@ test("ein Verbraucher bekommt 5 statt 9 Punkte aufgeschlagen", () => {
     asOf: "2026-08-31",
     customerType: "consumer",
   });
-  assert.equal(result.effectiveRate, 1.52 + SURCHARGE_DEFAULT); // 6,52
-  // 1000 × 6,52 % × 31/365 = 5,5375
-  assert.equal(result.amount, 5.54);
+  assert.equal(result.effectiveRate, 1.27 + SURCHARGE_DEFAULT); // 6,27
+  // 1000 × 6,27 % × 31/365 = 5,3252
+  assert.equal(result.amount, 5.33);
 });
 
-test("ein Zeitraum über den 1. Juli wird an der Satzänderung geteilt", () => {
+test("ein Zeitraum über eine Satzänderung hinweg wird geteilt", () => {
+  // Bewusst im Juli 2025: Dort liegt eine echte, geprüfte Satzänderung
+  // (2,27 % → 1,27 %). Ein Zeitraum über den 01.07.2026 taugt dafür nicht mehr,
+  // seit die ungeprüfte Zeile aus der Tabelle entfernt wurde — dort wird
+  // fortgeschrieben, es gibt also gar keinen Wechsel. Nebeneffekt: Dieser
+  // Zeitraum ist vollständig geprüft und meldet deshalb kein stale, was die
+  // eigentliche Aussage des Tests sauber hält.
   const result = computeDefaultInterest({
     principal: 1000,
-    dueDate: "2026-06-15",
-    asOf: "2026-07-15",
+    dueDate: "2025-06-15",
+    asOf: "2025-07-15",
     customerType: "business",
   });
   assert.equal(result.days, 30);
   assert.equal(result.segments.length, 2);
+  assert.equal(result.stale, false);
 
   const [juni, juli] = result.segments;
   assert.deepEqual(
     { from: juni.from, to: juni.to, days: juni.days, rate: juni.ratePercent },
-    { from: "2026-06-16", to: "2026-06-30", days: 15, rate: 10.27 }
+    { from: "2025-06-16", to: "2025-06-30", days: 15, rate: 11.27 }
   );
   assert.deepEqual(
     { from: juli.from, to: juli.to, days: juli.days, rate: juli.ratePercent },
-    { from: "2026-07-01", to: "2026-07-15", days: 15, rate: 10.52 }
+    { from: "2025-07-01", to: "2025-07-15", days: 15, rate: 10.27 }
   );
 
-  // 1000 × 10,27 % × 15/365 = 4,2206 und 1000 × 10,52 % × 15/365 = 4,3233
-  assert.equal(juni.amount, 4.22);
-  assert.equal(juli.amount, 4.32);
-  assert.equal(result.amount, 8.54);
+  // 1000 × 11,27 % × 15/365 = 4,6315 und 1000 × 10,27 % × 15/365 = 4,2206
+  assert.equal(juni.amount, 4.63);
+  assert.equal(juli.amount, 4.22);
+  assert.equal(result.amount, 8.85);
   // Tagesgewichtet, weil die beiden Hälften verschiedene Sätze tragen.
-  assert.equal(result.effectiveRate, 10.4);
-  // Nur die zweite Hälfte liegt hinter dem geprüften Stand — das genügt.
+  assert.equal(result.effectiveRate, 10.77);
+  // Beide Hälften liegen im geprüften Bereich — hier geht es allein um die
+  // Teilung, nicht um die Aktualität der Tabelle.
   assert.equal(juni.stale, false);
-  assert.equal(juli.stale, true);
-  assert.equal(result.stale, true);
+  assert.equal(juli.stale, false);
 });
 
 test("ein Schaltjahr teilt durch 366, nicht durch 365", () => {
@@ -297,12 +315,12 @@ test("keine Zinseszinsen: zwei Zeiträume hintereinander ergeben denselben Betra
     customerType: "business",
   });
 
-  assert.equal(august.amount, 8.93); // 1000 × 10,52 % × 31/365
-  assert.equal(september.amount, 8.65); // 1000 × 10,52 % × 30/365
-  assert.equal(amStueck.amount, 17.58); // 1000 × 10,52 % × 61/365
+  assert.equal(august.amount, 8.72); // 1000 × 10,27 % × 31/365
+  assert.equal(september.amount, 8.44); // 1000 × 10,27 % × 30/365
+  assert.equal(amStueck.amount, 17.16); // 1000 × 10,27 % × 61/365
   assert.equal(round2(august.amount + september.amount), amStueck.amount);
-  // Mit Zinseszins liefe der September auf 1008,93 und ergäbe 8,73.
-  assert.notEqual(september.amount, 8.73);
+  // Mit Zinseszins liefe der September auf 1008,72 und ergäbe 8,51.
+  assert.notEqual(september.amount, 8.51);
 });
 
 test("der Zinsbetrag ist linear im Betrag", () => {
