@@ -332,6 +332,47 @@ export function validateInvoiceForFinalization(params: {
 }
 
 /**
+ * Plausibilitätsprüfung der Datumsangaben — bewusst getrennt von
+ * validateInvoiceForFinalization.
+ *
+ * Warum getrennt und nicht als Fehler dort oben: § 14 UStG verlangt gar kein
+ * Fälligkeitsdatum. Ein Befund hier darf deshalb das Fertigstellen nicht
+ * sperren — sonst wäre eine Rechnung plötzlich nicht mehr abschliessbar, die
+ * es bisher war, und derselbe Riegel fiele auch allen Aufrufen über die API vor
+ * die Füsse. Stumm durchgehen lassen darf man es trotzdem nicht: Am
+ * Fälligkeitsdatum hängen Zahlungsziel, Verzug, Mahnfristen und später die
+ * Zinsberechnung.
+ *
+ * Bewusst NICHT beanstandet wird ein Fälligkeitsdatum *gleich* dem
+ * Rechnungsdatum — das ist der legitime Fall "zahlbar sofort".
+ */
+export function validateInvoiceDates(params: {
+  invoiceDate: string | null | undefined
+  dueDate: string | null | undefined
+}): ValidationError[] {
+  const warnings: ValidationError[] = []
+  const { invoiceDate, dueDate } = params
+
+  // Beide Werte liegen als ISO-Datum (YYYY-MM-DD) vor — so schreibt sie der
+  // DatePicker und so stehen sie in der Datenbank. In diesem Format ist der
+  // Zeichenkettenvergleich identisch mit dem zeitlichen Vergleich; das erspart
+  // ein Date-Objekt und damit jede Zeitzonen-Verschiebung um einen Tag.
+  const isIsoDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value)
+
+  if (invoiceDate && dueDate && isIsoDate(invoiceDate) && isIsoDate(dueDate)) {
+    if (dueDate < invoiceDate) {
+      warnings.push({
+        field: 'dueDate',
+        message:
+          'Das Fälligkeitsdatum liegt vor dem Rechnungsdatum — Zahlungsziel und Verzugsfristen stimmen dann nicht.',
+      })
+    }
+  }
+
+  return warnings
+}
+
+/**
  * Formats validation errors into a user-friendly message
  */
 export function formatValidationErrors(errors: ValidationError[]): string {

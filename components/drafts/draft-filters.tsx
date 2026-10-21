@@ -377,11 +377,22 @@ export function DraftFiltersToolbar({
 
         {/* Results count */}
         <div className="ml-auto text-sm text-neutral-500">
+          {/*
+            Das Substantiv richtet sich nach der Gesamtzahl, auch in der
+            gefilterten Form: Es steht hinter dem „von" samt Gesamtzahl und
+            wird von dieser Zahl regiert. Bei einem einzigen Entwurf ist
+            „0 von 1 Entwurf" richtig und die Mehrzahl falsch — umgekehrt ist
+            „1 von 3 Entwürfen" richtig, obwohl die vordere Zahl 1 ist.
+            Die zweite Form steht ausserdem im Dativ.
+          */}
           {filteredDrafts.length === drafts.length ? (
-            <span>{drafts.length} Entwürfe</span>
+            <span>
+              {drafts.length} {drafts.length === 1 ? 'Entwurf' : 'Entwürfe'}
+            </span>
           ) : (
             <span>
-              {filteredDrafts.length} von {drafts.length} Entwürfen
+              {filteredDrafts.length} von {drafts.length}{' '}
+              {drafts.length === 1 ? 'Entwurf' : 'Entwürfen'}
             </span>
           )}
         </div>

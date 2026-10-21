@@ -283,6 +283,13 @@ export function InvoiceFiltersToolbar({
       ? null
       : TIME_PERIODS.find((p) => p.id === filters.timePeriod)?.label ?? null
 
+  // Einzahl/Mehrzahl der Trefferzahl. Beide Formen richten sich nach der
+  // Gesamtzahl, nicht nach der gefilterten: Im Satz „0 von 1 Rechnung" steht das
+  // Wort hinter „von 1" und gehört grammatisch zu dieser Zahl — „0 von 1
+  // Rechnungen" wäre falsch, „0 von 1 Rechnung" richtig. Dass damit dieselbe
+  // Bedingung für beide Formen gilt, ist ein Nebeneffekt, kein Zufall.
+  const invoiceNoun = `Rechnung${invoices.length === 1 ? "" : "en"}`
+
   const amountValue = useMemo(() => {
     if (filters.amountMin && filters.amountMax) {
       return `${filters.amountMin}€ – ${filters.amountMax}€`
@@ -550,28 +557,41 @@ export function InvoiceFiltersToolbar({
           </PopoverContent>
         </Popover>
 
-        {/* Filter löschen */}
-        {hasActiveFilters && (
-          <button
-            type="button"
-            onClick={() => setFilters(DEFAULT_FILTERS)}
-            // Zusammen mit dem ml-auto der Trefferzahl rückt der Link ganz nach
-            // rechts und bleibt doch neben der Zahl stehen.
-            className="ml-auto px-1 text-sm text-neutral-500 underline-offset-4 hover:text-neutral-900 hover:underline"
-          >
-            Filter löschen
-          </button>
-        )}
-
-        {/* Results count */}
-        <div className="ml-auto text-sm text-neutral-500">
-          {filteredInvoices.length === invoices.length ? (
-            <span>{invoices.length} Rechnungen</span>
-          ) : (
-            <span>
-              {filteredInvoices.length} von {invoices.length} Rechnungen
-            </span>
+        {/* Rechte Gruppe: „Filter löschen" und Trefferzahl.
+            Vorher trugen beide ein eigenes ml-auto; der freie Platz wurde damit
+            zwischen ihnen aufgeteilt, der Abstand war also von der Fensterbreite
+            abhängig und schrumpfte bei vollen Leisten auf null — dann las sich
+            der Knopf wie eine Beschriftung der Zahl. Ein ml-auto auf der Gruppe
+            schiebt beide gemeinsam nach rechts, der Abstand dazwischen ist fest. */}
+        <div className="ml-auto flex items-center gap-4">
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={() => setFilters(DEFAULT_FILTERS)}
+              // Akzentfarbe schon im Ruhezustand — wie bei „Alle anzeigen →" auf
+              // dem Dashboard und „Ersten Entwurf erstellen →" in der Entwurfsliste.
+              // Das Unterstreichen beim Darüberfahren bleibt eine Zugabe für die
+              // Maus; erkennbar ist der Knopf auch ohne sie, also auch auf
+              // Tastgeräten. `text-brand` ist derselbe Wert wie `var(--accent)`
+              // und passt zu `border-brand` der Chips daneben.
+              className="text-sm font-medium text-brand underline-offset-4 transition-colors hover:text-brand-hover hover:underline"
+            >
+              Filter löschen
+            </button>
           )}
+
+          {/* Results count */}
+          <div className="text-sm text-neutral-500">
+            {filteredInvoices.length === invoices.length ? (
+              <span>
+                {invoices.length} {invoiceNoun}
+              </span>
+            ) : (
+              <span>
+                {filteredInvoices.length} von {invoices.length} {invoiceNoun}
+              </span>
+            )}
+          </div>
         </div>
       </div>
     </div>

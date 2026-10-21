@@ -275,7 +275,9 @@ export default function ContactImportDialog({ open, onOpenChange, existingContac
               ) : (
                 <>
                   <p className="text-sm text-secondary">
-                    <strong>{importable.length}</strong> von {results.length} Kontakten werden importiert.
+                    {/* Dativ, und die Zahl dahinter regiert das Wort. */}
+                    <strong>{importable.length}</strong> von {results.length}{' '}
+                    {results.length === 1 ? 'Kontakt' : 'Kontakten'} werden importiert.
                     {invalidCount > 0 && ` ${invalidCount} mit Fehlern werden übersprungen.`}
                     {duplicateCount > 0 && ` ${duplicateCount} sind bereits vorhanden.`}
                   </p>
