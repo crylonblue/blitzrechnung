@@ -229,6 +229,8 @@ export interface Database {
           contact_name: string | null
           contact_phone: string | null
           contact_email: string | null
+          /** 'business' | 'consumer'; NULL = unbekannt (wird erst beim Mahnen erfragt). */
+          customer_type: 'business' | 'consumer' | null
           created_at: string
           updated_at: string
         }
@@ -251,6 +253,7 @@ export interface Database {
           contact_name?: string | null
           contact_phone?: string | null
           contact_email?: string | null
+          customer_type?: 'business' | 'consumer' | null
           created_at?: string
           updated_at?: string
         }
@@ -273,6 +276,7 @@ export interface Database {
           contact_name?: string | null
           contact_phone?: string | null
           contact_email?: string | null
+          customer_type?: 'business' | 'consumer' | null
           created_at?: string
           updated_at?: string
         }
@@ -281,7 +285,7 @@ export interface Database {
         Row: {
           id: string
           company_id: string
-          status: 'draft' | 'created' | 'sent' | 'reminded' | 'paid' | 'cancelled'
+          status: 'draft' | 'created' | 'sent' | 'reminded' | 'paid' | 'cancelled' | 'uneinbringlich'
           invoice_type: 'invoice' | 'cancellation'
           invoice_number: string | null
           invoice_date: string | null
@@ -314,7 +318,7 @@ export interface Database {
         Insert: {
           id?: string
           company_id: string
-          status?: 'draft' | 'created' | 'sent' | 'reminded' | 'paid' | 'cancelled'
+          status?: 'draft' | 'created' | 'sent' | 'reminded' | 'paid' | 'cancelled' | 'uneinbringlich'
           invoice_type?: 'invoice' | 'cancellation'
           invoice_number?: string | null
           invoice_date?: string | null
@@ -347,7 +351,7 @@ export interface Database {
         Update: {
           id?: string
           company_id?: string
-          status?: 'draft' | 'created' | 'sent' | 'reminded' | 'paid' | 'cancelled'
+          status?: 'draft' | 'created' | 'sent' | 'reminded' | 'paid' | 'cancelled' | 'uneinbringlich'
           invoice_type?: 'invoice' | 'cancellation'
           invoice_number?: string | null
           invoice_date?: string | null
@@ -441,6 +445,150 @@ export interface Database {
           unit?: string
           unit_price?: number
           default_vat_rate?: number
+          created_at?: string
+          updated_at?: string
+        }
+      }
+      dunning_stages: {
+        Row: {
+          id: string
+          company_id: string
+          position: number
+          name: string
+          days_after_previous: number
+          grace_days: number
+          fee_amount: number
+          charge_interest: boolean
+          charge_late_fee_flat: boolean
+          intro_text: string | null
+          outro_text: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          company_id: string
+          position: number
+          name: string
+          days_after_previous: number
+          grace_days: number
+          fee_amount?: number
+          charge_interest?: boolean
+          charge_late_fee_flat?: boolean
+          intro_text?: string | null
+          outro_text?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          company_id?: string
+          position?: number
+          name?: string
+          days_after_previous?: number
+          grace_days?: number
+          fee_amount?: number
+          charge_interest?: boolean
+          charge_late_fee_flat?: boolean
+          intro_text?: string | null
+          outro_text?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      }
+      payment_reminders: {
+        Row: {
+          id: string
+          company_id: string
+          invoice_id: string
+          /** Eingefroren aus dunning_stages, ohne Fremdschluessel. */
+          stage_position: number
+          stage_name: string
+          status: 'created' | 'sent'
+          reminder_date: string
+          due_date: string
+          invoice_due_date: string
+          claimed_amount: number
+          fee_amount: number
+          late_fee_flat: number
+          interest_amount: number
+          interest_rate: number | null
+          base_rate: number | null
+          interest_from: string | null
+          interest_days: number | null
+          total_amount: number
+          seller_snapshot: Json | null
+          buyer_snapshot: Json | null
+          language: string
+          intro_text: string | null
+          outro_text: string | null
+          pdf_url: string | null
+          recipient_email: string | null
+          sent_at: string | null
+          /** Verweis auf die Fassung, die diese hier abloest; NULL = gueltig. */
+          superseded_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          company_id: string
+          invoice_id: string
+          stage_position: number
+          stage_name: string
+          status?: 'created' | 'sent'
+          reminder_date: string
+          due_date: string
+          invoice_due_date: string
+          claimed_amount: number
+          fee_amount?: number
+          late_fee_flat?: number
+          interest_amount?: number
+          interest_rate?: number | null
+          base_rate?: number | null
+          interest_from?: string | null
+          interest_days?: number | null
+          total_amount: number
+          seller_snapshot?: Json | null
+          buyer_snapshot?: Json | null
+          language?: string
+          intro_text?: string | null
+          outro_text?: string | null
+          pdf_url?: string | null
+          recipient_email?: string | null
+          sent_at?: string | null
+          superseded_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          company_id?: string
+          invoice_id?: string
+          stage_position?: number
+          stage_name?: string
+          status?: 'created' | 'sent'
+          reminder_date?: string
+          due_date?: string
+          invoice_due_date?: string
+          claimed_amount?: number
+          fee_amount?: number
+          late_fee_flat?: number
+          interest_amount?: number
+          interest_rate?: number | null
+          base_rate?: number | null
+          interest_from?: string | null
+          interest_days?: number | null
+          total_amount?: number
+          seller_snapshot?: Json | null
+          buyer_snapshot?: Json | null
+          language?: string
+          intro_text?: string | null
+          outro_text?: string | null
+          pdf_url?: string | null
+          recipient_email?: string | null
+          sent_at?: string | null
+          superseded_by?: string | null
           created_at?: string
           updated_at?: string
         }
