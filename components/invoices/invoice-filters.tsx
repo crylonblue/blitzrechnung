@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { useState, useMemo, useCallback, useEffect } from "react"
+import { useSearchParams } from "next/navigation"
 import { Search, X } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { DatePicker } from "@/components/ui/date-picker"
@@ -72,6 +73,37 @@ const DEFAULT_FILTERS: InvoiceFilters = {
   amountMax: "",
 }
 
+/**
+ * Vorbelegung von aussen, über einen Query-Parameter.
+ *
+ * `/invoices?overdue=1` startet mit gesetztem Überfällig-Filter. Die Kachel
+ * „Überfällig" auf der Übersicht zeigt dorthin; damit ist die gefilterte
+ * Liste die Vorschlagsliste zum Mahnen, und ein eigener Mahnlauf-Bildschirm
+ * erübrigt sich.
+ *
+ * Nur die **Anfangsbelegung**: Der Parameter wird einmal gelesen und danach
+ * nicht mehr beachtet. Würde der Filterzustand an die URL gebunden, müsste
+ * jedes Antippen eines Chips die Adresse umschreiben — die Leiste bliebe
+ * äusserlich gleich, verhielte sich aber anders (History-Einträge,
+ * Zurück-Taste), und das war nicht verlangt.
+ */
+const OVERDUE_PARAM = "overdue"
+
+function anfangsFilter(params: URLSearchParams | ReadonlyURLSearchParamsLike): InvoiceFilters {
+  return {
+    ...DEFAULT_FILTERS,
+    // Eigenes Set statt des geteilten aus DEFAULT_FILTERS: eine gemeinsam
+    // benutzte Menge liesse sich aus Versehen für alle verändern.
+    statuses: new Set(),
+    showOverdue: params.get(OVERDUE_PARAM) === "1",
+  }
+}
+
+/** Minimale Form von `ReadonlyURLSearchParams` — mehr braucht die Vorbelegung nicht. */
+interface ReadonlyURLSearchParamsLike {
+  get(name: string): string | null
+}
+
 interface InvoiceFiltersProps {
   invoices: Invoice[]
   onFilteredInvoicesChange: (filtered: Invoice[]) => void
@@ -83,7 +115,10 @@ export function InvoiceFiltersToolbar({
   onFilteredInvoicesChange,
   companyNames = {},
 }: InvoiceFiltersProps) {
-  const [filters, setFilters] = useState<InvoiceFilters>(DEFAULT_FILTERS)
+  const searchParams = useSearchParams()
+  // Lazy-Initialisierung: Der Parameter zählt beim ersten Rendern, danach
+  // gehört der Zustand dem Nutzer.
+  const [filters, setFilters] = useState<InvoiceFilters>(() => anfangsFilter(searchParams))
   const [statusOpen, setStatusOpen] = useState(false)
   const [datePopoverOpen, setDatePopoverOpen] = useState(false)
   const [amountPopoverOpen, setAmountPopoverOpen] = useState(false)

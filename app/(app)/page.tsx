@@ -230,8 +230,13 @@ export default async function DashboardPage() {
           </div>
         </Link>
 
+        {/* Die Kachel führt in die Rechnungsliste mit gesetztem
+            Überfällig-Filter. Damit ist die gefilterte Liste die
+            Vorschlagsliste zum Mahnen — ein eigener Mahnlauf-Bildschirm
+            erübrigt sich. Steht nichts offen, führt sie in eine leere Liste,
+            und das ist die richtige Antwort auf „nichts überfällig". */}
         <Link
-          href="/invoices"
+          href="/invoices?overdue=1"
           className="card block transition-colors hover:border-[var(--border-strong)]"
           style={{ textDecoration: 'none' }}
         >

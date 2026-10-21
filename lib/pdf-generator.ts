@@ -1,41 +1,39 @@
-import { PDFDocument, rgb, type PDFPage } from "pdf-lib";
-import fontkit from "@pdf-lib/fontkit";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { rgb } from "pdf-lib";
 import { embedFacturX, Profile, Flavor } from "@stackforge-eu/factur-x";
-import type { Invoice, Address } from "./schema";
+import type { Invoice } from "./schema";
 import { generateXRechnungXML } from "./zugferd-generator";
 import { computeInvoiceTotals } from "./invoice-totals";
 import { getUnitLabel } from "./units";
 import { buildEpcPayload } from "./girocode";
 import { encodeQrMatrix, qrMatrixToRuns } from "./qr";
-
-// Bundled assets, read once. PDF/A-3 requires every font embedded, so we ship a
-// real TTF instead of pdf-lib's non-embeddable standard fonts. Liberation Sans
-// is metric-compatible with the previous Helvetica, so the layout is unchanged.
-// The compact sRGB profile is the mandatory PDF/A output intent.
-const readAsset = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)));
-const FONT_REGULAR = readAsset("./assets/fonts/LiberationSans-Regular.ttf");
-const FONT_BOLD = readAsset("./assets/fonts/LiberationSans-Bold.ttf");
-const SRGB_ICC = new Uint8Array(readAsset("./assets/icc/sRGB.icc"));
-import { 
-  getTranslations, 
-  formatDateForLanguage, 
+import {
+  briefbogenAnlegen,
+  zeichneKopf,
+  zeichneZweispalter,
+  zeichneFliesstext,
+  zeichneFusszeileAufAllenSeiten,
+  sanitizeParagraphs,
+  CONTENT_BOTTOM,
+  CONTENT_WIDTH,
+  COLOR_BLACK,
+  COLOR_GRAY,
+  FOOTER_Y,
+  MARGIN_LEFT,
+  MARGIN_RIGHT,
+  PAGE_WIDTH,
+  SRGB_ICC,
+  type Metazeile,
+} from "./pdf-briefbogen";
+import {
+  getTranslations,
+  formatDateForLanguage,
   formatCurrencyForLanguage,
-  type InvoiceLanguage 
+  type InvoiceLanguage
 } from "./invoice-translations";
 
-// Page setup constants
-const PAGE_WIDTH = 595.28; // A4 width in points
-const PAGE_HEIGHT = 841.89; // A4 height in points
-const MARGIN_LEFT = 50;
-const MARGIN_RIGHT = 50;
-const MARGIN_TOP = 50;
-const MARGIN_BOTTOM = 50;
-const CONTENT_WIDTH = PAGE_WIDTH - MARGIN_LEFT - MARGIN_RIGHT;
-// Baseline of the footer block. Hoisted because the Girocode is anchored
-// relative to it, and it must be known before the footer itself is drawn.
-const FOOTER_Y = MARGIN_BOTTOM + 60;
+// `sanitizeParagraphs` lebt jetzt im Briefbogen, bleibt hier aber exportiert:
+// bestehende Aufrufer (und Tests) beziehen sie seit jeher von hier.
+export { sanitizeParagraphs };
 
 // Girocode geometry: the code sits bottom-left, just above the footer rule, so
 // it lands in the same place on every invoice instead of drifting with the
@@ -43,50 +41,8 @@ const FOOTER_Y = MARGIN_BOTTOM + 60;
 const GIROCODE_SIZE = 72;
 const GIROCODE_BOTTOM = FOOTER_Y + 34;
 
-// Lowest baseline body content may occupy. Below it sits the footer rule, so
-// anything that would cross it belongs on the next page instead.
-const CONTENT_BOTTOM = FOOTER_Y + 40;
 // Vertical room the Girocode band claims, expressed in the content flow.
 const GIROCODE_BLOCK_HEIGHT = GIROCODE_BOTTOM + GIROCODE_SIZE + 10 - CONTENT_BOTTOM;
-
-// Colors
-const COLOR_BLACK = rgb(0, 0, 0);
-const COLOR_GRAY = rgb(0.5, 0.5, 0.5);
-const COLOR_LIGHT_GRAY = rgb(0.7, 0.7, 0.7);
-
-function formatAddress(address: Address): { streetLine: string; cityLine: string } {
-  return {
-    streetLine: `${address.street} ${address.streetNumber}`,
-    cityLine: `${address.postalCode} ${address.city}`,
-  };
-}
-
-async function fetchImageAsBytes(url: string): Promise<{ bytes: Uint8Array; type: "png" | "jpg" } | null> {
-  try {
-    const response = await fetch(url);
-    if (!response.ok) return null;
-    
-    const contentType = response.headers.get("content-type") || "";
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    
-    // Determine image type from content-type or URL
-    if (contentType.includes("png") || url.toLowerCase().endsWith(".png")) {
-      return { bytes, type: "png" };
-    }
-    if (contentType.includes("jpeg") || contentType.includes("jpg") || 
-        url.toLowerCase().endsWith(".jpg") || url.toLowerCase().endsWith(".jpeg")) {
-      return { bytes, type: "jpg" };
-    }
-    
-    // Try to detect from magic bytes
-    if (bytes[0] === 0x89 && bytes[1] === 0x50) return { bytes, type: "png" };
-    if (bytes[0] === 0xFF && bytes[1] === 0xD8) return { bytes, type: "jpg" };
-    
-    return null;
-  } catch {
-    return null;
-  }
-}
 
 function formatDate(dateString: string, language: InvoiceLanguage = 'de'): string {
   return formatDateForLanguage(dateString, language);
@@ -110,44 +66,6 @@ function formatQuantity(quantity: number, language: InvoiceLanguage = 'de'): str
   return quantity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-// Sanitize text by removing newlines and other problematic characters for PDF rendering
-function sanitizeText(text: string): string {
-  return text.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-/**
- * Wie sanitizeText, aber Absätze bleiben erhalten.
- *
- * Für Felder, in denen der Nutzer bewusst umbricht — etwa eine
- * Positionsbeschreibung über mehrere Zeilen. Jeder Absatz wird für sich
- * bereinigt und einzeln umbrochen; leere Absätze fallen weg, damit ein
- * versehentlicher Doppelumbruch keine Lücke ins Layout reisst.
- */
-export function sanitizeParagraphs(text: string): string[] {
-  return text
-    .split(/\r?\n/)
-    .map((absatz) => absatz.replace(/\s+/g, ' ').trim())
-    .filter((absatz) => absatz.length > 0);
-}
-
-// Get country name from country code
-function getCountryName(countryCode: string, language: InvoiceLanguage = 'de'): string {
-  const countryNames: Record<string, { de: string; en: string }> = {
-    'DE': { de: 'Deutschland', en: 'Germany' },
-    'AT': { de: 'Österreich', en: 'Austria' },
-    'CH': { de: 'Schweiz', en: 'Switzerland' },
-    'FR': { de: 'Frankreich', en: 'France' },
-    'IT': { de: 'Italien', en: 'Italy' },
-    'NL': { de: 'Niederlande', en: 'Netherlands' },
-    'BE': { de: 'Belgien', en: 'Belgium' },
-    'PL': { de: 'Polen', en: 'Poland' },
-    'CZ': { de: 'Tschechien', en: 'Czech Republic' },
-    'GB': { de: 'Großbritannien', en: 'United Kingdom' },
-    'US': { de: 'USA', en: 'United States' },
-  };
-  return countryNames[countryCode]?.[language] || countryCode;
-}
-
 /**
  * Options for PDF generation
  */
@@ -164,201 +82,36 @@ interface PdfGenerationOptions {
 }
 
 export async function generateInvoicePDF(
-  invoice: Invoice, 
+  invoice: Invoice,
   language: InvoiceLanguage = 'de',
   options: PdfGenerationOptions = {}
 ): Promise<Uint8Array> {
   const { isCancellation = false, originalInvoiceNumber, showGirocode = true } = options;
-  
-  const pdfDoc = await PDFDocument.create();
 
-  // Every page the invoice grows onto, in order. `page` is the one currently
-  // being drawn, and every helper below targets it — so a page break is just a
-  // reassignment. Footers and page numbers are drawn across `pages` at the very
-  // end, once the final count is known.
-  const pages: PDFPage[] = [];
-  let page: PDFPage = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-  pages.push(page);
-  
-  pdfDoc.registerFontkit(fontkit);
-  const helvetica = await pdfDoc.embedFont(FONT_REGULAR, { subset: true });
-  const helveticaBold = await pdfDoc.embedFont(FONT_BOLD, { subset: true });
-  
-  let y = PAGE_HEIGHT - MARGIN_TOP;
-  
+  // Seitenformat, Schriften, Zeichenhelfer und Seitenverwaltung kommen aus dem
+  // gemeinsamen Briefbogen. Die Helfer werden destrukturiert, damit die
+  // Aufrufstellen unten so aussehen wie zuvor; `y` und `page` bleiben am
+  // Objekt, weil sie fortgeschrieben werden.
+  const bogen = await briefbogenAnlegen();
+  const { doc: pdfDoc, regular: helvetica, bold: helveticaBold } = bogen;
+  const { drawText, drawTextRight, wrapText, ensureSpace } = bogen;
+
   // Get translations for the selected language
   const t = getTranslations(language);
-  
-  // Helper function to draw text (sanitizes text to remove newlines)
-  const drawText = (text: string, x: number, yPos: number, options?: { 
-    font?: typeof helvetica; 
-    size?: number; 
-    color?: typeof COLOR_BLACK;
-    maxWidth?: number;
-  }) => {
-    let sanitized = sanitizeText(text);
-    const font = options?.font ?? helvetica;
-    const size = options?.size ?? 10;
-    
-    // Truncate if maxWidth specified
-    if (options?.maxWidth) {
-      while (font.widthOfTextAtSize(sanitized, size) > options.maxWidth && sanitized.length > 3) {
-        sanitized = sanitized.slice(0, -4) + '...';
-      }
-    }
-    
-    page.drawText(sanitized, {
-      x,
-      y: yPos,
-      font,
-      size,
-      color: options?.color ?? COLOR_BLACK,
-    });
-  };
-
-  // Helper to draw right-aligned text
-  const drawTextRight = (text: string, rightX: number, yPos: number, options?: { 
-    font?: typeof helvetica; 
-    size?: number; 
-    color?: typeof COLOR_BLACK;
-  }) => {
-    const sanitized = sanitizeText(text);
-    const font = options?.font ?? helvetica;
-    const size = options?.size ?? 10;
-    const textWidth = font.widthOfTextAtSize(sanitized, size);
-    drawText(text, rightX - textWidth, yPos, options);
-  };
-
-  // Word wrap helper — also breaks overlong single words so they never clip
-  const wrapText = (text: string, maxWidth: number, font: typeof helvetica, size: number): string[] => {
-    const words = text.split(' ');
-    const lines: string[] = [];
-    let currentLine = '';
-
-    const pushLongWord = (word: string) => {
-      let chunk = '';
-      for (const char of word) {
-        const test = chunk + char;
-        if (font.widthOfTextAtSize(test, size) > maxWidth && chunk) {
-          lines.push(chunk);
-          chunk = char;
-        } else {
-          chunk = test;
-        }
-      }
-      currentLine = chunk;
-    };
-
-    for (const word of words) {
-      if (font.widthOfTextAtSize(word, size) > maxWidth) {
-        if (currentLine) {
-          lines.push(currentLine);
-          currentLine = '';
-        }
-        pushLongWord(word);
-        continue;
-      }
-
-      const testLine = currentLine ? `${currentLine} ${word}` : word;
-      if (font.widthOfTextAtSize(testLine, size) > maxWidth && currentLine) {
-        lines.push(currentLine);
-        currentLine = word;
-      } else {
-        currentLine = testLine;
-      }
-    }
-    if (currentLine) {
-      lines.push(currentLine);
-    }
-    return lines;
-  };
-
-  const sellerAddress = formatAddress(invoice.seller.address);
-  const rightColumnX = PAGE_WIDTH / 2 + 10;
 
   // ===========================================
   // SECTION 1: Header - One-line sender + Logo
   // ===========================================
-  
-  // One-line sender address (top left, small font)
-  // Using bullet character instead of arrow (→) as WinAnsi encoding doesn't support arrows
-  const senderOneLine = `${invoice.seller.name} - ${sellerAddress.streetLine} - ${sellerAddress.cityLine}`;
-  drawText(senderOneLine, MARGIN_LEFT, y, { size: 8, color: COLOR_GRAY });
 
-  // Logo (top right)
-  let logoHeight = 0;
-  if (invoice.logoUrl) {
-    const imageData = await fetchImageAsBytes(invoice.logoUrl);
-    if (imageData) {
-      const image = imageData.type === "png" 
-        ? await pdfDoc.embedPng(imageData.bytes)
-        : await pdfDoc.embedJpg(imageData.bytes);
-      
-      // Scale logo to max 150px width or 50px height
-      const maxWidth = 150;
-      const maxHeight = 50;
-      const scale = Math.min(maxWidth / image.width, maxHeight / image.height, 1);
-      const scaledWidth = image.width * scale;
-      const scaledHeight = image.height * scale;
-      logoHeight = scaledHeight;
-      
-      page.drawImage(image, {
-        x: PAGE_WIDTH - MARGIN_RIGHT - scaledWidth,
-        y: y - scaledHeight + 10,
-        width: scaledWidth,
-        height: scaledHeight,
-      });
-    }
-  }
+  await zeichneKopf(bogen, {
+    absenderName: invoice.seller.name,
+    absenderAdresse: invoice.seller.address,
+    logoUrl: invoice.logoUrl,
+  });
 
   // ===========================================
   // SECTION 2: Two-Column Layout
   // ===========================================
-  
-  y -= Math.max(logoHeight, 20) + 30;
-  const twoColumnY = y;
-
-  // LEFT COLUMN: Recipient Address Block
-  const customerAddress = formatAddress(invoice.customer.address);
-
-  // Der Block endet dort, wo rechts die Rechnungsdaten beginnen. Ohne diese
-  // Grenze lief eine lange Firmierung oder Anschrift quer in die
-  // Metadaten-Spalte — bei internationalen Adressen und Abteilungszusätzen
-  // ist das der Regelfall, nicht die Ausnahme.
-  const addressMaxWidth = rightColumnX - MARGIN_LEFT - 16;
-
-  const drawAddressLine = (text: string, bold = false) => {
-    const font = bold ? helveticaBold : helvetica;
-    for (const line of wrapText(sanitizeText(text), addressMaxWidth, font, 10)) {
-      drawText(line, MARGIN_LEFT, y, bold ? { font: helveticaBold } : undefined);
-      y -= 14;
-    }
-  };
-
-  drawAddressLine(invoice.customer.name, true);
-  drawAddressLine(customerAddress.streetLine);
-  // Zusatzzeile zwischen Strasse und Ort — Abteilung, Gebaeude, c/o.
-  if (invoice.customer.address.addressLine2?.trim()) {
-    drawAddressLine(invoice.customer.address.addressLine2);
-  }
-  drawAddressLine(customerAddress.cityLine);
-  if (invoice.customer.address.country && invoice.customer.address.country !== 'DE') {
-    drawAddressLine(getCountryName(invoice.customer.address.country, language));
-  }
-
-  // RIGHT COLUMN: Metadata Table
-  const metadataY = twoColumnY;
-  const labelX = rightColumnX;
-  const valueX = PAGE_WIDTH - MARGIN_RIGHT;
-  const metadataLineHeight = 16;
-  let metaY = metadataY;
-
-  const drawMetadataRow = (label: string, value: string | undefined, yPos: number) => {
-    if (!value) return yPos;
-    drawText(label, labelX, yPos, { size: 8, color: COLOR_GRAY });
-    drawTextRight(value, valueX, yPos, { size: 8 });
-    return yPos - metadataLineHeight;
-  };
 
   // Metadata labels based on language
   const metaLabels = language === 'de' ? {
@@ -377,73 +130,72 @@ export async function generateInvoicePDF(
     contactPerson: 'YOUR CONTACT',
   };
 
-  metaY = drawMetadataRow(metaLabels.invoiceNumber, invoice.invoiceNumber, metaY);
-  metaY = drawMetadataRow(metaLabels.invoiceDate, formatDate(invoice.invoiceDate, language), metaY);
-  if (invoice.buyerReference) {
-    metaY = drawMetadataRow(metaLabels.reference, invoice.buyerReference, metaY);
-  }
-  metaY = drawMetadataRow(metaLabels.serviceDate, formatDate(invoice.serviceDate, language), metaY);
-  metaY = drawMetadataRow(metaLabels.dueDate, formatDate(getEffectiveDueDate(invoice), language), metaY);
-  if (invoice.seller.contact?.name) {
-    metaY = drawMetadataRow(metaLabels.contactPerson, invoice.seller.contact.name, metaY);
-  }
+  // Zeilen ohne Wert entfallen ersatzlos — sie dürfen keine Lücke hinterlassen.
+  const metazeilen: Metazeile[] = [
+    { label: metaLabels.invoiceNumber, value: invoice.invoiceNumber },
+    { label: metaLabels.invoiceDate, value: formatDate(invoice.invoiceDate, language) },
+    { label: metaLabels.reference, value: invoice.buyerReference },
+    { label: metaLabels.serviceDate, value: formatDate(invoice.serviceDate, language) },
+    { label: metaLabels.dueDate, value: formatDate(getEffectiveDueDate(invoice), language) },
+    { label: metaLabels.contactPerson, value: invoice.seller.contact?.name },
+  ];
 
-  // Move y to below both columns (increased spacing before headline)
-  y = Math.min(y, metaY) - 45;
+  zeichneZweispalter(bogen, {
+    empfaengerName: invoice.customer.name,
+    empfaengerAdresse: invoice.customer.address,
+    language,
+    metazeilen,
+  });
 
   // ===========================================
   // SECTION 3: Invoice Title
   // ===========================================
-  
+
   // Use different title for cancellation invoices
   let invoiceTitle: string;
   if (isCancellation) {
-    invoiceTitle = language === 'de' 
+    invoiceTitle = language === 'de'
       ? `Stornorechnung Nr. ${invoice.invoiceNumber}`
       : `Cancellation Invoice No. ${invoice.invoiceNumber}`;
   } else {
-    invoiceTitle = language === 'de' 
+    invoiceTitle = language === 'de'
       ? `Rechnung Nr. ${invoice.invoiceNumber}`
       : `Invoice No. ${invoice.invoiceNumber}`;
   }
-  
+
   const headlineSize = 14;
   const dateSize = 10;
-  drawText(invoiceTitle, MARGIN_LEFT, y, { font: helveticaBold, size: headlineSize });
+  drawText(invoiceTitle, MARGIN_LEFT, bogen.y, { font: helveticaBold, size: headlineSize });
   // Center date vertically with the headline
   const dateCenterOffset = (headlineSize - dateSize) / 2;
-  drawTextRight(formatDate(invoice.invoiceDate, language), PAGE_WIDTH - MARGIN_RIGHT, y + dateCenterOffset, { size: dateSize });
+  drawTextRight(formatDate(invoice.invoiceDate, language), PAGE_WIDTH - MARGIN_RIGHT, bogen.y + dateCenterOffset, { size: dateSize });
 
-  y -= 18;
-  
+  bogen.y -= 18;
+
   // Show reference to original invoice for cancellation invoices
   if (isCancellation && originalInvoiceNumber) {
     const refText = t.originalInvoiceRef(originalInvoiceNumber);
-    drawText(refText, MARGIN_LEFT, y, { size: 10, color: COLOR_GRAY });
-    y -= 20;
+    drawText(refText, MARGIN_LEFT, bogen.y, { size: 10, color: COLOR_GRAY });
+    bogen.y -= 20;
   } else {
-    y -= 12;
+    bogen.y -= 12;
   }
 
   // ===========================================
   // SECTION 4: Body Text (Greeting + Intro)
   // ===========================================
-  
+
   // Greeting
   const greeting = language === 'de' ? 'Sehr geehrte Damen und Herren,' : 'Dear Sir or Madam,';
-  drawText(greeting, MARGIN_LEFT, y);
-  y -= 20;
+  drawText(greeting, MARGIN_LEFT, bogen.y);
+  bogen.y -= 20;
 
   // Intro text (if provided)
   if (invoice.introText) {
-    const introLines = wrapText(sanitizeText(invoice.introText), CONTENT_WIDTH, helvetica, 10);
-    for (const line of introLines) {
-      drawText(line, MARGIN_LEFT, y);
-      y -= 14;
-    }
+    zeichneFliesstext(bogen, [invoice.introText]);
   }
 
-  y -= 20;
+  bogen.y -= 20;
 
   // ===========================================
   // Pagination
@@ -452,36 +204,17 @@ export async function generateInvoicePDF(
   // A long invoice flows onto further pages instead of being drawn into — and
   // eventually straight past — the footer. Continuation pages repeat a short
   // header and the table head so a reader always knows what they are looking at.
-  let blocksOnPage = 1; // the letterhead already occupies page one
-
-  const startPage = () => {
-    page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-    pages.push(page);
-    y = PAGE_HEIGHT - MARGIN_TOP;
-    blocksOnPage = 0;
-
+  bogen.fortsetzungskopf = () => {
     const continued =
       language === 'de' ? `${invoiceTitle} - Fortsetzung` : `${invoiceTitle} - continued`;
-    drawText(continued, MARGIN_LEFT, y, { size: 8, color: COLOR_GRAY });
-    y -= 24;
-  };
-
-  /**
-   * Break to a new page when `needed` points of vertical space are no longer
-   * available, running `onNewPage` once the fresh page is open. Never breaks on
-   * a page that is still empty: a block taller than a whole page has to overflow
-   * somewhere, and an endless break loop is worse than one overlong row.
-   */
-  const ensureSpace = (needed: number, onNewPage?: () => void) => {
-    if (y - needed >= CONTENT_BOTTOM || blocksOnPage === 0) return;
-    startPage();
-    onNewPage?.();
+    drawText(continued, MARGIN_LEFT, bogen.y, { size: 8, color: COLOR_GRAY });
+    bogen.y -= 24;
   };
 
   // ===========================================
   // SECTION 5: Line Items Table
   // ===========================================
-  
+
   // Column positions and widths
   const tableLeft = MARGIN_LEFT;
   const tableRight = PAGE_WIDTH - MARGIN_RIGHT;
@@ -494,27 +227,27 @@ export async function generateInvoicePDF(
   };
 
   // Table header
-  const tableHeaders = language === 'de' 
+  const tableHeaders = language === 'de'
     ? { description: 'Beschreibung', quantity: 'Menge', unit: 'Einheit', unitPrice: 'Einzelpreis', total: 'Gesamtpreis' }
     : { description: 'Description', quantity: 'Qty', unit: 'Unit', unitPrice: 'Unit Price', total: 'Total' };
 
   // Drawn once at the top of the table and again on every continuation page.
   const drawTableHeader = () => {
-    drawText(tableHeaders.description, col.description, y, { font: helveticaBold, size: 9 });
-    drawTextRight(tableHeaders.quantity, col.quantity + 40, y, { font: helveticaBold, size: 9 });
-    drawText(tableHeaders.unit, col.unit, y, { font: helveticaBold, size: 9 });
-    drawTextRight(tableHeaders.unitPrice, col.unitPrice + 55, y, { font: helveticaBold, size: 9 });
-    drawTextRight(tableHeaders.total, col.total, y, { font: helveticaBold, size: 9 });
+    drawText(tableHeaders.description, col.description, bogen.y, { font: helveticaBold, size: 9 });
+    drawTextRight(tableHeaders.quantity, col.quantity + 40, bogen.y, { font: helveticaBold, size: 9 });
+    drawText(tableHeaders.unit, col.unit, bogen.y, { font: helveticaBold, size: 9 });
+    drawTextRight(tableHeaders.unitPrice, col.unitPrice + 55, bogen.y, { font: helveticaBold, size: 9 });
+    drawTextRight(tableHeaders.total, col.total, bogen.y, { font: helveticaBold, size: 9 });
 
     // Header bottom border
-    y -= 5;
-    page.drawLine({
-      start: { x: tableLeft, y },
-      end: { x: tableRight, y },
+    bogen.y -= 5;
+    bogen.page.drawLine({
+      start: { x: tableLeft, y: bogen.y },
+      end: { x: tableRight, y: bogen.y },
       thickness: 0.5,
       color: COLOR_BLACK,
     });
-    y -= 18;
+    bogen.y -= 18;
   };
 
   // All amounts come from the shared EN 16931 calculator, so the PDF, the
@@ -556,31 +289,31 @@ export async function generateInvoicePDF(
 
     // Description wraps within its column; qty/price stay on the first line
     descLines.forEach((line, lineIndex) => {
-      drawText(line, col.description, y - lineIndex * descLineHeight);
+      drawText(line, col.description, bogen.y - lineIndex * descLineHeight);
     });
 
     // Quantity with unit combined for German format
     const qtyText = formatQuantity(item.quantity, language);
-    drawTextRight(qtyText, col.quantity + 40, y);
+    drawTextRight(qtyText, col.quantity + 40, bogen.y);
 
     // Unit
-    drawText(getUnitLabel(item.unit, language), col.unit, y);
+    drawText(getUnitLabel(item.unit, language), col.unit, bogen.y);
 
     // Unit price
-    drawTextRight(formatCurrency(item.unitPrice, language), col.unitPrice + 55, y);
+    drawTextRight(formatCurrency(item.unitPrice, language), col.unitPrice + 55, bogen.y);
 
     // Total
-    drawTextRight(formatCurrency(itemTotal, language), col.total, y);
+    drawTextRight(formatCurrency(itemTotal, language), col.total, bogen.y);
 
-    y -= rowHeight;
-    blocksOnPage++;
+    bogen.y -= rowHeight;
+    bogen.blocksOnPage++;
   });
 
   // ===========================================
   // SECTION 6: Totals Block (Right-Aligned)
   // ===========================================
-  
-  y -= 10;
+
+  bogen.y -= 10;
 
   const netTotal = totals.netTotal;
   const grossTotal = totals.grossTotal;
@@ -590,9 +323,9 @@ export async function generateInvoicePDF(
 
   // Net total
   const netLabel = language === 'de' ? 'Gesamtbetrag netto' : 'Net total';
-  drawText(netLabel, totalsLabelX, y);
-  drawTextRight(formatCurrency(netTotal, language), totalsValueX, y);
-  y -= 16;
+  drawText(netLabel, totalsLabelX, bogen.y);
+  drawTextRight(formatCurrency(netTotal, language), totalsValueX, bogen.y);
+  bogen.y -= 16;
 
   // VAT lines — one per (category, rate) breakdown, matching the XRechnung.
   for (const g of sortedBreakdown) {
@@ -602,27 +335,27 @@ export async function generateInvoicePDF(
         : g.category === 'AE'
         ? language === 'de' ? 'Reverse Charge (§ 13b UStG)' : 'Reverse charge (§ 13b)'
         : language === 'de' ? `Umsatzsteuer ${g.rate}%` : `VAT ${g.rate}%`;
-    drawText(vatLabel, totalsLabelX, y);
-    drawTextRight(formatCurrency(g.taxAmount, language), totalsValueX, y);
-    y -= 16;
+    drawText(vatLabel, totalsLabelX, bogen.y);
+    drawTextRight(formatCurrency(g.taxAmount, language), totalsValueX, bogen.y);
+    bogen.y -= 16;
   }
 
   // Separator line
-  y -= 2;
-  page.drawLine({
-    start: { x: totalsLabelX, y },
-    end: { x: totalsValueX, y },
+  bogen.y -= 2;
+  bogen.page.drawLine({
+    start: { x: totalsLabelX, y: bogen.y },
+    end: { x: totalsValueX, y: bogen.y },
     thickness: 0.5,
     color: COLOR_BLACK,
   });
-  y -= 12;
+  bogen.y -= 12;
 
   // Gross total (bold)
   const grossLabel = language === 'de' ? 'Gesamtbetrag brutto' : 'Total amount';
-  drawText(grossLabel, totalsLabelX, y, { font: helveticaBold });
-  drawTextRight(formatCurrency(grossTotal, language), totalsValueX, y, { font: helveticaBold });
+  drawText(grossLabel, totalsLabelX, bogen.y, { font: helveticaBold });
+  drawTextRight(formatCurrency(grossTotal, language), totalsValueX, bogen.y, { font: helveticaBold });
 
-  y -= 24;
+  bogen.y -= 24;
 
   // Exemption reasons (§14 Abs. 4 Nr. 8 UStG: tax-exempt invoices must state the
   // reason). One note per distinct reason from the VAT breakdown.
@@ -633,32 +366,21 @@ export async function generateInvoicePDF(
         .filter((r): r is string => !!r)
     ),
   ];
-  for (const reason of exemptionReasons) {
-    for (const wrapped of wrapText(sanitizeText(reason), CONTENT_WIDTH, helvetica, 9)) {
-      ensureSpace(12);
-      drawText(wrapped, MARGIN_LEFT, y, { size: 9, color: COLOR_GRAY });
-      y -= 12;
-      blocksOnPage++;
-    }
-  }
+  zeichneFliesstext(bogen, exemptionReasons, {
+    size: 9,
+    color: COLOR_GRAY,
+    zeilenhoehe: 12,
+    umbruchSichern: true,
+  });
 
-  y -= 16;
+  bogen.y -= 16;
 
   // ===========================================
   // SECTION 7: Outro/Payment Notice
   // ===========================================
-  
+
   if (invoice.outroText) {
-    const outroLines = invoice.outroText.split('\n');
-    for (const line of outroLines) {
-      const wrappedLines = wrapText(sanitizeText(line), CONTENT_WIDTH, helvetica, 10);
-      for (const wrappedLine of wrappedLines) {
-        ensureSpace(14);
-        drawText(wrappedLine, MARGIN_LEFT, y);
-        y -= 14;
-        blocksOnPage++;
-      }
-    }
+    zeichneFliesstext(bogen, invoice.outroText.split('\n'), { umbruchSichern: true });
   }
 
   // ===========================================
@@ -696,7 +418,7 @@ export async function generateInvoicePDF(
       // A quiet zone is part of the symbol: without it a scanner may not find
       // the code against the surrounding text.
       const quietZone = (GIROCODE_SIZE / matrix.length) * 4;
-      page.drawRectangle({
+      bogen.page.drawRectangle({
         x: qrLeft - quietZone,
         y: GIROCODE_BOTTOM - quietZone,
         width: GIROCODE_SIZE + quietZone * 2,
@@ -705,7 +427,7 @@ export async function generateInvoicePDF(
       });
 
       for (const run of runs) {
-        page.drawRectangle({
+        bogen.page.drawRectangle({
           x: qrLeft + run.x,
           // Runs are measured from the top of the code; PDF y grows upward.
           y: qrTop - run.y - run.height,
@@ -754,124 +476,10 @@ export async function generateInvoicePDF(
 
   // Every page carries the footer; it is drawn at the end, when the page
   // count that the page numbers need is finally known.
-  const drawFooter = () => {
-    const footerY = FOOTER_Y;
-    const footerFontSize = 8;
-    const footerLineHeight = 11;
-    const footerColWidth = CONTENT_WIDTH / 4;
-    const footerCols = [
-      MARGIN_LEFT,
-      MARGIN_LEFT + footerColWidth,
-      MARGIN_LEFT + footerColWidth * 2,
-      MARGIN_LEFT + footerColWidth * 3,
-    ];
-
-    const footerLabels = language === 'de'
-      ? { phone: 'TEL.', email: 'E-MAIL', court: 'AMTSGERICHT', register: 'HR-NR.', vatId: 'UST.-ID', taxNumber: 'STEUER-NR.', director: 'GESCHÄFTSF.', bank: 'BANK', accountHolder: 'KONTOINHABER' }
-      : { phone: 'PHONE', email: 'E-MAIL', court: 'REG. COURT', register: 'REG. NO.', vatId: 'VAT ID', taxNumber: 'TAX NO.', director: 'MANAGING DIR.', bank: 'BANK', accountHolder: 'ACCOUNT HOLDER' };
-
-    // Separator line above footer
-    page.drawLine({
-      start: { x: MARGIN_LEFT, y: footerY + 20 },
-      end: { x: PAGE_WIDTH - MARGIN_RIGHT, y: footerY + 20 },
-      thickness: 0.5,
-      color: COLOR_LIGHT_GRAY,
-    });
-
-    // Helper to draw footer row - puts label and value on same line if they fit,
-    // otherwise breaks and wraps the value so it never runs into the next column
-    const drawFooterRow = (label: string, value: string, x: number, yPos: number, maxWidth: number): number => {
-      const labelWidth = helvetica.widthOfTextAtSize(label + ' ', footerFontSize);
-      const valueWidth = helvetica.widthOfTextAtSize(sanitizeText(value), footerFontSize);
-
-      drawText(label, x, yPos, { size: footerFontSize, color: COLOR_GRAY });
-      if (labelWidth + valueWidth <= maxWidth) {
-        drawText(value, x + labelWidth, yPos, { size: footerFontSize });
-        return yPos - footerLineHeight;
-      }
-      yPos -= footerLineHeight;
-      return drawFooterValue(value, x, yPos, maxWidth);
-    };
-
-    // Helper to draw a footer value (no label), wrapped to the column width
-    const drawFooterValue = (value: string, x: number, yPos: number, maxWidth: number): number => {
-      for (const line of wrapText(sanitizeText(value), maxWidth, helvetica, footerFontSize)) {
-        drawText(line, x, yPos, { size: footerFontSize });
-        yPos -= footerLineHeight;
-      }
-      return yPos;
-    };
-
-    // Column 1: Company Address (no labels, just values)
-    const col1Width = footerColWidth - 5;
-    let col1Y = footerY;
-    col1Y = drawFooterValue(invoice.seller.name, footerCols[0], col1Y, col1Width);
-    col1Y = drawFooterValue(sellerAddress.streetLine, footerCols[0], col1Y, col1Width);
-    col1Y = drawFooterValue(sellerAddress.cityLine, footerCols[0], col1Y, col1Width);
-    if (invoice.seller.address.country) {
-      drawFooterValue(getCountryName(invoice.seller.address.country, language), footerCols[0], col1Y, col1Width);
-    }
-
-    // Column 2: Contact Info
-    let col2Y = footerY;
-    if (invoice.seller.phoneNumber) {
-      col2Y = drawFooterRow(footerLabels.phone, invoice.seller.phoneNumber, footerCols[1], col2Y, footerColWidth - 5);
-    }
-    if (invoice.seller.email || invoice.seller.contact?.email) {
-      const email = invoice.seller.email || invoice.seller.contact?.email || '';
-      col2Y = drawFooterRow(footerLabels.email, email, footerCols[1], col2Y, footerColWidth - 5);
-    }
-
-    // Column 3: Legal Info
-    let col3Y = footerY;
-    if (invoice.seller.court) {
-      col3Y = drawFooterRow(footerLabels.court, invoice.seller.court, footerCols[2], col3Y, footerColWidth - 5);
-    }
-    if (invoice.seller.registerNumber) {
-      col3Y = drawFooterRow(footerLabels.register, invoice.seller.registerNumber, footerCols[2], col3Y, footerColWidth - 5);
-    }
-    if (invoice.seller.vatId) {
-      col3Y = drawFooterRow(footerLabels.vatId, invoice.seller.vatId, footerCols[2], col3Y, footerColWidth - 5);
-    }
-    if (invoice.seller.taxNumber) {
-      col3Y = drawFooterRow(footerLabels.taxNumber, invoice.seller.taxNumber, footerCols[2], col3Y, footerColWidth - 5);
-    }
-    if (invoice.seller.managingDirector) {
-      col3Y = drawFooterRow(footerLabels.director, invoice.seller.managingDirector, footerCols[2], col3Y, footerColWidth - 5);
-    }
-
-    // Column 4: Bank Details
-    let col4Y = footerY;
-    if (invoice.bankDetails) {
-      // Banks match the payee name against the IBAN; when the account is held
-      // under a different (e.g. shortened) name than the company, customers
-      // need to see it, or their transfer gets flagged.
-      const accountHolder = invoice.bankDetails.accountHolder?.trim();
-      if (accountHolder && accountHolder !== invoice.seller.name.trim()) {
-        col4Y = drawFooterRow(footerLabels.accountHolder, accountHolder, footerCols[3], col4Y, footerColWidth - 5);
-      }
-      col4Y = drawFooterRow(footerLabels.bank, invoice.bankDetails.bankName, footerCols[3], col4Y, footerColWidth - 5);
-      col4Y = drawFooterRow('IBAN', invoice.bankDetails.iban, footerCols[3], col4Y, footerColWidth - 5);
-      if (invoice.bankDetails.bic) {
-        col4Y = drawFooterRow('BIC', invoice.bankDetails.bic, footerCols[3], col4Y, footerColWidth - 5);
-      }
-    }
-
-    // Next free baseline below the bank column, which shares the right edge
-    // with the page number.
-    return col4Y;
-  };
-
-  const totalPages = pages.length;
-  pages.forEach((footerPage, index) => {
-    page = footerPage;
-    const bankColumnBottom = drawFooter();
-    // Drops below the bank column when it runs long (e.g. a separate account holder).
-    const pageNumberY = Math.min(MARGIN_BOTTOM, bankColumnBottom);
-    drawTextRight(`${index + 1}/${totalPages}`, PAGE_WIDTH - MARGIN_RIGHT, pageNumberY, {
-      size: 8,
-      color: COLOR_GRAY,
-    });
+  zeichneFusszeileAufAllenSeiten(bogen, {
+    seller: invoice.seller,
+    bankDetails: invoice.bankDetails,
+    language,
   });
 
   // Set document metadata
@@ -911,4 +519,3 @@ export async function generateInvoicePDF(
 
   return result.pdf;
 }
-

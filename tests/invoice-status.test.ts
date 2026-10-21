@@ -11,8 +11,16 @@ import { nextStatusAfterSend } from "../lib/invoice-service";
  * den Lebenszyklus nur vorwärts bewegen.
  */
 
-/** Alle Werte des CHECK-Constraints aus supabase/migrations/010. */
-const ALL_STATUSES = ["draft", "created", "sent", "reminded", "paid", "cancelled"] as const;
+/** Alle Werte des CHECK-Constraints, zuletzt geändert in supabase/migrations/040. */
+const ALL_STATUSES = [
+  "draft",
+  "created",
+  "sent",
+  "reminded",
+  "paid",
+  "cancelled",
+  "uneinbringlich",
+] as const;
 
 test("finalisierte, noch nie versendete Rechnung wird auf 'sent' gesetzt", () => {
   assert.equal(nextStatusAfterSend("created"), "sent");
@@ -24,11 +32,14 @@ test("gemahnte Rechnung fällt beim erneuten Versand nicht auf 'sent' zurück", 
   assert.equal(nextStatusAfterSend("reminded"), null);
 });
 
-test("bezahlte und stornierte Rechnungen bleiben unangetastet", () => {
+test("Endzustände bleiben unangetastet", () => {
   // Eine Rechnung noch einmal zur Dokumentation zu verschicken macht sie weder
-  // wieder offen noch hebt es ein Storno auf.
+  // wieder offen noch hebt es ein Storno auf. Für 'uneinbringlich' gilt
+  // dasselbe: Die Forderung ist abgeschrieben, der Versand einer Kopie ändert
+  // daran nichts.
   assert.equal(nextStatusAfterSend("paid"), null);
   assert.equal(nextStatusAfterSend("cancelled"), null);
+  assert.equal(nextStatusAfterSend("uneinbringlich"), null);
 });
 
 test("erneuter Versand einer versendeten Rechnung ändert nichts", () => {

@@ -28,6 +28,22 @@ export type Product = Database['public']['Tables']['products']['Row']
 export type ProductInsert = Database['public']['Tables']['products']['Insert']
 export type ProductUpdate = Database['public']['Tables']['products']['Update']
 
+export type DunningStage = Database['public']['Tables']['dunning_stages']['Row']
+export type DunningStageInsert = Database['public']['Tables']['dunning_stages']['Insert']
+export type DunningStageUpdate = Database['public']['Tables']['dunning_stages']['Update']
+
+export type PaymentReminder = Database['public']['Tables']['payment_reminders']['Row']
+export type PaymentReminderInsert = Database['public']['Tables']['payment_reminders']['Insert']
+export type PaymentReminderUpdate = Database['public']['Tables']['payment_reminders']['Update']
+
+/**
+ * Unternehmer oder Verbraucher. NULL am Kontakt heißt „unbekannt" — gefragt
+ * wird erst im Mahnen-Dialog, weil nur dort etwas davon abhängt: Zinssatz
+ * (§ 288 Abs. 1/2 BGB), 40-€-Pauschale (§ 288 Abs. 5 BGB) und Hinweispflicht
+ * (§ 286 Abs. 3 BGB).
+ */
+export type CustomerType = 'business' | 'consumer'
+
 // Helper types for address
 export interface Address {
   street: string
