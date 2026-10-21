@@ -1,8 +1,8 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { ChevronRight, LoaderCircle } from 'lucide-react'
+import { ChevronRight, CircleCheck, LoaderCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -296,6 +296,36 @@ export default function DunningDialog({
     setText(baueSchreiben({ invoice, absender, status }))
   }, [isOpen, textVomNutzer, invoice, absender, status])
 
+  const textfeld = useRef<HTMLTextAreaElement | null>(null)
+
+  /**
+   * Das Textfeld misst sich an seinem Inhalt.
+   *
+   * Die vorbereiteten Schreiben sind in der Dialogbreite je nach Stufe rund
+   * 14 bis 24 Zeilen lang: am kürzesten die Zahlungserinnerung ohne
+   * Aufstellung, am längsten die letzte Mahnung mit allen Posten und einem
+   * langen Firmennamen. Bei `rows={10}` endete der Text deshalb ohne jedes
+   * Zeichen dafür, dass es weitergeht. Eine feste Höhe für den längsten Fall
+   * stünde im Regelfall halb leer im Weg und schöbe die Aufstellung darüber
+   * aus dem Bild — also wächst das Feld mit und hört an einer Grenze auf
+   * (`max-h` an der Klasse: 35 rem, also knapp 24 Zeilen, und zugleich nie
+   * mehr als die halbe Fensterhöhe, damit der Dialog auf einem kleinen
+   * Bildschirm nicht nur noch aus Textfeld besteht). Ab dieser Grenze rollt
+   * das Feld — was in aller Regel nur noch den selbst getippten Langbrief
+   * trifft, nicht mehr den vorbereiteten Text.
+   */
+  useEffect(() => {
+    const feld = textfeld.current
+    if (!feld) return
+    // Erst zurücksetzen: `scrollHeight` wüsste sonst nur von der bisherigen
+    // Höhe, und das Feld könnte nach dem Löschen von Zeilen nie schrumpfen.
+    feld.style.height = 'auto'
+    // `scrollHeight` kennt Innenabstand und Inhalt, nicht den Rahmen — bei
+    // `border-box` fehlten sonst zwei Pixel und es erschiene ein Rollbalken.
+    const rahmen = feld.offsetHeight - feld.clientHeight
+    feld.style.height = `${feld.scrollHeight + rahmen}px`
+  }, [isOpen, text])
+
   /**
    * Die Stufen, die zur Auswahl stehen.
    *
@@ -315,6 +345,19 @@ export default function DunningDialog({
   }, [basis])
 
   const forderung = status.forderung
+
+  /**
+   * Gibt es überhaupt etwas aufzuschlüsseln?
+   *
+   * Ohne Zinsen, Gebühr und Pauschale ist die Gesamtforderung der offene
+   * Betrag — zwei Zeilen mit derselben Zahl behaupten eine Rechnung, die nicht
+   * stattfindet. Und das ist kein Randfall: Stufe 1 sieht nichts davon vor,
+   * eine Zahlungserinnerung landet also immer hier. `baueSchreiben` trifft
+   * dieselbe Unterscheidung für den Brieftext.
+   */
+  const hatZusaetze =
+    forderung !== null &&
+    (forderung.zinsen > 0 || forderung.gebuehr > 0 || forderung.pauschale > 0)
 
   /**
    * Unternehmer oder Verbraucher — nur fragen, wenn es den Betrag ändert.
@@ -396,15 +439,19 @@ export default function DunningDialog({
           {forderung ? (
             <>
               {/* Die Aufstellung. Was 0 ist, steht nicht da — eine Zeile
-                  „Pauschale 0,00 €" erklärt nichts und sieht aus wie ein Fehler. */}
+                  „Pauschale 0,00 €" erklärt nichts und sieht aus wie ein Fehler.
+                  Und kommt gar nichts dazu, bleibt eine einzige Zeile: die
+                  Gesamtforderung. */}
               <dl
                 className={`space-y-1.5 text-sm transition-opacity ${istAmRechnen ? 'opacity-50' : ''}`}
                 aria-busy={istAmRechnen}
               >
-                <div className="flex items-baseline justify-between gap-4">
-                  <dt className="text-zinc-600 dark:text-zinc-400">Offener Betrag</dt>
-                  <dd className="tabular-nums">{EUR(forderung.offenerBetrag)}</dd>
-                </div>
+                {hatZusaetze && (
+                  <div className="flex items-baseline justify-between gap-4">
+                    <dt className="text-zinc-600 dark:text-zinc-400">Offener Betrag</dt>
+                    <dd className="tabular-nums">{EUR(forderung.offenerBetrag)}</dd>
+                  </div>
+                )}
 
                 {forderung.zinsen > 0 && (
                   <div className="flex items-baseline justify-between gap-4">
@@ -434,7 +481,18 @@ export default function DunningDialog({
                   </div>
                 )}
 
-                <div className="flex items-baseline justify-between gap-4 border-t border-zinc-200 pt-1.5 font-semibold dark:border-zinc-700">
+                {/* „Gesamtforderung" trägt die Zeile auch allein: Sie benennt,
+                    was gefordert wird, und das bleibt dieselbe Aussage, sobald
+                    Posten dazukommen. „Offener Betrag" meint den Rest der
+                    Rechnung — sobald Zinsen anfallen, wäre das etwas anderes
+                    als die Summe, und die Zeile dürfte dann nicht mehr so
+                    heissen. Der Strich darüber trennt von der Aufstellung und
+                    hat ohne sie nichts zu trennen. */}
+                <div
+                  className={`flex items-baseline justify-between gap-4 font-semibold ${
+                    hatZusaetze ? 'border-t border-zinc-200 pt-1.5 dark:border-zinc-700' : ''
+                  }`}
+                >
                   <dt>Gesamtforderung</dt>
                   <dd className="tabular-nums">{EUR(forderung.summe)}</dd>
                 </div>
@@ -498,15 +556,21 @@ export default function DunningDialog({
             <Label htmlFor="dunning-text" className="sr-only">
               Schreiben
             </Label>
+            {/* `rows` ist nur der Stand vor der ersten Messung — gleich hoch
+                wie das kürzeste vorbereitete Schreiben, damit beim Öffnen
+                nichts springt. `resize-none`, weil ein von Hand gezogener
+                Griff beim nächsten Tastendruck wieder zurückschnappen würde;
+                die Höhenmessung ist der bessere Griff. */}
             <Textarea
               id="dunning-text"
-              rows={10}
+              ref={textfeld}
+              rows={14}
               value={text}
               onChange={(e) => {
                 setText(e.target.value)
                 setTextVomNutzer(true)
               }}
-              className="text-sm leading-relaxed"
+              className="max-h-[min(35rem,50vh)] min-h-32 resize-none text-sm leading-relaxed"
             />
           </div>
 
@@ -583,6 +647,12 @@ export default function DunningDialog({
                 />
               </div>
 
+              {/* Der Basiszinssatz gehört zum Schalter darüber: Sind die Zinsen
+                  aus, ist das Feld wirkungslos. Deaktiviert statt ausgeblendet
+                  — Ausblenden liesse beim Umlegen des Schalters alles darunter
+                  springen, und wer gerade im Feld steht, verlöre den Fokus ins
+                  Nichts. So bleibt stattdessen sichtbar, woran der Satz hängt,
+                  und das Umlegen bewegt nur die Beschriftung darunter. */}
               <div>
                 <Label htmlFor="dunning-base-rate" className="text-xs text-zinc-500 dark:text-zinc-400">
                   Basiszinssatz (% p. a.)
@@ -592,6 +662,7 @@ export default function DunningDialog({
                   type="number"
                   step="0.01"
                   inputMode="decimal"
+                  disabled={!zinsenAn}
                   className="mt-1"
                   placeholder={
                     status.zinsDetails?.segments[0]
@@ -610,9 +681,11 @@ export default function DunningDialog({
                   }}
                 />
                 <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
-                  {status.stale
-                    ? 'Der hinterlegte Basiszinssatz ist nicht geprüft. Bitte bestätigen oder korrigieren Sie ihn.'
-                    : 'Leer lassen, um den hinterlegten Satz der Deutschen Bundesbank zu verwenden.'}
+                  {!zinsenAn
+                    ? 'Wird erst gebraucht, wenn Verzugszinsen berechnet werden.'
+                    : status.stale
+                      ? 'Der hinterlegte Basiszinssatz ist nicht geprüft. Bitte bestätigen oder korrigieren Sie ihn.'
+                      : 'Leer lassen, um den hinterlegten Satz der Deutschen Bundesbank zu verwenden.'}
                 </p>
               </div>
             </div>
@@ -624,17 +697,32 @@ export default function DunningDialog({
         <DialogFooter className="sm:justify-between">
           {/* Zurückhaltend und links: der häufigste Ausgang einer Mahnung ist,
               dass bezahlt wurde — aber er ist nicht das, wozu dieser Dialog
-              aufgefordert hat. */}
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={handleBereitsBezahlt}
-            disabled={istAmBezahlen || istAmSpeichern}
-            className="text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
-          >
-            {istAmBezahlen && <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />}
-            Rechnung ist bereits bezahlt
-          </Button>
+              aufgefordert hat.
+
+              Er setzt die Rechnung allerdings auf „bezahlt", und neben dem
+              gleich aussehenden „Abbrechen" wurde er dafür zu leicht
+              verwechselt. Statt einer Rückfrage — die Änderung lässt sich im
+              Status-Umschalter zurücknehmen — bekommt er dasselbe wie das
+              „Löschen" im Entwurfseditor: eigene Zone links, eigenes Zeichen.
+              Das Häkchen sagt, dass hier etwas festgestellt und nicht
+              abgebrochen wird; auf schmalen Bildschirmen, wo die Fusszeile zur
+              Spalte wird, trennt ihn zusätzlich eine Linie vom Rest. */}
+          <div className="mt-2 border-t border-zinc-200 pt-3 dark:border-zinc-700 sm:mt-0 sm:border-t-0 sm:pt-0">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={handleBereitsBezahlt}
+              disabled={istAmBezahlen || istAmSpeichern}
+              className="w-full text-zinc-500 hover:text-zinc-900 sm:w-auto dark:text-zinc-400 dark:hover:text-zinc-100"
+            >
+              {istAmBezahlen ? (
+                <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <CircleCheck className="mr-2 h-4 w-4" aria-hidden="true" />
+              )}
+              Rechnung ist bereits bezahlt
+            </Button>
+          </div>
 
           <div className="flex gap-2">
             <Button type="button" variant="outline" onClick={onClose} disabled={istAmSpeichern}>
