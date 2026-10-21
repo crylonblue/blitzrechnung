@@ -293,9 +293,8 @@ async function bewerte(
   // --- Verzugsbeginn -----------------------------------------------------
   let verzugsbeginnTag: string
   try {
-    verzugsbeginn
     verzugsbeginnTag = verzugsbeginn(invoice, anpassungen.defaultSince)
-  } catch (err) {
+  } catch {
     // Entweder fehlen beide Daten (praktisch nur bei Entwürfen, die oben schon
     // heraus sind) oder der Nutzer hat ein unbrauchbares Datum übergeben.
     // Beides ist keine Serverstörung, sondern eine Lage, die man erklären kann.
@@ -465,6 +464,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const invoice = await ladeUndPruefe(supabase, user.id, id)
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
     const anpassungen = ausBody(body)
+    // Der Dialog schickt den bearbeiteten Schreibtext mit. Ohne Angabe bleibt
+    // es beim Text der Stufe; ein leerer String heisst "kein Text" und ist
+    // etwas anderes als "nicht angegeben".
+    const schreibtext = typeof body.text === 'string' ? body.text : undefined
 
     const bewertung = await bewerte(supabase, invoice, anpassungen)
     if (!bewertung.lage.mahnbar || !bewertung.stufe || !bewertung.forderung || !bewertung.verzugsbeginnTag) {
@@ -491,6 +494,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         // und genau dieses Datum wird eingefroren.
         reminderDate: bewertung.stichtag,
         defaultSince: bewertung.verzugsbeginnTag,
+        // Der im Dialog bearbeitete Schreibtext. Ohne Angabe gilt der Text der
+        // Stufe; ein leerer String ist dagegen eine Entscheidung des Nutzers
+        // und wird als solche eingefroren.
+        introText: schreibtext,
       }
     )
 

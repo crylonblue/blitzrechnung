@@ -730,3 +730,32 @@ test("eine versendete Mahnung lässt sich nicht verwerfen", async () => {
   );
   assert.equal(tabellen.payment_reminders.length, 1);
 });
+
+/**
+ * Der im Dialog bearbeitete Schreibtext.
+ *
+ * Der Dialog schickt ihn mit; wird er auf dem Weg verworfen, bearbeitet der
+ * Nutzer das Schreiben und findet beim Öffnen wieder den Standardtext vor —
+ * ohne jede Fehlermeldung. Genau so war es, bevor `introText` durchgereicht
+ * wurde: Die Route las das Feld gar nicht.
+ */
+test("ein bearbeiteter Schreibtext gewinnt gegen den Text der Stufe", () => {
+  const d = datensatzZum("2026-02-28", STUFE_2, {
+    introText: "Sehr geehrte Damen und Herren,\n\nunsere Rechnung ist offen.",
+  });
+  assert.equal(d.intro_text, "Sehr geehrte Damen und Herren,\n\nunsere Rechnung ist offen.");
+  // Der Schlusstext bleibt der der Stufe — bearbeitet wird nur der Hauptteil.
+  assert.equal(d.outro_text, STUFE_2.outro_text);
+});
+
+test("ohne bearbeiteten Text gilt weiterhin der Text der Stufe", () => {
+  const d = datensatzZum("2026-02-28", STUFE_2);
+  assert.equal(d.intro_text, STUFE_2.intro_text);
+});
+
+test("ein geleerter Text ist eine Angabe, kein fehlender Wert", () => {
+  // Wer alles löscht, will keinen Text — nicht den Stufentext zurück.
+  // Deshalb prüft der Datensatzbau auf `undefined` und nicht auf Wahrheitswert.
+  const d = datensatzZum("2026-02-28", STUFE_2, { introText: "" });
+  assert.equal(d.intro_text, "");
+});

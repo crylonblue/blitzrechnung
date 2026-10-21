@@ -10,6 +10,7 @@ import { format } from 'date-fns'
 import { de } from 'date-fns/locale'
 import { User, ShoppingCart, FileText, FileCode, Check, SendHorizontal, Ban, ExternalLink } from 'lucide-react'
 import SendInvoiceModal from './send-invoice-modal'
+import DunningSection from './dunning-section'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -427,6 +428,23 @@ const handleDownloadPdf = async () => {
                   E-Mail-Adresse für den Rechnungsversand
                 </p>
               </div>
+
+              {/* Mahnwesen — ausschliesslich bei überfälligen Rechnungen, und
+                  bewusst ausserhalb der Download-Gruppe darunter: Die hängt an
+                  vorhandener PDF/XML, eine überfällige Rechnung ohne erzeugte
+                  Datei muss sich trotzdem mahnen lassen. */}
+              {isOverdue(invoice) && (
+                <DunningSection
+                  invoice={invoice}
+                  empfaenger={buyerName}
+                  absender={companyName || 'Ihr Unternehmen'}
+                  onChanged={() => loadInvoice(invoice.id)}
+                  onPaid={() => {
+                    loadInvoice(invoice.id)
+                    closeDrawer()
+                  }}
+                />
+              )}
 
               {/* Download Buttons */}
               {(invoice.pdf_url || invoice.invoice_file_reference || invoice.xml_url) && (

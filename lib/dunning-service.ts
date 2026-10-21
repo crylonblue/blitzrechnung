@@ -151,6 +151,13 @@ export interface MahnungsDatensatzInput {
    */
   invoiceDueDate: string | null
   language: string
+  /**
+   * Der vom Nutzer bearbeitete Schreibtext. Ohne Angabe gilt der Text der
+   * Stufe. Er wird hier eingefroren wie jede andere Angabe des Dokuments:
+   * Wird die Stufe später umformuliert, darf sich ein bereits geschriebenes
+   * Mahnschreiben nicht rückwirkend ändern.
+   */
+  introText?: string | null
   sellerSnapshot: PartySnapshot | null
   buyerSnapshot: PartySnapshot | null
   recipientEmail: string | null
@@ -215,8 +222,10 @@ export function baueMahnungsDatensatz(input: MahnungsDatensatzInput): PaymentRem
     buyer_snapshot: input.buyerSnapshot as PaymentReminderInsert['buyer_snapshot'],
 
     language: input.language,
-    // NULL heißt "Standardtext". Die Texte selbst kommen später.
-    intro_text: stufe.intro_text,
+    // Der bearbeitete Text gewinnt; NULL heißt "Standardtext der Stufe".
+    // Ein leerer Text ist dabei eine Angabe des Nutzers und kein fehlender
+    // Wert — wer alles löscht, will keinen Text, nicht den Stufentext zurück.
+    intro_text: input.introText !== undefined ? input.introText : stufe.intro_text,
     outro_text: stufe.outro_text,
 
     recipient_email: input.recipientEmail,
@@ -376,6 +385,8 @@ export interface MahnungParams {
   defaultSince: string
   /** Ohne Angabe die Adresse aus dem Empfänger-Snapshot. */
   recipientEmail?: string | null
+  /** Der bearbeitete Schreibtext; ohne Angabe der Text der Stufe. */
+  introText?: string | null
 }
 
 async function fuegeEin(supabase: Db, datensatz: PaymentReminderInsert): Promise<PaymentReminder> {
@@ -425,6 +436,7 @@ function baueAusRechnung(
     sellerSnapshot: baueVerkaeuferSnapshot(invoice, company),
     buyerSnapshot,
     recipientEmail: params.recipientEmail ?? invoice.recipient_email ?? buyerSnapshot?.email ?? null,
+    introText: params.introText,
     supersededBy,
   })
 }
