@@ -5,6 +5,7 @@ import {
   type CustomerType,
   type InterestResult,
 } from "./dunning-interest";
+import { addDays, parseDay } from "./iso-day";
 import { round2 } from "./invoice-totals";
 import { formatCurrencyForLanguage, formatDateForLanguage } from "./invoice-translations";
 import type { DunningStageDefinition } from "./dunning-stages";
@@ -30,41 +31,9 @@ import type { Invoice, PaymentReminder } from "../types";
  * `computeDefaultInterest`, die Rundung aus `lib/invoice-totals.ts`.
  */
 
-// ---------------------------------------------------------------------------
-// Datumsarithmetik auf 'YYYY-MM-DD'
-// ---------------------------------------------------------------------------
-//
-// ISO-Tage lassen sich lexikografisch vergleichen; nur fürs Addieren von Tagen
-// braucht es echte Arithmetik. UTC, weil eine lokale Zeitzone über einen
-// Sommerzeitwechsel hinweg einen Tag verschieben und damit eine Frist um einen
-// Tag verfehlen würde.
-//
-// (Dieselben drei Helfer stecken auch in lib/dunning-interest.ts, dort aber
-// nicht exportiert. Sie dort zu exportieren wäre die bessere Lösung — die
-// Datei gehört nicht zu dieser Iteration.)
-
-const DAY_MS = 86_400_000;
-const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
-
-function parseDay(iso: string): number {
-  if (!ISO_DAY.test(iso)) {
-    throw new Error(`Ungültiges Datum "${iso}" — erwartet wird YYYY-MM-DD.`);
-  }
-  const [year, month, day] = iso.split("-").map(Number);
-  const ms = Date.UTC(year, month - 1, day);
-  if (formatDay(ms) !== iso) {
-    throw new Error(`Ungültiges Datum "${iso}" — diesen Tag gibt es nicht.`);
-  }
-  return ms;
-}
-
-function formatDay(ms: number): string {
-  return new Date(ms).toISOString().split("T")[0];
-}
-
-function addDays(iso: string, days: number): string {
-  return formatDay(parseDay(iso) + days * DAY_MS);
-}
+// Datumsarithmetik: `lib/iso-day.ts`. ISO-Tage lassen sich lexikografisch
+// vergleichen; nur fürs Addieren von Tagen braucht es echte Arithmetik, und die
+// rechnet dort aus gutem Grund in UTC (siehe Kopfkommentar der Datei).
 
 /** Kurzform für die Hinweistexte: '2026-03-02' -> '02.03.2026'. */
 const d = (iso: string) => formatDateForLanguage(iso, "de");
@@ -268,10 +237,42 @@ export function istMahnbarerStatus(status: Invoice["status"]): boolean {
   return !(NICHT_MAHNBARE_STATUS as readonly string[]).includes(status);
 }
 
+/**
+ * Ist der Beleg seiner **Natur** nach mahnbar?
+ *
+ * Eine Stornorechnung (`invoice_type === 'cancellation'`) ist keine Forderung,
+ * sondern eine Gutschrift: Das Geld schuldet der Rechnungssteller dem
+ * Empfänger, nicht umgekehrt. Sie zu mahnen ist nicht „betragsmäßig sinnlos",
+ * sondern fachlich verkehrt — und zwar unabhängig davon, welche Zahl im Beleg
+ * steht.
+ *
+ * Bisher fiel ein Storno nur deshalb heraus, weil seine Beträge negiert sind
+ * und damit die Prüfung `offenerBetrag <= 0` griff. Das ist ein Zufallstreffer:
+ * Er prüft das Vorzeichen, nicht den Beleg. Ein Storno mit positivem Betrag
+ * (fehlerhaft erzeugt, importiert, per API angelegt, oder über den Parameter
+ * `offenerBetrag` übersteuert) rutschte durch — und erzeugte eine Mahnung über
+ * Geld, das der Mahnende selbst schuldet.
+ *
+ * Bewusst **neben** `istMahnbarerStatus` und nicht darin:
+ *
+ *  * Es sind zwei verschiedene Fragen. Der Status ist ein Lebenszyklus und
+ *    ändert sich („bezahlt"), die Belegart ist eine Eigenschaft, die der Beleg
+ *    nie wieder verliert. Getrennt gehalten, trägt jede ihre eigene, klare
+ *    Fehlermeldung; zusammengelegt bliebe nur eine gemeinsame, vage.
+ *  * `istMahnbarerStatus` nähme sonst die ganze Rechnung statt eines Status und
+ *    müsste umbenannt werden — eine Signaturänderung an einer exportierten
+ *    Funktion, die anderswo bereits aufgerufen wird.
+ *  * `lib/invoice-utils.ts` (`isOverdue`) trennt die beiden Prüfungen genauso.
+ *    Zwei Stellen, dieselbe Reihenfolge, dieselbe Begründung.
+ */
+export function istMahnbarerBeleg(invoice: Pick<Invoice, "invoice_type">): boolean {
+  return invoice.invoice_type !== "cancellation";
+}
+
 /** Was `berechneForderung` von einer Rechnung braucht. */
 export type ForderungInvoice = Pick<
   Invoice,
-  "status" | "invoice_date" | "due_date" | "total_amount"
+  "status" | "invoice_type" | "invoice_date" | "due_date" | "total_amount"
 >;
 
 export interface ForderungInput {
@@ -341,6 +342,16 @@ export function berechneForderung(input: ForderungInput): Forderung {
   // kann nicht versehentlich in einem PDF landen. Die Oberfläche filtert diese
   // Rechnungen ohnehin vorher aus; kommt eine hier an, ist das ein Fehler im
   // Programm und keine Lage des Nutzers.
+  // Vor dem Status, weil die Belegart der grundsätzlichere Einwand ist: Ein
+  // Status lässt sich ändern, aus einem Storno wird nie eine Forderung. Steht
+  // ein Storno zusätzlich auf einem Endstatus, ist „das ist eine Gutschrift"
+  // die Auskunft, die weiterhilft.
+  if (!istMahnbarerBeleg(invoice)) {
+    throw new Error(
+      "Eine Stornorechnung kann nicht gemahnt werden: Sie ist eine Gutschrift — der Betrag steht dem Empfänger zu, nicht Ihnen."
+    );
+  }
+
   if (!istMahnbarerStatus(invoice.status)) {
     throw new Error(
       `Eine Rechnung im Status "${invoice.status}" kann nicht gemahnt werden.`

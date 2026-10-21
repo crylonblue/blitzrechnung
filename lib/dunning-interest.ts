@@ -1,4 +1,5 @@
 import { round2 } from "./invoice-totals";
+import { DAY_MS, formatDay, halfYearStart, parseDay, yearOf } from "./iso-day";
 
 /**
  * Verzugszinsen nach § 288 BGB.
@@ -138,45 +139,13 @@ export const BASE_RATES: BaseRatePeriod[] = [
  */
 export const BASE_RATES_PUBLISHED_THROUGH = "2026-01-01";
 
-const DAY_MS = 86_400_000;
-const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
-
 /**
- * 'YYYY-MM-DD' als UTC-Zeitstempel. UTC, weil eine lokale Zeitzone den Tag
- * verschieben und damit einen Zinstag kosten oder schenken würde.
- *
- * Streng geprüft: ein unvollständiges oder erfundenes Datum („2026-02-30",
- * ein ISO-Zeitstempel mit Uhrzeit) würde sonst stillschweigend NaN erzeugen und
- * am Ende als 0,00 € Zinsen auf der Mahnung landen.
+ * Der Teiler der act/act-Methode: die echte Länge des Kalenderjahres. Steht
+ * bewusst hier und nicht in `lib/iso-day.ts` — das ist keine Datumsarithmetik,
+ * sondern die Zinstagemethode dieses Moduls (siehe Kopfkommentar).
  */
-function parseDay(iso: string): number {
-  if (!ISO_DAY.test(iso)) {
-    throw new Error(`Ungültiges Datum "${iso}" — erwartet wird YYYY-MM-DD.`);
-  }
-  const [year, month, day] = iso.split("-").map(Number);
-  const ms = Date.UTC(year, month - 1, day);
-  if (formatDay(ms) !== iso) {
-    throw new Error(`Ungültiges Datum "${iso}" — diesen Tag gibt es nicht.`);
-  }
-  return ms;
-}
-
-function formatDay(ms: number): string {
-  return new Date(ms).toISOString().split("T")[0];
-}
-
-function yearOf(ms: number): number {
-  return new Date(ms).getUTCFullYear();
-}
-
 function daysInYear(year: number): number {
   return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0 ? 366 : 365;
-}
-
-/** '2026-08-14' -> '2026-07-01'; das Halbjahr, zu dem ein Tag gehört. */
-function halfYearStart(iso: string): string {
-  const [year, month] = iso.split("-").map(Number);
-  return month <= 6 ? `${year}-01-01` : `${year}-07-01`;
 }
 
 export interface BaseRateLookup {

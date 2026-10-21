@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   berechneForderung,
+  istMahnbarerBeleg,
   istMahnbarerStatus,
   naechsteStufe,
   verzugsbeginn,
@@ -35,6 +36,7 @@ import { LATE_FEE_FLAT } from "../lib/dunning-interest";
 function rechnung(overrides: Partial<ForderungInvoice> = {}): ForderungInvoice {
   return {
     status: "sent",
+    invoice_type: "invoice",
     invoice_date: "2026-01-15",
     due_date: "2026-02-14",
     total_amount: 1000,
@@ -398,4 +400,34 @@ test("offene Rechnungen sind mahnbar", () => {
     assert.equal(istMahnbarerStatus(status), true, status);
     assert.equal(forderung({ invoice: rechnung({ status }) }).summe, 1044.5, status);
   }
+});
+
+test("eine Stornorechnung ist nicht mahnbar — auch mit positivem Betrag", () => {
+  // Der Fall, den die reine Vorzeichenprüfung durchlässt: Ein Storno trägt
+  // normalerweise negierte Beträge und fiele schon über `offenerBetrag <= 0`
+  // heraus. Hier steht bewusst ein positiver Betrag — fehlerhaft erzeugt,
+  // importiert oder per API angelegt. Ohne die ausdrückliche Regel käme eine
+  // Mahnung über 1.044,50 € heraus, also über Geld, das der Mahnende selbst
+  // schuldet.
+  const storno = rechnung({
+    status: "created", // ein Storno erbt den Status der Ursprungsrechnung
+    invoice_type: "cancellation",
+    total_amount: 1000,
+  });
+
+  assert.equal(istMahnbarerBeleg(storno), false);
+  // Der Status allein lässt das Storno durch — genau deshalb braucht es die
+  // zweite, eigene Regel.
+  assert.equal(istMahnbarerStatus(storno.status), true);
+  assert.throws(() => forderung({ invoice: storno }), /Gutschrift/);
+
+  // Und auch dann, wenn der offene Betrag von außen positiv übersteuert wird.
+  assert.throws(
+    () =>
+      forderung({
+        invoice: rechnung({ invoice_type: "cancellation", total_amount: -1000 }),
+        offenerBetrag: 500,
+      }),
+    /Gutschrift/
+  );
 });

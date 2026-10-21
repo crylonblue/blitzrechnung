@@ -507,11 +507,17 @@ export interface Database {
           status: 'created' | 'sent'
           reminder_date: string
           due_date: string
-          invoice_due_date: string
+          /** Verzugsbeginn inkl. 30-Tage-Boden — nicht die Faelligkeit der Rechnung. */
+          default_since: string
+          /** Roh aus invoices.due_date; NULL, wenn die Rechnung keine traegt. */
+          invoice_due_date: string | null
           claimed_amount: number
           fee_amount: number
           late_fee_flat: number
           interest_amount: number
+          /** Zinsabschnitte (InterestSegment[] aus lib/dunning-interest.ts) — massgeblich. */
+          interest_segments: Json | null
+          /** Nur Anzeige; NULL, sobald der Zeitraum mehr als einen Satz traegt. */
           interest_rate: number | null
           base_rate: number | null
           interest_from: string | null
@@ -539,11 +545,13 @@ export interface Database {
           status?: 'created' | 'sent'
           reminder_date: string
           due_date: string
-          invoice_due_date: string
+          default_since: string
+          invoice_due_date?: string | null
           claimed_amount: number
           fee_amount?: number
           late_fee_flat?: number
           interest_amount?: number
+          interest_segments?: Json | null
           interest_rate?: number | null
           base_rate?: number | null
           interest_from?: string | null
@@ -570,11 +578,13 @@ export interface Database {
           status?: 'created' | 'sent'
           reminder_date?: string
           due_date?: string
-          invoice_due_date?: string
+          default_since?: string
+          invoice_due_date?: string | null
           claimed_amount?: number
           fee_amount?: number
           late_fee_flat?: number
           interest_amount?: number
+          interest_segments?: Json | null
           interest_rate?: number | null
           base_rate?: number | null
           interest_from?: string | null

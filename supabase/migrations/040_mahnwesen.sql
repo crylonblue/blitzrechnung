@@ -166,10 +166,34 @@ CREATE TABLE payment_reminders (
   reminder_date DATE NOT NULL,
   -- Die neue Zahlungsfrist, die diese Mahnung einraeumt.
   due_date DATE NOT NULL,
-  -- Die Faelligkeit der Rechnung, wie sie beim Schreiben der Mahnung galt.
-  -- Eingefroren, weil sie die Grundlage fuer Verzug und Zinszeitraum ist,
-  -- invoices.due_date aber nullbar und nachtraeglich aenderbar.
-  invoice_due_date DATE NOT NULL,
+  -- Zwei verschiedene Tage, die das Mahnschreiben beide braucht und die nur im
+  -- Regelfall zusammenfallen.
+  --
+  -- Der Verzugsbeginn, wie er beim Schreiben der Mahnung galt: der letzte Tag,
+  -- an dem noch rechtzeitig gezahlt werden konnte — Verzug besteht ab dem
+  -- Folgetag (§ 187 Abs. 1 BGB). Hier steckt der 30-Tage-Boden aus § 286
+  -- Abs. 3 BGB drin, deshalb ist das ausdruecklich NICHT die Faelligkeit der
+  -- Rechnung: Ein einseitig aufgedrucktes, verkuerztes Zahlungsziel ("zahlbar
+  -- innerhalb von 14 Tagen") ist keine kalendermaessige Bestimmung nach § 286
+  -- Abs. 2 Nr. 1 und verkuerzt den gesetzlichen Verzugseintritt nicht. Dann
+  -- steht hier invoice_date + 30 und in invoice_due_date der 14. Tag.
+  --
+  -- Eingefroren, weil daran der Zinszeitraum haengt und invoices.due_date
+  -- nachtraeglich aenderbar ist. NOT NULL, weil verzugsbeginn() immer einen
+  -- Wert liefert oder wirft — ohne Verzugsbeginn gibt es nichts zu mahnen.
+  -- Das Schreiben sagt damit: "Sie befinden sich seit dem ... in Verzug."
+  default_since DATE NOT NULL,
+
+  -- Die Faelligkeit der Rechnung, wie sie beim Schreiben der Mahnung galt —
+  -- roh aus invoices.due_date. Das Schreiben sagt damit: "Rechnung 0042 vom
+  -- ..., zahlbar bis ...".
+  --
+  -- Nullbar, weil eine Rechnung keine Faelligkeit tragen muss (Entwuerfe und
+  -- per API angelegte Rechnungen haben nicht zwingend eine). Dann druckt das
+  -- Schreiben an dieser Stelle eben nichts. Ein hilfsweise eingesetzter Wert
+  -- waere hier schlimmer als die Luecke: er saehe aus wie eine Angabe, die auf
+  -- der Rechnung steht, und stuende dort nicht.
+  invoice_due_date DATE,
 
   -- Was tatsaechlich gefordert wird. Getrennt von invoices.total_amount, weil
   -- es keine Teilzahlungen in der Datenhaltung gibt: Hat der Kunde einen Teil
@@ -185,8 +209,32 @@ CREATE TABLE payment_reminders (
   -- Die Zinsgrundlagen, eingefroren: Der Basiszinssatz aendert sich jeden
   -- 1. Januar und 1. Juli. Eine heute geschriebene Mahnung muss morgen noch
   -- nachrechenbar sein.
+  --
+  -- Die Wahrheit steht in `interest_segments`, nicht in den Skalaren daneben.
+  -- Laeuft eine Forderung ueber einen Satzwechsel hinweg, wird der Zinszeitraum
+  -- geteilt, und jedes Teilstueck traegt den damals geltenden Satz — dann gibt
+  -- es *einen* Zinssatz schlicht nicht. Ein einzelner Wert koennte nur ein
+  -- tagesgewichteter Durchschnitt sein, und der sieht aus wie eine
+  -- Feststellung, laesst sich aber nicht nachrechnen: je Abschnitt wird
+  -- gerundet, wer mit dem Durchschnitt multipliziert landet neben
+  -- `interest_amount`. Genau die Information, die eine Mahnung in drei Jahren
+  -- nachvollziehbar macht, ginge dabei still verloren.
+  --
+  -- Form je Eintrag — eins zu eins InterestSegment aus lib/dunning-interest.ts:
+  --   { "from", "to", "days", "baseRate", "ratePercent", "daysInYear",
+  --     "amount", "stale" }
+  interest_segments JSONB,
+
+  -- Anzeigewerte, und nur dafuer. Traegt der ganze Zeitraum genau einen Satz,
+  -- stehen Zinssatz und Basiszinssatz hier und koennen so gedruckt werden
+  -- ("9,27 % p. a."). Sonst bleiben beide NULL — eine ehrliche Luecke, die zum
+  -- Blick in interest_segments zwingt, ist besser als ein Mittelwert, den
+  -- jemand fuer den geltenden Satz haelt.
   interest_rate NUMERIC(5,2),
   base_rate NUMERIC(5,2),
+  -- Diese beiden bleiben auch ueber mehrere Abschnitte hinweg eindeutig: der
+  -- erste Zinstag ist der erste Zinstag, und die Zinstage addieren sich. Nur
+  -- die Saetze tun das nicht.
   interest_from DATE,
   interest_days INTEGER CHECK (interest_days IS NULL OR interest_days >= 0),
 
@@ -230,8 +278,24 @@ CREATE TABLE payment_reminders (
   -- Was als verschickt gilt, muss sagen wann.
   CONSTRAINT payment_reminders_sent_has_timestamp CHECK (
     status <> 'sent' OR sent_at IS NOT NULL
+  ),
+
+  -- Ein Objekt oder eine Zahl an dieser Stelle waere eine andere Datenstruktur
+  -- als die, die jeder Leser erwartet. Billig zu pruefen, teuer zu entdecken.
+  CONSTRAINT payment_reminders_interest_segments_is_array CHECK (
+    interest_segments IS NULL OR jsonb_typeof(interest_segments) = 'array'
+  ),
+
+  -- Wer Zinsen fordert, muss sagen, wie er sie gerechnet hat. Ein Betrag ohne
+  -- Abschnitte waere eine Behauptung ohne Beleg — und genau das Loch, das die
+  -- Spalte interest_segments schliessen soll.
+  CONSTRAINT payment_reminders_interest_has_segments CHECK (
+    interest_amount = 0 OR interest_segments IS NOT NULL
   )
 );
+
+COMMENT ON COLUMN payment_reminders.interest_segments IS
+  'Zinsabschnitte als JSON-Array (InterestSegment aus lib/dunning-interest.ts). Massgeblich fuer die Nachrechnung; interest_rate/base_rate sind nur Anzeigewerte und bleiben NULL, sobald der Zeitraum mehr als einen Satz traegt.';
 
 -- Je Rechnung und Stufe darf es nur EINE gueltige Fassung geben; abgeloeste
 -- Fassungen bleiben beliebig oft daneben stehen. Dass das keine zwei gueltigen
@@ -272,3 +336,120 @@ CREATE POLICY "Users can delete unsent reminders of their companies"
 
 CREATE TRIGGER update_payment_reminders_updated_at BEFORE UPDATE ON payment_reminders
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+
+-- ---------------------------------------------------------------------------
+-- 5. Eine Fassung durch die naechste abloesen
+-- ---------------------------------------------------------------------------
+--
+-- Das Problem, das diese Funktion loest, steckt im partiellen eindeutigen
+-- Index weiter oben: je (invoice_id, stage_position) darf es nur EINE Zeile
+-- mit superseded_by IS NULL geben. Eine Abloesung muss deshalb zwei Zeilen
+-- gleichzeitig bewegen — die alte verliert ihre Gueltigkeit, die neue bekommt
+-- sie. Naiv geht beides nicht:
+--
+--   * Die neue Fassung zuerst als gueltig einfuegen: die alte steht noch auf
+--     gueltig, der Index schlaegt zu.
+--   * Zuerst die alte abloesen: superseded_by zeigt dann auf eine Zeile, die
+--     es noch nicht gibt — der Fremdschluessel schlaegt zu.
+--
+-- Der Ausweg ist ein dritter Zustand, den der Index nicht kennt: Die neue
+-- Fassung wird zunaechst *geparkt* eingefuegt, mit superseded_by auf die alte.
+-- Sie ist damit selbst nicht gueltig und faellt aus dem partiellen Index
+-- heraus; die alte bleibt vorerst die gueltige Fassung. Das Einfuegen erledigt
+-- die Anwendung (lib/dunning-service.ts), weil dort die ganze Feldabbildung
+-- steht und getestet ist.
+--
+-- Dann tauscht diese Funktion die Gueltigkeit, und zwar in dieser Reihenfolge:
+--
+--   1. alt.superseded_by := neu   -> keine Zeile ist gueltig (beide zeigen
+--                                    aufeinander; ein Ringverweis, den der
+--                                    CHECK ...not_self_superseded erlaubt,
+--                                    weil er nur Selbstverweise verbietet)
+--   2. neu.superseded_by := NULL  -> genau die neue Zeile ist gueltig
+--
+-- Nach jedem einzelnen Schritt ist hoechstens eine Zeile gueltig, der Index
+-- schlaegt also nie zu. Und weil beide Schritte in einer Funktion stehen,
+-- laufen sie in einer Transaktion: den Zwischenzustand ohne gueltige Fassung
+-- sieht niemand ausser uns. Genau deshalb muss das hier stehen und kann nicht
+-- aus zwei PostgREST-Aufrufen bestehen — zwei Aufrufe sind zwei Transaktionen,
+-- und zwischen ihnen haette die Rechnung voruebergehend gar keine gueltige
+-- Mahnung dieser Stufe. Die Stufenermittlung wuerde die Stufe dann erneut
+-- anbieten und die 40-Euro-Pauschale falsch zaehlen.
+--
+-- Bricht umgekehrt schon das Einfuegen ab oder scheitert dieser Aufruf, bleibt
+-- nur die geparkte Zeile uebrig: unsichtbar fuer die Stufenermittlung, von der
+-- Anwendung wieder loeschbar, und die alte Fassung ist unveraendert gueltig.
+-- Ein Fehler faellt also in die harmlose Richtung.
+--
+-- SECURITY INVOKER (der Standardfall, hier ausdruecklich hingeschrieben): Beide
+-- UPDATEs gehen durch die Zugriffsregeln der Tabelle, eine eigene
+-- Firmenpruefung im Rumpf waere ueberfluessig und eine zweite Wahrheit.
+--
+-- tests/dunning-service.test.ts bildet den Index nach und prueft diese
+-- Reihenfolge — samt Gegenprobe mit der naiven Reihenfolge.
+CREATE OR REPLACE FUNCTION supersede_payment_reminder(
+  p_old_id UUID,
+  p_new_id UUID
+)
+RETURNS SETOF payment_reminders
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_old payment_reminders;
+  v_new payment_reminders;
+BEGIN
+  IF p_old_id = p_new_id THEN
+    RAISE EXCEPTION 'Eine Mahnung kann sich nicht selbst abloesen (%)', p_old_id
+      USING ERRCODE = '22023';
+  END IF;
+
+  -- Beide Zeilen sperren, bevor irgendetwas geschrieben wird. Zwei gleichzeitige
+  -- Abloesungen derselben Fassung sollen sich nacheinander anstellen; die
+  -- zweite findet die alte Fassung dann bereits abgeloest vor und bricht ab,
+  -- statt eine zweite Nachfolgerin zu erzeugen.
+  SELECT * INTO v_old FROM payment_reminders WHERE id = p_old_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Abzuloesende Mahnung % nicht gefunden', p_old_id
+      USING ERRCODE = '22023';
+  END IF;
+
+  SELECT * INTO v_new FROM payment_reminders WHERE id = p_new_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Neue Fassung % nicht gefunden', p_new_id
+      USING ERRCODE = '22023';
+  END IF;
+
+  IF v_old.superseded_by IS NOT NULL THEN
+    RAISE EXCEPTION 'Mahnung % wurde bereits abgeloest', p_old_id
+      USING ERRCODE = '23505';
+  END IF;
+
+  -- Die neue Fassung muss geparkt ankommen, sonst waere sie schon beim
+  -- Einfuegen am Index gescheitert und wir reden ueber eine fremde Zeile.
+  IF v_new.superseded_by IS DISTINCT FROM p_old_id THEN
+    RAISE EXCEPTION 'Neue Fassung % ist nicht auf % geparkt', p_new_id, p_old_id
+      USING ERRCODE = '22023';
+  END IF;
+
+  -- Abgeloest wird nur innerhalb derselben Rechnung und derselben Stufe. Eine
+  -- "1. Mahnung", die eine "Letzte Mahnung" abloest, waere keine Korrektur,
+  -- sondern ein Loch in der Eskalation.
+  IF v_new.invoice_id <> v_old.invoice_id
+     OR v_new.stage_position <> v_old.stage_position THEN
+    RAISE EXCEPTION 'Abloesung nur innerhalb derselben Rechnung und Stufe moeglich'
+      USING ERRCODE = '22023';
+  END IF;
+
+  UPDATE payment_reminders SET superseded_by = p_new_id WHERE id = p_old_id;
+  UPDATE payment_reminders SET superseded_by = NULL     WHERE id = p_new_id;
+
+  RETURN QUERY SELECT * FROM payment_reminders WHERE id = p_new_id;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION supersede_payment_reminder(UUID, UUID) FROM PUBLIC;
+REVOKE ALL ON FUNCTION supersede_payment_reminder(UUID, UUID) FROM anon;
+GRANT EXECUTE ON FUNCTION supersede_payment_reminder(UUID, UUID) TO authenticated;
