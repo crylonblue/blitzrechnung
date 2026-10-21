@@ -163,26 +163,37 @@ export default function Sidebar({ companyName, userEmail, userName }: SidebarPro
         {/* Bottom Section: User Info & Logout */}
         <div className="border-t px-8 py-6" style={{ borderColor: 'var(--border-default)' }}>
           {/*
-            Bei der Registrierung wird kein Name erhoben, `userName` ist dann leer.
-            Vorher fiel die fette Zeile auf die E-Mail zurück und die graue Zeile
-            zeigte dieselbe Adresse gleich noch einmal. Deshalb steht die Adresse
-            jetzt genau einmal: als Zweitzeile, wenn es einen Namen gibt, sonst
-            als alleinige Hauptzeile. `min-h-10` hält die Höhe der beiden Fälle
-            gleich, damit die Fußzeile nicht springt, sobald ein Nutzer später
-            einen Namen hinterlegt.
-            `truncate` + `title`, weil lange Adressen die 320px breite
-            Seitenleiste sonst umbrechen oder überlaufen lassen.
+            Bei einer Registrierung mit E-Mail und Passwort gibt es kein
+            `full_name`, und der Datenbank-Trigger schreibt dann die Adresse
+            selbst als Namen (siehe handle_new_user). `userName` ist also nicht
+            leer, sondern gleich der E-Mail — eine Prüfung auf "kein Name"
+            allein greift hier ins Leere und zeigt dieselbe Zeile zweimal.
+
+            Deshalb entscheidet nicht, OB ein Name da ist, sondern ob er etwas
+            anderes sagt als die Adresse. Das trägt auch dann noch, wenn der
+            Trigger später NULL schreibt oder irgendwo ein Leerstring landet.
+
+            `min-h-10` hält die Höhe beider Fälle gleich, damit die Fußzeile
+            nicht springt, sobald jemand einen Namen hinterlegt. `truncate` +
+            `title`, weil lange Adressen die 320 px breite Leiste sonst
+            umbrechen oder überlaufen lassen.
           */}
-          <div className="mb-4 min-h-10">
-            <p className="truncate text-sm font-medium" style={{ color: 'var(--text-primary)' }} title={userName || userEmail}>
-              {userName || userEmail}
-            </p>
-            {userName && (
-              <p className="mt-1 truncate text-xs" style={{ color: 'var(--text-meta)' }} title={userEmail}>
-                {userEmail}
-              </p>
-            )}
-          </div>
+          {(() => {
+            const name = userName?.trim()
+            const zeigeName = Boolean(name) && name !== userEmail.trim()
+            return (
+              <div className="mb-4 min-h-10">
+                <p className="truncate text-sm font-medium" style={{ color: 'var(--text-primary)' }} title={zeigeName ? name : userEmail}>
+                  {zeigeName ? name : userEmail}
+                </p>
+                {zeigeName && (
+                  <p className="mt-1 truncate text-xs" style={{ color: 'var(--text-meta)' }} title={userEmail}>
+                    {userEmail}
+                  </p>
+                )}
+              </div>
+            )
+          })()}
           <button
             onClick={handleLogout}
             className="w-full rounded-md border px-3 py-2 text-sm font-medium transition-all duration-200 hover:bg-[rgba(45,45,45,0.04)] hover:text-[var(--text-primary)]"
