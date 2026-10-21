@@ -598,3 +598,124 @@ export async function verwerfeMahnung(
     )
   }
 }
+
+// ---------------------------------------------------------------------------
+// 5. Hinweise ordnen
+// ---------------------------------------------------------------------------
+
+/**
+ * Die Arten von Hinweis, die `berechneForderung` erzeugt.
+ *
+ * `unbekannt` ist der Platzhalter für einen Hinweis, den diese Datei noch
+ * nicht kennt — ein später hinzugekommener Text soll nicht stillschweigend
+ * ganz nach hinten rutschen und damit aus der Anzeige fallen.
+ */
+type HinweisArt =
+  | 'basiszins-ungeprueft'
+  | 'schuldnertyp-unbekannt'
+  | 'verzug-nicht-eingetreten'
+  | 'teilbetrag'
+  | 'unbekannt'
+  | 'pauschale-verbraucher'
+  | 'pauschale-bereits-berechnet'
+  | 'pauschale-typ-unbekannt'
+
+/**
+ * Erkennung über eine stabile Teilzeichenkette.
+ *
+ * Unschön, aber die ehrlichste Lösung an dieser Stelle: `berechneForderung`
+ * liefert fertige Sätze und keine Kennungen, und dieses Modul darf die reine
+ * Berechnung nicht umbauen, nur um sie zu sortieren. Damit die Zuordnung nicht
+ * leise verfällt, wenn jemand dort einen Satz umformuliert, wacht
+ * `tests/dunning-hinweise.test.ts` über die Marker — der Test lässt die echten
+ * Hinweise erzeugen und prüft die Reihenfolge, nicht die Marker selbst.
+ */
+const HINWEIS_MARKER: ReadonlyArray<readonly [HinweisArt, string]> = [
+  ['basiszins-ungeprueft', 'noch nicht als geprüft hinterlegt'],
+  ['schuldnertyp-unbekannt', 'Vorsichtshalber werden nur'],
+  ['verzug-nicht-eingetreten', 'Der Verzug beginnt erst'],
+  ['teilbetrag', 'Sie mahnen einen Teilbetrag'],
+  // Vor `pauschale-verbraucher`, weil beide Sätze mit derselben Wendung über
+  // die Pauschale beginnen und sich erst in der Begründung unterscheiden.
+  ['pauschale-typ-unbekannt', 'weil nicht hinterlegt ist, ob der Schuldner'],
+  ['pauschale-verbraucher', 'nur gegenüber Unternehmen zu'],
+  ['pauschale-bereits-berechnet', 'bereits mit einer früheren Mahnung berechnet'],
+]
+
+/**
+ * Die Rangfolge. Kleiner heißt dringender.
+ *
+ * Leitgedanke: **Was die Forderung angreifbar macht, steht über dem, was sie
+ * nur kleiner macht, und beides steht über dem, was nur erklärt.**
+ *
+ *  1. Ungeprüfter Basiszinssatz — der einzige Hinweis, der eine Handlung
+ *     *vor* dem Versand verlangt. Die Zinsforderung stützt sich auf eine
+ *     fortgeschriebene Zahl; stimmt sie nicht, ist der geforderte Betrag
+ *     falsch und das Schreiben angreifbar.
+ *  2. Unbekannter Schuldnertyp — eine Lücke in den eigenen Daten, die der
+ *     Nutzer genau jetzt schließen kann, und die zugleich Zinssatz und
+ *     Pauschale bestimmt.
+ *  3. Verzug noch nicht eingetreten — ändert, was das Schreiben überhaupt
+ *     fordern darf. Macht die Forderung kleiner, nicht falsch.
+ *  4. Teilbetrag — betrifft die Höhe, ist aber vom Nutzer selbst so gewählt.
+ *  5. Unbekannter neuer Hinweis — im Zweifel sichtbar lassen.
+ *  6.–8. Die Pauschale-Hinweise erklären nur, warum die 40 € fehlen. Sie
+ *     verlangen nichts und ändern nichts; sie stehen deshalb hinten und werden
+ *     von der Begrenzung als Erste abgeschnitten.
+ */
+const HINWEIS_RANG: Record<HinweisArt, number> = {
+  'basiszins-ungeprueft': 1,
+  'schuldnertyp-unbekannt': 2,
+  'verzug-nicht-eingetreten': 3,
+  teilbetrag: 4,
+  unbekannt: 5,
+  'pauschale-verbraucher': 6,
+  'pauschale-bereits-berechnet': 7,
+  'pauschale-typ-unbekannt': 8,
+}
+
+function artVon(hinweis: string): HinweisArt {
+  for (const [art, marker] of HINWEIS_MARKER) {
+    if (hinweis.includes(marker)) return art
+  }
+  return 'unbekannt'
+}
+
+/** Höchstens so viele Hinweise gleichzeitig. */
+export const HINWEIS_GRENZE = 3
+
+/**
+ * Hinweise nach Dringlichkeit ordnen und auf drei begrenzen.
+ *
+ * Vier Hinweise nebeneinander sind keine Hilfe mehr, sondern eine Textwand:
+ * Wer sie überspringt, überspringt auch den wichtigen. Deshalb wird hier
+ * ausgewählt statt nur sortiert — eine Oberfläche, die alles zeigt, zeigt
+ * nichts.
+ *
+ * Eine Doppelung wird dabei aufgelöst: Ist der Schuldnertyp unbekannt, sagt
+ * der allgemeine Hinweis das bereits samt Folgen für Zinssatz **und**
+ * Pauschale. Der zusätzliche Pauschale-Hinweis wiederholte nur dessen zweite
+ * Hälfte und kostete einen der drei Plätze.
+ *
+ * Reine Funktion, bewusst ohne Datenbank und ohne Next.js: So kann der Test
+ * sie direkt gegen die echten Hinweise aus `berechneForderung` laufen lassen,
+ * und der Versand in Iteration 6 kann dieselbe Auswahl treffen wie der Dialog.
+ */
+export function sortiereHinweise(
+  hinweise: readonly string[],
+  grenze: number = HINWEIS_GRENZE
+): string[] {
+  const eingestuft = hinweise.map((text) => ({ text, art: artVon(text) }))
+
+  const typUnbekanntGenannt = eingestuft.some((h) => h.art === 'schuldnertyp-unbekannt')
+  const ohneDoppelung = typUnbekanntGenannt
+    ? eingestuft.filter((h) => h.art !== 'pauschale-typ-unbekannt')
+    : eingestuft
+
+  return [...ohneDoppelung]
+    // Stabil: bei gleichem Rang bleibt die Reihenfolge, in der
+    // `berechneForderung` die Hinweise erzeugt hat.
+    .sort((a, b) => HINWEIS_RANG[a.art] - HINWEIS_RANG[b.art])
+    .slice(0, grenze)
+    .map((h) => h.text)
+}

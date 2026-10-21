@@ -67,15 +67,15 @@ test("der Basiszinssatz wird für den am Tag geltenden Zeitraum genommen", () =>
   assert.equal(baseRateFor("2020-01-01").rate, -0.88); // die lange flache Strecke
 });
 
-test("ein Tag nach dem letzten Eintrag schreibt den letzten Satz fort", () => {
-  // Die Tabelle endet beim letzten geprüften Satz. Ein späterer Tag bekommt
-  // deshalb diesen Satz — zusammen mit `stale`, damit der Aufrufer weiss, dass
-  // er auf einer Fortschreibung sitzt und nicht auf einer Feststellung.
-  // Fortschreiben fordert im Zweifel zu wenig; eine geratene Erhöhung in der
-  // Tabelle würde zu viel fordern, und das auf einem Mahnschreiben.
-  const spaet = baseRateFor("2026-08-14");
-  assert.equal(spaet.rate, 1.27);
-  assert.equal(spaet.from, "2025-07-01"); // zeigt ehrlich auf die geprüfte Periode
+test("ein Tag jenseits des gepflegten Stands schreibt den letzten Satz fort", () => {
+  // Sobald die Tabelle veraltet, wird der zuletzt gepflegte Satz fortgeschrieben
+  // — zusammen mit `stale`, damit der Aufrufer weiss, dass er auf einer
+  // Fortschreibung sitzt und nicht auf einer Feststellung. Fortschreiben
+  // fordert im Zweifel zu wenig; eine geratene Erhöhung würde zu viel fordern,
+  // und das auf einem Mahnschreiben.
+  const spaet = baseRateFor("2027-02-14");
+  assert.equal(spaet.rate, 1.52);
+  assert.equal(spaet.from, "2026-07-01"); // zeigt auf die gepflegte Periode
   assert.equal(spaet.stale, true);
 });
 
@@ -87,10 +87,10 @@ test("ein Tag vor Beginn der Tabelle ist ein Fehler, keine Schätzung", () => {
 
 test("ein Halbjahr nach dem geprüften Stand wird als stale gemeldet", () => {
   assert.equal(baseRateFor(BASE_RATES_PUBLISHED_THROUGH).stale, false);
-  assert.equal(baseRateFor("2026-06-30").stale, false); // dasselbe Halbjahr
-  // Ab dem 01.07.2026 wird fortgeschrieben, nicht festgestellt.
-  assert.equal(baseRateFor("2026-07-01").stale, true);
+  assert.equal(baseRateFor("2026-12-31").stale, false); // dasselbe Halbjahr
+  // Ab dem 01.01.2027 wird fortgeschrieben, nicht festgestellt.
   assert.equal(baseRateFor("2027-01-01").stale, true);
+  assert.equal(baseRateFor("2027-07-01").stale, true);
 });
 
 test("der geprüfte Stand ist selbst ein Halbjahresbeginn", () => {
@@ -134,7 +134,7 @@ test("der Fälligkeitstag zählt nicht mit, der letzte Tag schon", () => {
   assert.equal(result.segments[0].to, "2026-08-31");
 });
 
-test("Unternehmen: Basis 1,27 + 9 Punkte über 31 Tage", () => {
+test("Unternehmen: Basis 1,52 + 9 Punkte über 31 Tage", () => {
   const result = computeDefaultInterest({
     principal: 1000,
     dueDate: "2026-07-31",
@@ -143,12 +143,12 @@ test("Unternehmen: Basis 1,27 + 9 Punkte über 31 Tage", () => {
   });
   assert.equal(result.days, 31);
   assert.equal(result.segments.length, 1);
-  assert.equal(result.effectiveRate, 1.27 + SURCHARGE_NO_CONSUMER); // 10,27
-  // 1000 × 10,27 % × 31/365 = 8,7225
-  assert.equal(result.amount, 8.72);
-  // Der Satz für dieses Halbjahr ist nicht geprüft, sondern fortgeschrieben —
-  // das Ergebnis meldet stale, und der Aufrufer muss es bestätigen lassen.
-  assert.equal(result.stale, true);
+  assert.equal(result.effectiveRate, 1.52 + SURCHARGE_NO_CONSUMER); // 10,52
+  // 1000 × 10,52 % × 31/365 = 8,9348
+  assert.equal(result.amount, 8.93);
+  // Der Satz ist gepflegt, also ist das Ergebnis belastbar und braucht keine
+  // Bestätigung durch den Nutzer.
+  assert.equal(result.stale, false);
 });
 
 test("ein Verbraucher bekommt 5 statt 9 Punkte aufgeschlagen", () => {
@@ -158,9 +158,9 @@ test("ein Verbraucher bekommt 5 statt 9 Punkte aufgeschlagen", () => {
     asOf: "2026-08-31",
     customerType: "consumer",
   });
-  assert.equal(result.effectiveRate, 1.27 + SURCHARGE_DEFAULT); // 6,27
-  // 1000 × 6,27 % × 31/365 = 5,3252
-  assert.equal(result.amount, 5.33);
+  assert.equal(result.effectiveRate, 1.52 + SURCHARGE_DEFAULT); // 6,52
+  // 1000 × 6,52 % × 31/365 = 5,5375
+  assert.equal(result.amount, 5.54);
 });
 
 test("ein Zeitraum über eine Satzänderung hinweg wird geteilt", () => {
@@ -315,12 +315,12 @@ test("keine Zinseszinsen: zwei Zeiträume hintereinander ergeben denselben Betra
     customerType: "business",
   });
 
-  assert.equal(august.amount, 8.72); // 1000 × 10,27 % × 31/365
-  assert.equal(september.amount, 8.44); // 1000 × 10,27 % × 30/365
-  assert.equal(amStueck.amount, 17.16); // 1000 × 10,27 % × 61/365
+  assert.equal(august.amount, 8.93); // 1000 × 10,52 % × 31/365
+  assert.equal(september.amount, 8.65); // 1000 × 10,52 % × 30/365
+  assert.equal(amStueck.amount, 17.58); // 1000 × 10,52 % × 61/365
   assert.equal(round2(august.amount + september.amount), amStueck.amount);
-  // Mit Zinseszins liefe der September auf 1008,72 und ergäbe 8,51.
-  assert.notEqual(september.amount, 8.51);
+  // Mit Zinseszins liefe der September auf 1008,93 und ergäbe 8,72.
+  assert.notEqual(september.amount, 8.72);
 });
 
 test("der Zinsbetrag ist linear im Betrag", () => {

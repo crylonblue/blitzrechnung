@@ -329,13 +329,18 @@ test("die Korrektur derselben Stufe darf die Pauschale erneut tragen", () => {
 
 // --- Basiszinssatz, Gebühr, Teilzahlung ------------------------------------
 
+// Die beiden folgenden Fälle liegen bewusst JENSEITS von
+// BASE_RATES_PUBLISHED_THROUGH. Läge der Stichtag im gepflegten Bereich, wäre
+// der erste Test gegenstandslos und der zweite bestünde aus dem falschen
+// Grund — stale wäre dann ohnehin false, auch ohne Override. Wird die
+// Zinstabelle gepflegt, müssen diese Daten mitwandern.
 test("ein ungeprüfter Basiszinssatz macht die ganze Forderung stale", () => {
-  // Die Oberfläche muss das später zur Bestätigung vorlegen können, statt
+  // Die Oberfläche muss das zur Bestätigung vorlegen können, statt
   // stillschweigend mit einem fortgeschriebenen Satz zu mahnen.
   const f = forderung({
-    invoice: rechnung({ invoice_date: "2026-06-15", due_date: "2026-07-15" }),
-    verzugsbeginn: "2026-07-15",
-    stichtag: "2026-08-01",
+    invoice: rechnung({ invoice_date: "2026-12-15", due_date: "2027-01-15" }),
+    verzugsbeginn: "2027-01-15",
+    stichtag: "2027-02-01",
   });
 
   assert.equal(f.stale, true);
@@ -344,9 +349,9 @@ test("ein ungeprüfter Basiszinssatz macht die ganze Forderung stale", () => {
 
 test("ein Override des Basiszinssatzes räumt stale aus", () => {
   const f = forderung({
-    invoice: rechnung({ invoice_date: "2026-06-15", due_date: "2026-07-15" }),
-    verzugsbeginn: "2026-07-15",
-    stichtag: "2026-08-01",
+    invoice: rechnung({ invoice_date: "2026-12-15", due_date: "2027-01-15" }),
+    verzugsbeginn: "2027-01-15",
+    stichtag: "2027-02-01",
     baseRateOverride: 1.52,
   });
 

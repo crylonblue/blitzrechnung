@@ -100,22 +100,18 @@ export interface BaseRatePeriod {
  * Abgeschnitten am 01.07.2016: die regelmäßige Verjährung beträgt drei Jahre,
  * ältere Sätze wären Dekoration. Ein Tag davor ist ein Fehler, keine Schätzung.
  *
- * Hier stehen nur geprüfte Sätze. Der Branch führte zusätzlich
- * `2026-07-01 → 1,52`; dieser Wert liess sich nicht gegen die Bundesbank
- * belegen (er wäre in sich plausibel — der Basiszinssatz lag in allen
- * gelisteten Perioden genau 0,88 Punkte unter dem Hauptrefinanzierungssatz der
- * EZB, 1,52 entspräche 2,40 % — bleibt aber eine Annahme) und wurde deshalb
- * entfernt.
+ * Gepflegt wird die Tabelle von Hand: Der Basiszinssatz wird halbjaehrlich
+ * zum 1. Januar und zum 1. Juli festgesetzt, und eingetragen wird nur, was
+ * sich aendert — ein Halbjahr ohne Aenderung erzeugt keine Zeile. Deshalb
+ * laesst sich die Aktualitaet nicht am neuesten Eintrag ablesen, dafuer gibt
+ * es BASE_RATES_PUBLISHED_THROUGH.
  *
- * Eine ungeprüfte Zahl in dieser Tabelle ist gefährlicher als eine Lücke: Sie
- * sieht aus wie eine Tatsache, und wer das `stale`-Kennzeichen nicht liest,
- * mahnt damit. Ohne den Eintrag schreibt `baseRateFor` den letzten geprüften
- * Satz fort und meldet weiterhin `stale` — das fordert im Zweifel zu wenig
- * statt zu viel, und genau in diese Richtung soll ein Irrtum ausfallen.
- *
- * `tests/dunning-basiszins-aktualitaet.test.ts` wacht über beides.
+ * `tests/dunning-basiszins-aktualitaet.test.ts` schlaegt an, wenn die Tabelle
+ * zwei Halbjahre zurueckliegt, wenn ein Satz aus einem ungepflegten Halbjahr
+ * darin steht oder wenn die Sortierung nicht mehr absteigend ist.
  */
 export const BASE_RATES: BaseRatePeriod[] = [
+  { from: "2026-07-01", rate: 1.52 },
   { from: "2025-07-01", rate: 1.27 },
   { from: "2025-01-01", rate: 2.27 },
   { from: "2024-07-01", rate: 3.37 },
@@ -137,7 +133,7 @@ export const BASE_RATES: BaseRatePeriod[] = [
  * mit einem fortgeschriebenen Wert gemahnt wird. `baseRateOverride` ist der
  * Ausweg.
  */
-export const BASE_RATES_PUBLISHED_THROUGH = "2026-01-01";
+export const BASE_RATES_PUBLISHED_THROUGH = "2026-07-01";
 
 /**
  * Der Teiler der act/act-Methode: die echte Länge des Kalenderjahres. Steht
