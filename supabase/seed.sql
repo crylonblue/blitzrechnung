@@ -12,7 +12,7 @@
 -- sich von Lauf zu Lauf unterscheiden — Fehler, die nur bei einer ueberfaelligen
 -- Rechnung mit verkuerztem Zahlungsziel auftreten, findet so niemand zweimal.
 --
--- Zugang:  hello@till.email  /  blitz1234
+-- Zugang:  hello@till.email  /  Email123!
 --
 -- Zwei Regeln, an die sich alles hier haelt:
 --
@@ -95,7 +95,7 @@ INSERT INTO auth.users (
   'authenticated',
   'authenticated',
   'hello@till.email',
-  crypt('blitz1234', gen_salt('bf')),
+  crypt('Email123!', gen_salt('bf')),
   now(),
   '{"provider": "email", "providers": ["email"]}'::jsonb,
   '{"full_name": "Till Kemper", "provider": "email"}'::jsonb,
