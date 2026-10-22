@@ -356,6 +356,50 @@ test("versendeMahnung hängt das Schreiben an und hebt die Rechnung auf reminded
   assert.equal(tabellen.invoices[0].status, "reminded");
 });
 
+/**
+ * Rückfall: Mahnungen gingen an die alte Adresse, obwohl in der Schublade
+ * eine neue gespeichert war.
+ *
+ * Zwei Ursachen, die sich gegenseitig deckten. Die Schublade lud nach dem
+ * Speichern den Mahnstatus nicht nach, hielt also einen Schnappschuss vom
+ * Öffnen fest — und die Achse schickte die Adresse aus diesem Schnappschuss
+ * beim Versand mit. Hier gewinnt eine mitgeschickte Adresse über jede
+ * hinterlegte, und damit gewann der veraltete Wert.
+ *
+ * Die Oberfläche schickt jetzt nichts mehr mit, was sie nicht anzeigt. Diese
+ * beiden Prüfungen halten die Rangfolge fest, auf die sie sich dabei verlässt.
+ */
+test("ohne mitgeschickte Adresse gewinnt die der Rechnung über den Empfänger-Snapshot", async () => {
+  const inv = rechnung({ recipient_email: "buchhaltung@kunde.test" } as Partial<Invoice>);
+  const { supabase, tabellen, mahnung, versendet, w } = await mitMahnung(inv);
+
+  const ergebnis = await versendeMahnung(supabase, { companyId: "firma-1" }, { reminderId: mahnung.id }, w);
+
+  assert.equal(ergebnis.empfaengerEmail, "buchhaltung@kunde.test");
+  assert.equal(versendet[0].to, "buchhaltung@kunde.test");
+  assert.notEqual(ergebnis.empfaengerEmail, KAEUFER.email);
+  // Schon beim Anlegen festgehalten, nicht erst beim Senden aufgelöst: Woran
+  // das Schreiben adressiert war, soll später nachlesbar sein.
+  assert.equal(tabellen.payment_reminders[0].recipient_email, "buchhaltung@kunde.test");
+});
+
+test("eine ausdrücklich mitgeschickte Adresse schlägt die hinterlegte", async () => {
+  const inv = rechnung({ recipient_email: "buchhaltung@kunde.test" } as Partial<Invoice>);
+  const { supabase, mahnung, versendet, w } = await mitMahnung(inv);
+
+  // Das ist der Fall „Vorher ansehen": Dort steht das Feld, der Benutzer sieht
+  // es und ändert es für diesen einen Versand. Nur dann darf es gewinnen.
+  const ergebnis = await versendeMahnung(
+    supabase,
+    { companyId: "firma-1" },
+    { reminderId: mahnung.id, recipientEmail: "chef@kunde.test" },
+    w
+  );
+
+  assert.equal(ergebnis.empfaengerEmail, "chef@kunde.test");
+  assert.equal(versendet[0].to, "chef@kunde.test");
+});
+
 test("erneutes Senden ist erlaubt und lässt sent_at stehen", async () => {
   const { supabase, tabellen, mahnung, versendet, w } = await mitMahnung();
   const ctx = { companyId: "firma-1" };

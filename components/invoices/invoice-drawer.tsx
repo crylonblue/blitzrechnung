@@ -198,6 +198,12 @@ export default function InvoiceDrawer() {
       toast.error('Fehler beim Speichern der E-Mail-Adresse')
     } else {
       setInvoice({ ...invoice, recipient_email: recipientEmail || null })
+      // Der Mahnstatus trägt die Empfängeradresse mit (`mail.empfaenger`, aus
+      // `invoice.recipient_email` abgeleitet). Ohne dieses Nachladen bliebe er
+      // auf dem Stand vom Öffnen der Schublade: Die Achse nennt dann die alte
+      // Adresse, das Mahnschreiben ginge dorthin, und der Nutzer hat die neue
+      // eine Zeile darüber soeben gespeichert. Genau dieser Fehler war es.
+      mahnstatusNeuLaden()
       toast.success('E-Mail-Adresse gespeichert')
     }
     setIsSavingEmail(false)

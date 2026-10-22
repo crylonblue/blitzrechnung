@@ -251,7 +251,7 @@ export default function DunningAxis({
    * anlegt, belügt den Benutzer an der Stelle, an der er am wenigsten damit
    * rechnet.
    */
-  const kannMailen = Boolean(status?.mail?.empfaenger)
+  const kannMailen = Boolean(invoice.recipient_email || status?.mail?.empfaenger)
 
   const schritte = useMemo(
     () => (status ? baueAchse(invoice, status, heuteLokal()) : []),
@@ -297,10 +297,21 @@ export default function DunningAxis({
   /**
    * Senden ohne Zwischenbildschirm.
    *
-   * Brief und Begleit-E-Mail kommen vom Server: `text` wird weggelassen (dann
-   * gilt der Text der Stufe), die Mail-Felder sind genau die, die der Server
-   * selbst vorbereitet hat. Damit geht exakt das hinaus, was unter „Vorher
-   * ansehen" zu sehen gewesen wäre — nur ohne den Umweg.
+   * **Hier wird nichts mitgeschickt, was der Benutzer nicht gesehen hat.**
+   * Weder der Brief noch Empfänger, Betreff oder Text der E-Mail: Alle vier
+   * baut der Server selbst, und zwar aus dem Stand im Augenblick des Versands.
+   *
+   * Das ist nicht nur weniger Code, sondern die Behebung eines Fehlers. Die
+   * Achse hielt bis eben den Empfänger aus `status.mail` fest — einen
+   * Schnappschuss vom Öffnen der Schublade. Wer die Adresse darüber änderte,
+   * schickte trotzdem an die alte: Beim Versand gewinnt eine mitgeschickte
+   * Adresse über die der Rechnung (`versendeMahnung` in
+   * `lib/dunning-service.ts`). Ein Wert, den diese Oberfläche nirgends
+   * anzeigt, darf einen frischen Wert nicht überstimmen.
+   *
+   * Wer die Adresse für diesen einen Versand abweichend setzen will, nimmt
+   * „Vorher ansehen" — dort steht das Feld, und dort ist das Mitschicken eine
+   * Aussage des Benutzers statt eines Nebeneffekts.
    */
   const jetztSenden = (stufenPosition: number, name: string) => {
     if (!status) return
@@ -311,16 +322,7 @@ export default function DunningAxis({
         const ergebnis = await legeMahnungAn(
           invoice.id,
           { stage: stufenPosition },
-          {
-            senden: kannMailen,
-            mail: status.mail
-              ? {
-                  empfaenger: status.mail.empfaenger,
-                  betreff: status.mail.betreff,
-                  text: status.mail.text,
-                }
-              : undefined,
-          }
+          { senden: kannMailen }
         )
         if (ergebnis.versendet) {
           toast.success(`${name} versendet`, { description: `An ${ergebnis.empfaengerEmail}.` })
