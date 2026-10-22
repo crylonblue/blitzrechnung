@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ChevronRight, CircleCheck, LoaderCircle } from 'lucide-react'
 import { toast } from 'sonner'
@@ -48,9 +48,15 @@ import {
  * und was den Betrag verändert (Unternehmer oder Verbraucher), und auch das
  * nur dann, wenn es den Betrag wirklich verändert.
  *
- * Alles Verstellbare liegt hinter „Anpassen" — eingeklappt, solange nichts
- * vom Standard abweicht. Das Muster (natives `<details>/<summary>`) stammt
- * aus `components/drafts/draft-editor.tsx`; dort steckt die manuelle
+ * Die Hauptsache ist der Brief: Er steht oben und nimmt den meisten Platz,
+ * weil er das ist, was beim Kunden ankommt. Die Zahlen tragen ihn als
+ * schmaler Streifen von unten — sie sind die Kontrolle, nicht das Ergebnis.
+ *
+ * Alles Verstellbare liegt hinter „Anpassen" — eingeklappt, bis auf den einen
+ * Fall, in dem der Nutzer etwas bestätigen muss (siehe `startetOffen`); was
+ * abweicht, nennt die zugeklappte Zeile trotzdem beim Namen. Das Muster
+ * (natives `<details>/<summary>`) stammt aus
+ * `components/drafts/draft-editor.tsx`; dort steckt die manuelle
  * Rechnungsnummer im selben Aufbau.
  */
 
@@ -245,6 +251,34 @@ function baueSchreiben({ invoice, absender, status }: SchreibenInput): string {
   return absaetze.join('\n\n')
 }
 
+/**
+ * Startet „Anpassen" offen?
+ *
+ * Genau ein Fall: Der Basiszinssatz ist fortgeschrieben statt geprüft
+ * (`stale`). Dann steht im Brief eine Zinszahl, für die niemand geradesteht —
+ * bestreitet der Schuldner sie, ist die Forderung angreifbar, und das Feld,
+ * um den Satz zu bestätigen, liegt in diesem Bereich. Der Server setzt
+ * `stale` ohnehin nur, wenn tatsächlich Zinsen gerechnet wurden (siehe
+ * `lib/dunning-claim.ts`); ohne Zinsen gibt es nichts zu bestätigen.
+ *
+ * Was hier bewusst **nicht** mehr steht — beides riss den Bereich vorher auf,
+ * ohne dass der Nutzer etwas hätte entscheiden müssen:
+ *
+ *  * Verzugsbeginn ≠ Fälligkeit. Das ist der 30-Tage-Boden aus § 286 Abs. 3
+ *    BGB, also das *richtige* Datum. Es trifft jedes verkürzte Zahlungsziel
+ *    und war damit fast der Normalfall. Bestätigen muss man nichts, was
+ *    stimmt — erklären schon, und das tut die zugeklappte Zeile.
+ *  * Die Stufe ist noch nicht fällig. Die Wartezeit zwischen zwei Schreiben
+ *    ist unsere eigene Einstellung und keine Rechtsfrage: Früher zu erinnern
+ *    macht die Forderung nicht angreifbar.
+ *
+ * Unsichtbar wird dadurch nichts: Was abweicht, nennt `abweichungen` in der
+ * zugeklappten Zeile.
+ */
+function startetOffen(stand: DunningStatus): boolean {
+  return stand.stale
+}
+
 interface DunningDialogProps {
   invoice: Invoice
   /** Name des Empfängers, so wie ihn die Schublade schon aufgelöst hat. */
@@ -304,28 +338,6 @@ export default function DunningDialog({
    */
   const [kundentypGefragt, setKundentypGefragt] = useState(false)
 
-  /**
-   * Weicht die Lage vom glatten Normalfall ab, startet „Anpassen" offen.
-   *
-   * Drei Abweichungen zählen, und alle drei haben denselben Grund: Der Nutzer
-   * soll nicht bestätigen, was er nicht gesehen hat.
-   *
-   *  * `stale` — der Basiszinssatz ist fortgeschrieben, nicht geprüft. Genau
-   *    dafür gibt es im Bereich das Feld, um ihn zu setzen.
-   *  * Verzugsbeginn ≠ Fälligkeit der Rechnung — meist der 30-Tage-Boden aus
-   *    § 286 Abs. 3 BGB bei Verbrauchern. Die Zinsen laufen dann später los,
-   *    als das Fälligkeitsdatum der Rechnung vermuten lässt.
-   *  * Die Stufe ist noch nicht fällig — dann mahnt man früher als vorgesehen,
-   *    und das ist eine Entscheidung, keine Routine.
-   */
-  const startetOffen = useCallback(
-    (stand: DunningStatus) =>
-      stand.stale ||
-      (invoice.due_date !== null && stand.verzugsbeginn !== invoice.due_date) ||
-      (stand.stufe !== null && !stand.istFaellig),
-    [invoice.due_date]
-  )
-
   // Beim Öffnen auf den Stand zurück, den die Schublade geholt hat. Ein Dialog,
   // der die Einstellungen des letzten Males noch trägt, mahnt beim zweiten Mal
   // anders als beim ersten, ohne dass jemand etwas geändert hätte.
@@ -338,7 +350,7 @@ export default function DunningDialog({
     setBasiszinsText('')
     setKundentypGefragt(false)
     setAnpassenOffen(startetOffen(basis))
-  }, [isOpen, basis, startetOffen])
+  }, [isOpen, basis])
 
   // Der Schlüssel macht aus dem Objekt eine vergleichbare Zeichenkette — sonst
   // liefe der Effekt bei jedem Rendern erneut.
@@ -397,12 +409,14 @@ export default function DunningDialog({
    * Aufstellung, am längsten die letzte Mahnung mit allen Posten und einem
    * langen Firmennamen. Bei `rows={10}` endete der Text deshalb ohne jedes
    * Zeichen dafür, dass es weitergeht. Eine feste Höhe für den längsten Fall
-   * stünde im Regelfall halb leer im Weg und schöbe die Aufstellung darüber
-   * aus dem Bild — also wächst das Feld mit und hört an einer Grenze auf
-   * (`max-h` an der Klasse: 35 rem, also knapp 24 Zeilen, und zugleich nie
-   * mehr als die halbe Fensterhöhe, damit der Dialog auf einem kleinen
-   * Bildschirm nicht nur noch aus Textfeld besteht). Ab dieser Grenze rollt
-   * das Feld — was in aller Regel nur noch den selbst getippten Langbrief
+   * stünde im Regelfall halb leer im Weg — also wächst das Feld mit und hört
+   * an einer Grenze auf (`max-h` an der Klasse: 22 rem, rund 15 Zeilen).
+   *
+   * Warum diese Grenze und nicht mehr: Der Dialog ist auf 42 rem gedeckelt;
+   * Kopf, Fusszeile und Innenabstand nehmen davon rund 12 rem. Ein Feld, das
+   * darüber hinauswüchse, verdrängte die Zahlen darunter aus dem Bild und
+   * machte den Dialog zu einem Textfeld mit Rahmen. Ab der Grenze rollt das
+   * Feld in sich — was in aller Regel nur noch den selbst getippten Langbrief
    * trifft, nicht mehr den vorbereiteten Text.
    */
   useEffect(() => {
@@ -476,6 +490,85 @@ export default function DunningDialog({
   const zinsText = zinsErlaeuterung(status.zinsDetails)
   const zinsenAn = anpassung.interest ?? (status.zinsDetails?.segments.length ?? 0) > 0
 
+  /**
+   * Die Zahlen als Streifen, nicht als Tabelle.
+   *
+   * Die Hauptsache dieses Dialogs ist der Brief — er ist das, was beim Kunden
+   * ankommt und was geprüft werden will. Die Aufstellung stand vorher als
+   * mehrzeilige Tabelle darüber und nahm im Regelfall (Zahlungserinnerung,
+   * keine Zinsen, keine Pauschale) den halben oberen Rand für genau zwei
+   * Zahlen ein. Sie steht deshalb jetzt **unter** dem Brief, und jeder Posten
+   * ist ein schmales Paar aus Beschriftung und Wert: Es passen mehrere in
+   * eine Zeile, und im Regelfall ist der ganze Streifen eine einzige.
+   *
+   * Verloren geht dabei nichts — dieselben Posten in derselben Reihenfolge,
+   * die Gesamtforderung hervorgehoben, weil sie die Aussage ist und die
+   * übrigen nur ihre Herkunft. Zinserläuterung und der Hinweis zur Frist
+   * stehen als Fussnoten darunter weiter.
+   */
+  const kennzahlen = useMemo(() => {
+    if (!forderung) return []
+    const liste: { label: string; wert: string; stark?: boolean }[] = []
+    if (hatZusaetze) {
+      liste.push({ label: 'Offener Betrag', wert: EUR(forderung.offenerBetrag) })
+      if (forderung.zinsen > 0) liste.push({ label: 'Verzugszinsen', wert: EUR(forderung.zinsen) })
+      if (forderung.gebuehr > 0) liste.push({ label: 'Mahnkosten', wert: EUR(forderung.gebuehr) })
+      if (forderung.pauschale > 0)
+        liste.push({ label: 'Pauschale § 288 Abs. 5', wert: EUR(forderung.pauschale) })
+    }
+    liste.push({ label: 'Gesamtforderung', wert: EUR(forderung.summe), stark: true })
+    liste.push({
+      // Vor Fälligkeit ist die Frist nicht „neu" — sie steht unverändert auf
+      // der Rechnung. Die Begründung steht bei `zahlungsfrist`.
+      label: nochNichtFaellig ? 'Zahlungsfrist der Rechnung' : 'Neue Zahlungsfrist',
+      wert: TAG(zahlungsfrist(forderung.neueFrist, nochNichtFaellig)),
+    })
+    return liste
+  }, [forderung, hatZusaetze, nochNichtFaellig])
+
+  /**
+   * Was die zugeklappte „Anpassen"-Zeile nennen muss.
+   *
+   * Ein Bereich, der zu ist, darf nichts verstecken, worauf es ankommt —
+   * dasselbe Versprechen wie bei der manuellen Rechnungsnummer im
+   * Entwurfseditor. Genannt wird deshalb jeder Wert, der vom glatten
+   * Normalfall abweicht, gleich ob der Nutzer ihn gesetzt oder der Server ihn
+   * gerechnet hat. So kann der Bereich zubleiben, ohne etwas zu unterschlagen.
+   */
+  const abweichungen = useMemo(() => {
+    const liste: string[] = []
+
+    // Eine andere Stufe als die, die der Server von sich aus vorgeschlagen hat.
+    if (anpassung.stage !== undefined && anpassung.stage !== basis.stufe?.position && status.stufe)
+      liste.push(`${status.stufe.position}. ${status.stufe.name}`)
+
+    // Der Verzugsbeginn — selbst eingetragen oder vom 30-Tage-Boden
+    // verschoben. Der gerechnete Fall ist richtig und muss nicht bestätigt
+    // werden, aber der Nutzer soll das Datum sehen: Ab ihm laufen die Zinsen,
+    // und bei Stufe 2 und 3 steht es im Brief.
+    if (
+      anpassung.defaultSince !== undefined ||
+      (invoice.due_date !== null && status.verzugsbeginn !== invoice.due_date)
+    )
+      liste.push(`Verzug seit ${TAG(status.verzugsbeginn)}`)
+
+    // Nur der angefasste Schalter zählt: Dass eine Stufe von sich aus keine
+    // Zinsen vorsieht, ist keine Abweichung, sondern ihre Einstellung.
+    if (anpassung.interest !== undefined)
+      liste.push(anpassung.interest ? 'Zinsen berechnet' : 'ohne Zinsen')
+
+    if (anpassung.baseRate !== undefined) liste.push(`Basiszins ${PROZENT(anpassung.baseRate)} %`)
+    else if (status.stale && zinsenAn) liste.push('Basiszins ungeprüft')
+
+    // Früher mahnen als geplant ist erlaubt, soll aber dastehen.
+    if (status.stufe !== null && !status.istFaellig)
+      liste.push(
+        status.faelligAb ? `Stufe erst ab ${TAG(status.faelligAb)} fällig` : 'Stufe noch nicht fällig'
+      )
+
+    return liste
+  }, [anpassung, basis.stufe, status, invoice.due_date, zinsenAn])
+
   const handleSpeichern = async () => {
     if (!forderung || !status.stufe) return
     setIstAmSpeichern(true)
@@ -522,113 +615,38 @@ export default function DunningDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={(offen) => !offen && onClose()}>
-      {/* Drei Zeilen: Kopf und Fuss stehen, nur die Mitte rollt. Lange
-          Hinweistexte können den Dialog damit nicht aus dem Bild schieben. */}
-      <DialogContent className="sm:max-w-xl max-h-[85vh] grid-rows-[auto_minmax(0,1fr)_auto]">
+      {/* Drei Zeilen: Kopf und Fuss stehen, nur die Mitte rollt — „Senden" ist
+          damit nie weggescrollt, und der Titel sagt jederzeit, worum es geht.
+
+          Die Höhe hat zwei Grenzen, und die kleinere gewinnt. `88svh` hält den
+          Dialog auf kleinen und auf durch Browserleisten verkürzten Schirmen
+          im Bild (`svh` statt `vh`: die mobile Adressleiste zählt mit). Die
+          feste Grenze von 42 rem ist die eigentliche Neuerung: Ein Dialog, der
+          auf einem hohen Monitor von Kante zu Kante läuft, ist kein Dialog
+          mehr, sondern eine Seite — er braucht einen sichtbaren Rand, damit
+          erkennbar bleibt, dass dahinter etwas liegt, zu dem man zurückkehrt. */}
+      <DialogContent className="sm:max-w-xl max-h-[min(42rem,88svh)] grid-rows-[auto_minmax(0,1fr)_auto]">
         <DialogHeader>
           <DialogTitle>{titel}</DialogTitle>
           <DialogDescription>An {empfaenger}</DialogDescription>
         </DialogHeader>
 
         <div className="overflow-y-auto pr-1">
-          {forderung ? (
-            <>
-              {/* Die Aufstellung. Was 0 ist, steht nicht da — eine Zeile
-                  „Pauschale 0,00 €" erklärt nichts und sieht aus wie ein Fehler.
-                  Und kommt gar nichts dazu, bleibt eine einzige Zeile: die
-                  Gesamtforderung. */}
-              <dl
-                className={`space-y-1.5 text-sm transition-opacity ${istAmRechnen ? 'opacity-50' : ''}`}
-                aria-busy={istAmRechnen}
-              >
-                {hatZusaetze && (
-                  <div className="flex items-baseline justify-between gap-4">
-                    <dt className="text-zinc-600 dark:text-zinc-400">Offener Betrag</dt>
-                    <dd className="tabular-nums">{EUR(forderung.offenerBetrag)}</dd>
-                  </div>
-                )}
-
-                {forderung.zinsen > 0 && (
-                  <div className="flex items-baseline justify-between gap-4">
-                    <dt className="text-zinc-600 dark:text-zinc-400">
-                      Verzugszinsen
-                      {zinsText && (
-                        <span className="block text-xs text-zinc-400 dark:text-zinc-500">
-                          {zinsText}
-                        </span>
-                      )}
-                    </dt>
-                    <dd className="tabular-nums">{EUR(forderung.zinsen)}</dd>
-                  </div>
-                )}
-
-                {forderung.gebuehr > 0 && (
-                  <div className="flex items-baseline justify-between gap-4">
-                    <dt className="text-zinc-600 dark:text-zinc-400">Mahnkosten</dt>
-                    <dd className="tabular-nums">{EUR(forderung.gebuehr)}</dd>
-                  </div>
-                )}
-
-                {forderung.pauschale > 0 && (
-                  <div className="flex items-baseline justify-between gap-4">
-                    <dt className="text-zinc-600 dark:text-zinc-400">Pauschale § 288 Abs. 5</dt>
-                    <dd className="tabular-nums">{EUR(forderung.pauschale)}</dd>
-                  </div>
-                )}
-
-                {/* „Gesamtforderung" trägt die Zeile auch allein: Sie benennt,
-                    was gefordert wird, und das bleibt dieselbe Aussage, sobald
-                    Posten dazukommen. „Offener Betrag" meint den Rest der
-                    Rechnung — sobald Zinsen anfallen, wäre das etwas anderes
-                    als die Summe, und die Zeile dürfte dann nicht mehr so
-                    heissen. Der Strich darüber trennt von der Aufstellung und
-                    hat ohne sie nichts zu trennen. */}
-                <div
-                  className={`flex items-baseline justify-between gap-4 font-semibold ${
-                    hatZusaetze ? 'border-t border-zinc-200 pt-1.5 dark:border-zinc-700' : ''
-                  }`}
-                >
-                  <dt>Gesamtforderung</dt>
-                  <dd className="tabular-nums">{EUR(forderung.summe)}</dd>
-                </div>
-              </dl>
-
-              {/* Dieselbe Frist wie im Schreiben darunter — und vor
-                  Fälligkeit auch dieselbe Beschriftung: „neu" wäre sie dann
-                  gerade nicht, sie steht unverändert auf der Rechnung. Die
-                  Begründung steht bei `zahlungsfrist`. */}
-              <p className="mt-4 text-sm">
-                <span className="text-zinc-600 dark:text-zinc-400">
-                  {nochNichtFaellig ? 'Zahlungsfrist der Rechnung: ' : 'Neue Zahlungsfrist: '}
-                </span>
-                <span className="font-medium">
-                  {TAG(zahlungsfrist(forderung.neueFrist, nochNichtFaellig))}
-                </span>
-              </p>
-              {nochNichtFaellig && (
-                <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
-                  Eine Erinnerung vor Fälligkeit verkürzt die Frist nicht — es bleibt bei
-                  dem Datum, das auf der Rechnung steht.
-                </p>
-              )}
-            </>
-          ) : (
-            <p className="text-sm text-zinc-600 dark:text-zinc-400">
-              {status.grund || 'Für diese Rechnung lässt sich derzeit keine Forderung beziffern.'}
-            </p>
-          )}
-
-          {/* Die einzige Frage, und nur wenn sie den Betrag ändert. */}
+          {/* Die einzige Frage — und sie steht ganz oben, weil ihre Antwort
+              die Beträge im Brief darunter verändert. Eine Frage unterhalb
+              dessen, was von ihr abhängt, wird erst gelesen, wenn man das
+              Ergebnis schon geglaubt hat. Schmal gehalten: eine Zeile statt
+              eines Kastens, denn sie erscheint ohnehin nur, wenn Zinsen oder
+              Pauschale im Spiel sind. */}
           {kundentypGefragt && (
-            <fieldset className="mt-4 rounded-md border border-zinc-200 p-3 dark:border-zinc-700">
-              <legend className="px-1 text-xs font-medium text-zinc-600 dark:text-zinc-400">
-                Wer schuldet den Betrag?
-              </legend>
-              <p className="mb-2 text-xs text-zinc-500 dark:text-zinc-400">
-                Zinssatz und Pauschale hängen davon ab. Ohne Angabe rechnen wir mit dem
-                niedrigeren Satz.
-              </p>
-              <div className="flex flex-wrap gap-4">
+            <fieldset className="mb-4 rounded-md border border-zinc-200 px-3 py-2 dark:border-zinc-700">
+              {/* Sichtbar als Text, für Hilfsmittel als `legend` — sonst
+                  spräche der Screenreader die Frage bei jedem Feld doppelt. */}
+              <legend className="sr-only">Wer schuldet den Betrag?</legend>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                <span aria-hidden="true" className="text-sm text-zinc-600 dark:text-zinc-400">
+                  Wer schuldet den Betrag?
+                </span>
                 {(
                   [
                     { wert: 'business', label: 'Unternehmen' },
@@ -650,7 +668,84 @@ export default function DunningDialog({
                   </label>
                 ))}
               </div>
+              <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                Zinssatz und Pauschale hängen davon ab. Ohne Angabe rechnen wir mit dem
+                niedrigeren Satz.
+              </p>
             </fieldset>
+          )}
+
+          {forderung ? (
+            <>
+              {/* Der Brief zuerst — er ist das, was beim Kunden ankommt, und
+                  damit das Einzige, was wirklich geprüft werden muss. Die
+                  Zahlen standen vorher darüber und schoben ihn aus dem Bild;
+                  jetzt tragen sie ihn von unten. */}
+              {/* An wen, steht schon im Kopf des Dialogs — hier genügt, was
+                  das Feld ist. */}
+              <Label htmlFor="dunning-text" className="text-xs text-zinc-500 dark:text-zinc-400">
+                Schreiben
+              </Label>
+              {/* `rows` ist nur der Stand vor der ersten Messung — gleich hoch
+                  wie das kürzeste vorbereitete Schreiben, damit beim Öffnen
+                  nichts springt. `resize-none`, weil ein von Hand gezogener
+                  Griff beim nächsten Tastendruck wieder zurückschnappen würde;
+                  die Höhenmessung ist der bessere Griff. */}
+              <Textarea
+                id="dunning-text"
+                ref={textfeld}
+                rows={14}
+                value={text}
+                onChange={(e) => {
+                  setText(e.target.value)
+                  setTextVomNutzer(true)
+                }}
+                className="mt-1 max-h-[22rem] min-h-32 resize-none text-sm leading-relaxed"
+              />
+
+              {/* Die Zahlen: ein Streifen, kein Block. Was 0 ist, steht nicht
+                  da — eine Zeile „Pauschale 0,00 €" erklärt nichts und sieht
+                  aus wie ein Fehler. Im Regelfall bleiben genau zwei Angaben,
+                  und die passen nebeneinander. */}
+              <dl
+                className={`mt-3 flex flex-wrap gap-x-6 gap-y-2 rounded-md bg-zinc-50 px-3 py-2 transition-opacity dark:bg-zinc-800/60 ${
+                  istAmRechnen ? 'opacity-50' : ''
+                }`}
+                aria-busy={istAmRechnen}
+              >
+                {kennzahlen.map(({ label, wert, stark }) => (
+                  <div key={label}>
+                    <dt className="text-xs text-zinc-500 dark:text-zinc-400">{label}</dt>
+                    {/* „Gesamtforderung" ist die Aussage, die übrigen Posten
+                        sind nur ihre Herkunft — deshalb trägt sie allein das
+                        Gewicht statt eines Trennstrichs, der beim Umbrechen
+                        ohnehin an der falschen Stelle landete. */}
+                    <dd className={`text-sm tabular-nums ${stark ? 'font-semibold' : ''}`}>
+                      {wert}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+
+              {/* Die Klammer zu den Zinsen steht als Fussnote und nicht mehr
+                  unter ihrer Beschriftung: Dort machte sie die Spalte so
+                  breit, dass der Streifen umbrach. */}
+              {forderung.zinsen > 0 && zinsText && (
+                <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
+                  Verzugszinsen: {zinsText}
+                </p>
+              )}
+              {nochNichtFaellig && (
+                <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
+                  Eine Erinnerung vor Fälligkeit verkürzt die Frist nicht — es bleibt bei
+                  dem Datum, das auf der Rechnung steht.
+                </p>
+              )}
+            </>
+          ) : (
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">
+              {status.grund || 'Für diese Rechnung lässt sich derzeit keine Forderung beziffern.'}
+            </p>
           )}
 
           {status.hinweise.length > 0 && (
@@ -661,28 +756,6 @@ export default function DunningDialog({
             </ul>
           )}
 
-          <div className="mt-4">
-            <Label htmlFor="dunning-text" className="sr-only">
-              Schreiben
-            </Label>
-            {/* `rows` ist nur der Stand vor der ersten Messung — gleich hoch
-                wie das kürzeste vorbereitete Schreiben, damit beim Öffnen
-                nichts springt. `resize-none`, weil ein von Hand gezogener
-                Griff beim nächsten Tastendruck wieder zurückschnappen würde;
-                die Höhenmessung ist der bessere Griff. */}
-            <Textarea
-              id="dunning-text"
-              ref={textfeld}
-              rows={14}
-              value={text}
-              onChange={(e) => {
-                setText(e.target.value)
-                setTextVomNutzer(true)
-              }}
-              className="max-h-[min(35rem,50vh)] min-h-32 resize-none text-sm leading-relaxed"
-            />
-          </div>
-
           {/* Kein eigenes Bauteil: components/ui/ hat weder Collapsible noch
               Accordion, und <details>/<summary> bringt Tastaturbedienung und
               die Zustandsansage ohne neue Abhängigkeit mit — so wie bei der
@@ -692,12 +765,21 @@ export default function DunningDialog({
             onToggle={(e) => setAnpassenOffen(e.currentTarget.open)}
             className="mt-4 border-t border-zinc-200 pt-3 dark:border-zinc-700"
           >
-            <summary className="flex cursor-pointer list-none items-center gap-2 text-sm text-zinc-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:text-zinc-400 [&::-webkit-details-marker]:hidden">
+            <summary className="flex cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 text-sm text-zinc-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:text-zinc-400 [&::-webkit-details-marker]:hidden">
               <ChevronRight
                 className={`h-4 w-4 shrink-0 transition-transform ${anpassenOffen ? 'rotate-90' : ''}`}
                 aria-hidden="true"
               />
               Anpassen
+              {/* Abweichende Werte müssen auch zugeklappt dastehen — sonst
+                  versteckt der Bereich genau das, was man wissen muss.
+                  Aufgeklappt stehen sie zwei Zeilen tiefer an ihren Feldern;
+                  sie dann hier zu wiederholen wäre Lärm. */}
+              {!anpassenOffen && abweichungen.length > 0 && (
+                <span className="font-medium text-zinc-900 dark:text-zinc-100">
+                  {abweichungen.join(' · ')}
+                </span>
+              )}
             </summary>
 
             <div className="mt-3 space-y-4">

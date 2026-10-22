@@ -1,25 +1,29 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { LoaderCircle, BellRing } from 'lucide-react'
-import { toast } from 'sonner'
+import { useState } from 'react'
+import { BellRing } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { Invoice } from '@/types'
 import DunningDialog from './dunning-dialog'
-import { ladeMahnstatus, verwirfMahnung, type DunningStatus } from './dunning-api'
+import type { DunningStatus } from './dunning-api'
 
 /**
- * Das Mahnwesen in der Rechnungs-Schublade.
+ * Die Mahnaktion in der Rechnungs-Schublade.
  *
- * Der ganze sichtbare Teil des Mahnwesens besteht aus diesem Block: ein Knopf
- * und eine Zeile Verlauf, beides nur bei Rechnungen, an denen überhaupt noch
- * etwas offen ist (siehe `istMahnbar` in der Schublade). Kein Menüpunkt, keine
- * Spalte in der Tabelle, kein eigener Bildschirm — wer nie mahnt, sieht davon
- * nichts.
+ * Dieser Block ist jetzt genau **eine Aktion**: der Knopf für die nächste
+ * Mahnstufe, dazu der Hinweis auf den fraglichen Zugang. Alles, was den
+ * *Zustand* betrifft — welche Mahnungen es gibt, was sie forderten, was als
+ * nächstes ansteht —, steht in der Dokumentenliste (`documents-section.tsx`).
  *
- * Auch eine **noch nicht fällige** Rechnung gehört dazu. Eine Erinnerung vor
- * Fälligkeit ist keine Mahnung: Es ist nichts überfällig, es besteht kein
+ * Vorher stand beides hier: der Knopf und darunter eine Zeile Verlauf
+ * („Zahlungserinnerung am 21.10. · 1. Mahnung vorgesehen ab 04.11."). Die
+ * Zeile ist entfallen, nicht gestrichen — sie ist in der Dokumentenliste
+ * aufgegangen, wo der Ausblick auf die nächste Stufe als letzte, gestrichelte
+ * Zeile steht. Zwei Darstellungen desselben Sachverhalts nebeneinander wären
+ * genau die Art Doppelung, die eine Schublade unübersichtlich macht.
+ *
+ * Auch eine **noch nicht fällige** Rechnung gehört hierher. Eine Erinnerung
+ * vor Fälligkeit ist keine Mahnung: Es ist nichts überfällig, es besteht kein
  * Verzug, und es gibt keinen Zinsanspruch. Dass sie trotzdem angeboten wird,
  * kostet nichts — betont wird sie nicht (das macht die Schublade weiterhin nur
  * bei einer überfälligen Rechnung), und der vorbereitete Text in
@@ -30,16 +34,10 @@ import { ladeMahnstatus, verwirfMahnung, type DunningStatus } from './dunning-ap
  * und lässt den ersten Klick schwerer wiegen, als er ist.
  *
  * Die Rahmung (Trennlinie, Abstand nach oben) liegt bewusst nicht hier,
- * sondern beim Aktionsbereich der Schublade: Mahnstufe, Downloads, Versand
- * und Storno stehen dort in **einem** Stapel, und eine eigene Trennlinie
- * mitten darin würde ihn zerschneiden.
+ * sondern beim Aktionsbereich der Schublade: Mahnstufe, Versand und Storno
+ * stehen dort in **einem** Stapel, und eine eigene Trennlinie mitten darin
+ * würde ihn zerschneiden.
  */
-
-/** „21.10." — im Verlauf zählt der Tag, nicht das Jahr. */
-function kurz(iso: string): string {
-  const [, monat, tag] = iso.split('-')
-  return `${tag}.${monat}.`
-}
 
 interface DunningSectionProps {
   invoice: Invoice
@@ -47,14 +45,20 @@ interface DunningSectionProps {
   empfaenger: string
   /** Name der eigenen Firma. */
   absender: string
-  /** Die Schublade lädt die Rechnung neu (Status, Verlauf). */
+  /**
+   * Der Mahnstatus. Die Schublade holt ihn einmal (siehe
+   * `use-dunning-status.ts`) und reicht ihn hier wie an die Dokumentenliste
+   * weiter — ein Stand für beide, statt zweier Anfragen mit zwei Wahrheiten.
+   */
+  status: DunningStatus | null
+  /** Die Schublade lädt Rechnung und Mahnstatus neu. */
   onChanged: () => void
   /** Die Rechnung ist bezahlt — die Schublade geht zu. */
   onPaid: () => void
   /**
    * Die Mahnstufe ist der wahrscheinliche nächste Schritt und steht im
    * Aktionsbereich ganz oben — dann trägt der Knopf auch das Gewicht dafür.
-   * Sonst bleibt er eine Nebenaktion unter den Downloads.
+   * Sonst bleibt er eine Nebenaktion.
    */
   betont?: boolean
 }
@@ -63,71 +67,30 @@ export default function DunningSection({
   invoice,
   empfaenger,
   absender,
+  status,
   onChanged,
   onPaid,
   betont = false,
 }: DunningSectionProps) {
-  const router = useRouter()
-  const [status, setStatus] = useState<DunningStatus | null>(null)
   const [dialogOffen, setDialogOffen] = useState(false)
-  const [verwerfeId, setVerwerfeId] = useState<string | null>(null)
-
-  const laden = useCallback(
-    (signal?: AbortSignal) =>
-      ladeMahnstatus(invoice.id, {}, signal)
-        .then((neu) => setStatus(neu))
-        .catch(() => {
-          // Bewusst still. Solange die Route fehlt oder klemmt, zeigt die
-          // Schublade einfach kein Mahnwesen — eine Fehlermeldung an dieser
-          // Stelle wäre Lärm über eine Funktion, nach der niemand gefragt hat.
-          if (!signal?.aborted) setStatus(null)
-        }),
-    [invoice.id]
-  )
-
-  useEffect(() => {
-    const controller = new AbortController()
-    laden(controller.signal)
-    return () => controller.abort()
-  }, [laden])
-
-  const handleVerwerfen = async (reminderId: string) => {
-    setVerwerfeId(reminderId)
-    try {
-      await verwirfMahnung(reminderId)
-      toast.success('Entwurf verworfen')
-      await laden()
-      onChanged()
-      router.refresh()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Der Entwurf konnte nicht verworfen werden.')
-    } finally {
-      setVerwerfeId(null)
-    }
-  }
-
-  // Noch nichts geladen, oder die Rechnung ist gar nicht mahnbar: null Pixel.
-  if (!status || (!status.mahnbar && status.verlauf.length === 0)) return null
-
-  const letzte = status.verlauf.length > 0 ? status.verlauf[status.verlauf.length - 1] : null
-  const entwurf = status.verlauf.find((eintrag) => eintrag.status === 'created') ?? null
 
   /**
-   * Der Knopf, sobald der Server eine Stufe benennen kann.
+   * Nichts geladen, nicht mahnbar oder keine Stufe mehr übrig: null Pixel.
    *
-   * Früher hing er zusätzlich an `status.istFaellig` — mit der Begründung, ein
-   * Knopf, der nur eine Fehlermeldung bringt, sei schlechter als keiner. Diese
-   * Begründung trägt nicht: `app/api/invoices/[id]/dunning/route.ts` prüft
-   * `istFaellig` an keiner Stelle. Weder `GET` noch `POST` lehnen deshalb ab;
-   * `istFaellig` ist eine **Auskunft** über den Zeitplan der Stufen, keine
-   * Sperre. Wer früher mahnen will — etwa mit einer freundlichen Erinnerung
-   * vor Fälligkeit —, konnte es serverseitig immer, nur kam er hier nicht hin.
+   * Früher hing der Knopf zusätzlich an `status.istFaellig` — mit der
+   * Begründung, ein Knopf, der nur eine Fehlermeldung bringt, sei schlechter
+   * als keiner. Diese Begründung trägt nicht: `app/api/invoices/[id]/dunning/route.ts`
+   * prüft `istFaellig` an keiner Stelle. Weder `GET` noch `POST` lehnen
+   * deshalb ab; `istFaellig` ist eine **Auskunft** über den Zeitplan der
+   * Stufen, keine Sperre. Wer früher mahnen will — etwa mit einer
+   * freundlichen Erinnerung vor Fälligkeit —, konnte es serverseitig immer,
+   * nur kam er hier nicht hin.
    *
    * Die Entscheidung bleibt trotzdem sichtbar: Der Dialog klappt „Anpassen"
    * von selbst auf, wenn die Stufe noch nicht dran ist, und der Serverhinweis
    * sagt, dass vor Verzug weder Zinsen noch Pauschale anfallen.
    */
-  const zeigeKnopf = status.mahnbar && status.stufe !== null
+  if (!status || !status.mahnbar || !status.stufe) return null
 
   /**
    * Zweifel am Zugang: `created` ist der einzige Status, in dem die Rechnung
@@ -143,38 +106,12 @@ export default function DunningSection({
    */
   const zugangFraglich = invoice.status === 'created'
 
-  /**
-   * Die Verlaufszeile, aus höchstens zwei Teilen: was zuletzt geschrieben
-   * wurde und was als nächstes möglich ist — „Zahlungserinnerung am 21.10. ·
-   * 1. Mahnung ab 04.11. möglich".
-   */
-  const verlaufsTeile: string[] = []
-  if (letzte) {
-    verlaufsTeile.push(
-      `${letzte.stage_name} am ${kurz(letzte.reminder_date)}${letzte.status === 'created' ? ' (Entwurf)' : ''}`
-    )
-  }
-  if (status.alleStufenDurchlaufen) {
-    // Nicht einfach den Knopf verschwinden lassen: Dass es nichts mehr zu
-    // eskalieren gibt, ist ein Ergebnis und keine Lücke.
-    verlaufsTeile.push('alle Mahnstufen durchlaufen')
-  } else if (status.stufe && !status.istFaellig && status.faelligAb) {
-    // „vorgesehen ab", nicht mehr „ab … möglich": Seit der Knopf auch vor
-    // diesem Tag steht, wäre „möglich" eine Absage, die der Knopf daneben
-    // widerlegt. Das Datum bleibt die nützliche Auskunft — es sagt, wann die
-    // Stufe nach dem eingerichteten Zeitplan an der Reihe ist.
-    verlaufsTeile.push(`${status.stufe.name} vorgesehen ab ${kurz(status.faelligAb)}`)
-  } else if (!letzte && status.stufe) {
-    verlaufsTeile.push('noch nicht gemahnt')
-  }
-
   return (
     <div>
-      {/* Der Hinweis steht über dem Knopf, nicht darunter: Die Zeile darunter
-          gehört dem Mahnverlauf, und wer liest, soll den Zweifel vor dem Klick
-          sehen. Volltext samt Ausweg im title — wie bei „Zum Fertigstellen
-          fehlt noch: …" im Entwurfseditor. */}
-      {zeigeKnopf && zugangFraglich && (
+      {/* Der Hinweis steht über dem Knopf: Wer liest, soll den Zweifel vor dem
+          Klick sehen. Volltext samt Ausweg im title — wie bei „Zum
+          Fertigstellen fehlt noch: …" im Entwurfseditor. */}
+      {zugangFraglich && (
         <p
           className="mb-2 text-xs text-zinc-500 dark:text-zinc-400"
           title={'Verzug setzt nach § 286 Abs. 3 BGB den Zugang der Rechnung voraus. Haben Sie die Rechnung per Post verschickt, setzen Sie den Status oben auf „Versendet".'}
@@ -184,39 +121,17 @@ export default function DunningSection({
         </p>
       )}
 
-      {zeigeKnopf && status.stufe && (
-        <Button
-          variant={betont ? 'default' : 'outline'}
-          className="w-full"
-          onClick={() => setDialogOffen(true)}
-        >
-          <BellRing className="mr-2 h-4 w-4" />
-          {status.stufe.name}
-        </Button>
-      )}
-
-      {verlaufsTeile.length > 0 && (
-        <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-          {verlaufsTeile.join(' · ')}
-        </p>
-      )}
-
-      {/* Ein Entwurf ist noch nichts Verschicktes — er muss sich zurücknehmen
-          lassen, ohne dass man ihn anderswo suchen müsste. */}
-      {entwurf && (
-        <button
-          type="button"
-          onClick={() => handleVerwerfen(entwurf.id)}
-          disabled={verwerfeId === entwurf.id}
-          className="mt-1 inline-flex items-center text-xs text-zinc-500 underline-offset-4 hover:text-zinc-900 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 disabled:opacity-50 dark:text-zinc-400 dark:hover:text-zinc-100"
-        >
-          {verwerfeId === entwurf.id && <LoaderCircle className="mr-1 h-3 w-3 animate-spin" />}
-          Entwurf verwerfen
-        </button>
-      )}
+      <Button
+        variant={betont ? 'default' : 'outline'}
+        className="w-full"
+        onClick={() => setDialogOffen(true)}
+      >
+        <BellRing className="mr-2 h-4 w-4" />
+        {status.stufe.name}
+      </Button>
 
       {/* Erst bei Bedarf einhängen: Der Dialog rechnet beim Öffnen auf dem
-          Stand, den dieser Block schon geholt hat. */}
+          Stand, den die Schublade schon geholt hat. */}
       {dialogOffen && (
         <DunningDialog
           invoice={invoice}
@@ -225,10 +140,7 @@ export default function DunningSection({
           basis={status}
           isOpen={dialogOffen}
           onClose={() => setDialogOffen(false)}
-          onCreated={() => {
-            laden()
-            onChanged()
-          }}
+          onCreated={onChanged}
           onPaid={onPaid}
         />
       )}
