@@ -18,7 +18,7 @@ import {
   LoaderCircle,
 } from 'lucide-react'
 import SendInvoiceModal from './send-invoice-modal'
-import DocumentsSection from './documents-section'
+import DunningAxis from './dunning-axis'
 import { useMahnstatus } from './use-dunning-status'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -300,28 +300,21 @@ const handleDownloadPdf = async () => {
   const hatDateien = hatPdf || hatXml
 
   /**
-   * Was ist der wahrscheinliche nächste Schritt?
+   * Wird der Versand der **Rechnung** betont?
    *
-   * Fünf gleich schwere Knöpfe sagen nichts darüber. Genau eine Aktion wird
-   * deshalb betont — die, die der Zustand nahelegt:
+   * Nur bei `created` — dem einzigen Status, in dem sicher ist, dass sie noch
+   * nie draussen war (siehe `nextStatusAfterSend` in `lib/invoice-service`).
+   * Dann ist der Versand der nächste Schritt, auch wenn sie bereits überfällig
+   * ist.
    *
-   * - `created`: die Rechnung war noch nie draussen (einziger Status, in dem
-   *   das sicher ist — siehe nextStatusAfterSend in lib/invoice-service).
-   *   Nächster Schritt ist der Versand, auch wenn sie schon überfällig ist.
-   * - `sent`/`reminded` und überfällig: die Rechnung ist zugestellt und nicht
-   *   bezahlt — dann ist die Mahnstufe dran.
-   * - sonst (bezahlt, storniert, abgeschrieben, oder versendet und noch nicht
-   *   fällig): nichts wird betont. Es gibt keinen drängenden nächsten Schritt,
-   *   und einen zu behaupten wäre schlechter als zu schweigen. Oben stehen
-   *   dann die Downloads.
+   * Der zweite Fall von früher ist entfallen: Bei einer zugestellten,
+   * überfälligen Rechnung wurde hier das Mahnen betont. Das entscheidet jetzt
+   * die Achse (`dunning-axis.tsx`), und sie kann es besser — sie kennt die
+   * Leiter der Firma und weiss, welche Stufe dran ist. Zwei Stellen, die
+   * dieselbe Betonung aus verschiedenen Quellen ableiten, laufen irgendwann
+   * auseinander.
    */
-  const betonung: 'email' | 'mahnung' | null = !invoice
-    ? null
-    : invoice.status === 'created'
-      ? 'email'
-      : (invoice.status === 'sent' || invoice.status === 'reminded') && isOverdue(invoice)
-        ? 'mahnung'
-        : null
+  const betontDenVersand = invoice?.status === 'created'
 
   /**
    * Darf diese Rechnung überhaupt gemahnt werden?
@@ -362,7 +355,7 @@ const handleDownloadPdf = async () => {
   /** Der Versandknopf, einmal betont und einmal gewöhnlich. */
   const versandKnopf = (
     <Button
-      variant={betonung === 'email' ? 'default' : 'outline'}
+      variant={betontDenVersand ? 'default' : 'outline'}
       className="w-full"
       onClick={() => setShowSendModal(true)}
     >
@@ -542,12 +535,11 @@ const handleDownloadPdf = async () => {
                 </p>
               </div>
 
-              {/* Was es zu dieser Rechnung gibt: die Rechnung selbst mit ihren
-                  Dateien und jede erzeugte Mahnung mit Datum, Stufe, Betrag
-                  und Zustand. Steht **vor** dem Aktionsbereich: erst was ist,
-                  dann was man tut — und der Ausblick auf die nächste Stufe
-                  endet direkt über dem Knopf, der sie auslöst. */}
-              <DocumentsSection
+              {/* Der Mahnweg dieser Rechnung als eine Spur: was war, was dran
+                  ist, was kommt. Steht **vor** dem Aktionsbereich, weil der
+                  fällige Schritt seinen Knopf selbst trägt — der Aktionsstapel
+                  darunter betrifft nur noch die Rechnung. */}
+              <DunningAxis
                 invoice={invoice}
                 status={mahnstatus}
                 hatPdf={hatPdf}
@@ -560,7 +552,6 @@ const handleDownloadPdf = async () => {
                 empfaenger={buyerName}
                 absender={companyName || 'Ihr Unternehmen'}
                 istMahnbar={istMahnbar}
-                betont={betonung === 'mahnung'}
                 onPaid={() => {
                   loadInvoice(invoice.id)
                   closeDrawer()

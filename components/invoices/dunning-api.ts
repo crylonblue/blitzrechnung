@@ -67,12 +67,28 @@ export interface DunningMail {
   text: string
 }
 
-/** Eine eingerichtete Mahnstufe, wie die Dokumentenauswahl sie anbietet. */
+/**
+ * Eine eingerichtete Mahnstufe — ein Sprosse der Leiter dieser Firma.
+ *
+ * Die Rechenfelder tragen die Stufen, die **noch nicht dran sind**. Für sie
+ * rechnet der Server keine Forderung (es gibt noch keinen Stichtag), aber die
+ * Achse sagt trotzdem, wann sie kommen und was sie zusätzlich fordern werden.
+ * Diese Auskunft steht hier, weil sie aus der Einstellung folgt und nicht aus
+ * einer Rechnung.
+ */
 export interface DunningStufenOption {
   position: number
   name: string
   /** Zu dieser Stufe besteht bereits eine gültige Mahnung — nicht noch einmal. */
   bereitsErstellt: boolean
+  /** Tage nach der Vorstufe; bei der ersten Stufe nach Fälligkeit der Rechnung. */
+  tageNachVorstufe: number
+  /** Neue Zahlungsfrist, die diese Stufe einräumt. */
+  fristTage: number
+  berechnetZinsen: boolean
+  berechnetPauschale: boolean
+  /** Mahngebühr der Stufe — tatsächliche Kosten, meist 0. */
+  gebuehr: number
 }
 
 export interface DunningStatus {
@@ -180,8 +196,13 @@ export async function ladeMahnstatus(
  * bekommt den Grund als Fehler — es bleibt nichts Halbes zurück.
  */
 export interface MahnungAnlegenParams {
-  /** Der Brief, der **im PDF** steht. */
-  text: string
+  /**
+   * Der Brief, der **im PDF** steht. Fehlt er, gilt der Text der Stufe — die
+   * Route unterscheidet `undefined` („nicht angegeben") von `''` („kein
+   * Text"). Die Achse lässt ihn weg: Sie sendet genau das, was der Server
+   * ohnehin vorbereitet hat.
+   */
+  text?: string
   /** Gleich verschicken? Sonst entsteht nur das Dokument. */
   senden: boolean
   /** Betreff und Text der **E-Mail**; nur beim Senden von Belang. */
@@ -209,6 +230,12 @@ export async function legeMahnungAn(
 ): Promise<MahnungAnlegenErgebnis> {
   const response = await fetch(`/api/invoices/${invoiceId}/dunning`, {
     method: 'POST',
+    // Der Versand aus der Achse kann im `pagehide` ausgelöst werden — beim
+    // Schliessen des Tabs also. Ohne `keepalive` bricht der Browser die
+    // Anfrage mit dem Dokument ab, und die Mahnung entstünde nie, obwohl der
+    // Nutzer „senden" gedrückt hat. Der Rumpf bleibt weit unter den 64 KB,
+    // die dafür erlaubt sind.
+    keepalive: true,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       stage: anpassung.stage,

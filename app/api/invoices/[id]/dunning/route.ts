@@ -188,12 +188,31 @@ interface Mahnlage {
    */
   mail: { empfaenger: string | null; betreff: string; text: string } | null
   /**
-   * Alle eingerichteten Mahnstufen, für die Auswahl unter „Dokument
-   * hinzufügen". `bereitsErstellt` heißt: zu dieser Stufe steht schon eine
-   * gültige Mahnung — der eindeutige Index ließe keine zweite zu, und das soll
-   * die Auswahl sagen statt es den Nutzer probieren zu lassen.
+   * Alle eingerichteten Mahnstufen — die Leiter dieser Firma, unverkürzt.
+   * `bereitsErstellt` heißt: zu dieser Stufe steht schon eine gültige Mahnung
+   * — der eindeutige Index ließe keine zweite zu, und das soll die Oberfläche
+   * sagen statt es den Nutzer probieren zu lassen.
+   *
+   * Warum die Rechenfelder mitkommen, obwohl die Route selbst rechnet: Die
+   * Oberfläche zeigt die Leiter **über die fällige Stufe hinaus** — was
+   * danach kommt, wann es kommt und was es zusätzlich fordern wird. Für eine
+   * Stufe, die noch nicht dran ist, rechnet niemand eine Forderung; ihre
+   * Beschreibung ergibt sich allein aus diesen Feldern. Sie stehen damit
+   * genau einmal in der Datenbank und werden nirgends nachgebaut.
    */
-  stufen: Array<{ position: number; name: string; bereitsErstellt: boolean }>
+  stufen: Array<{
+    position: number
+    name: string
+    bereitsErstellt: boolean
+    /** Tage nach der Vorstufe; bei der ersten Stufe nach Fälligkeit der Rechnung. */
+    tageNachVorstufe: number
+    /** Neue Zahlungsfrist, die diese Stufe einräumt. */
+    fristTage: number
+    berechnetZinsen: boolean
+    berechnetPauschale: boolean
+    /** Mahngebühr der Stufe — tatsächliche Kosten, meist 0. */
+    gebuehr: number
+  }>
   verlauf: Array<{
     id: string
     stage_position: number
@@ -364,6 +383,11 @@ async function bewerte(
     position: s.position,
     name: s.name,
     bereitsErstellt: belegteStufen.has(s.position),
+    tageNachVorstufe: s.days_after_previous,
+    fristTage: s.grace_days,
+    berechnetZinsen: s.charge_interest,
+    berechnetPauschale: s.charge_late_fee_flat,
+    gebuehr: Number(s.fee_amount),
   }))
 
   // Wählt der Nutzer eine Stufe, werden die darunterliegenden ausgeblendet —

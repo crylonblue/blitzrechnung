@@ -62,6 +62,21 @@ export function addDays(iso: string, days: number): string {
   return formatDay(parseDay(iso) + days * DAY_MS);
 }
 
+/**
+ * Tage von `von` bis `bis`. Negativ, wenn `bis` davor liegt.
+ *
+ * Die Division geht ohne Rest auf, weil beide Werte UTC-Mitternachten sind und
+ * ein UTC-Tag konstant `DAY_MS` lang ist — hier wird nichts gerundet und nichts
+ * abgeschnitten. In lokaler Zeit wäre genau das nicht wahr; siehe oben.
+ *
+ * Die Zählweise ist die des § 187 Abs. 1 BGB: Der Tag des Ereignisses zählt
+ * nicht mit. `daysBetween('2026-10-07', '2026-10-08')` ist also 1 — ein Tag
+ * Verzug, nicht zwei.
+ */
+export function daysBetween(von: string, bis: string): number {
+  return (parseDay(bis) - parseDay(von)) / DAY_MS;
+}
+
 /** Das Kalenderjahr eines UTC-Zeitstempels. */
 export function yearOf(ms: number): number {
   return new Date(ms).getUTCFullYear();
