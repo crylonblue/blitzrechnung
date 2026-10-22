@@ -5,7 +5,11 @@ import { meldeFehler } from '@/lib/observability'
 import { DunningServiceError, verwerfeMahnung } from '@/lib/dunning-service'
 
 /**
- * Einen Mahnungs-**Entwurf** verwerfen.
+ * Eine **noch nicht versendete** Mahnung verwerfen.
+ *
+ * Sie ist kein Entwurf mehr: Ihr Mahnschreiben ist erzeugt und abgelegt, sie
+ * steht in der Belegübersicht und lässt sich herunterladen. Was ihr fehlt, ist
+ * der Versand — und solange der nicht war, darf sie spurlos verschwinden.
  *
  * Die Route liegt bewusst nicht unter der Rechnung: Eine Mahnung hat eine
  * eigene Kennung, und der Dialog kennt sie aus dem Verlauf. Eine zweite

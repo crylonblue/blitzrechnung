@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import * as SchubladePrimitive from '@radix-ui/react-dialog'
-import { ChevronRight, CircleCheck, LoaderCircle, X } from 'lucide-react'
+import { ChevronRight, CircleCheck, LoaderCircle, SendHorizontal, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -331,9 +331,14 @@ interface DunningDrawerProps {
   absender: string
   /** Der ungefilterte Serverstand, bereits von der Schublade geholt. */
   basis: DunningStatus
+  /**
+   * Die Stufe, die der Nutzer in „Dokument hinzufügen" gewählt hat. `null`
+   * heisst „die, die ohnehin dran ist" — dann entscheidet der Server.
+   */
+  startStufe?: number | null
   isOpen: boolean
   onClose: () => void
-  /** Entwurf angelegt — die Schublade lädt Rechnung und Verlauf neu. */
+  /** Mahnung erstellt (und ggf. versendet) — die Schublade lädt alles neu. */
   onCreated: () => void
   /** Rechnung ist bezahlt — die Schublade schliesst sich. */
   onPaid: () => void
@@ -350,6 +355,7 @@ export default function DunningDrawer({
   empfaenger,
   absender,
   basis,
+  startStufe = null,
   isOpen,
   onClose,
   onCreated,
@@ -363,13 +369,27 @@ export default function DunningDrawer({
   const [status, setStatus] = useState<DunningStatus>(basis)
   const [istAmRechnen, setIstAmRechnen] = useState(false)
   const [fehler, setFehler] = useState<string | null>(null)
-  const [istAmSpeichern, setIstAmSpeichern] = useState(false)
+  /** Welcher der beiden Knöpfe gerade läuft — oder keiner. */
+  const [laeuft, setLaeuft] = useState<'senden' | 'erstellen' | null>(null)
   const [istAmBezahlen, setIstAmBezahlen] = useState(false)
 
   const [text, setText] = useState('')
   // Sobald der Nutzer den Text angefasst hat, wird er nicht mehr überschrieben:
   // eine Anpassung an den Zahlen darf keine getippte Zeile wegwerfen.
   const [textVomNutzer, setTextVomNutzer] = useState(false)
+
+  /**
+   * Das Begleitschreiben der E-Mail — der zweite Text.
+   *
+   * Er folgt der Vorbereitung des Servers, solange ihn niemand anfasst; dann
+   * gilt dieselbe Regel wie beim Mahnschreiben. Gespeichert wird er nirgends:
+   * Er gilt für diesen einen Versand.
+   */
+  const [mailEmpfaenger, setMailEmpfaenger] = useState('')
+  const [mailBetreff, setMailBetreff] = useState('')
+  const [mailText, setMailText] = useState('')
+  const [mailVomNutzer, setMailVomNutzer] = useState(false)
+  const [mailOffen, setMailOffen] = useState(false)
 
   const [anpassenOffen, setAnpassenOffen] = useState(false)
 
@@ -394,14 +414,19 @@ export default function DunningDrawer({
   // anders als beim ersten, ohne dass jemand etwas geändert hätte.
   useEffect(() => {
     if (!isOpen) return
-    setAnpassung({})
+    // Die gewählte Stufe ist die einzige Einstellung, die das Öffnen überlebt
+    // — sie ist die Antwort auf die Frage „welches Dokument?" und stand damit
+    // schon vor der Schublade fest.
+    setAnpassung(startStufe === null ? {} : { stage: startStufe })
     setStatus(basis)
     setFehler(null)
     setTextVomNutzer(false)
+    setMailVomNutzer(false)
+    setMailOffen(false)
     setBasiszinsText('')
     setKundentypGefragt(false)
     setAnpassenOffen(startetOffen(basis))
-  }, [isOpen, basis])
+  }, [isOpen, basis, startStufe])
 
   // Der Schlüssel macht aus dem Objekt eine vergleichbare Zeichenkette — sonst
   // liefe der Effekt bei jedem Rendern erneut.
@@ -449,6 +474,15 @@ export default function DunningDrawer({
     if (!isOpen || textVomNutzer) return
     setText(baueSchreiben({ invoice, absender, status }))
   }, [isOpen, textVomNutzer, invoice, absender, status])
+
+  // Dasselbe für die Begleit-E-Mail — nur kommt sie fertig vom Server, weil
+  // dort auch die Vorlage für den Versand ohne Bildschirm liegt.
+  useEffect(() => {
+    if (!isOpen || mailVomNutzer || !status.mail) return
+    setMailEmpfaenger(status.mail.empfaenger ?? '')
+    setMailBetreff(status.mail.betreff)
+    setMailText(status.mail.text)
+  }, [isOpen, mailVomNutzer, status.mail])
 
   const textfeld = useRef<HTMLTextAreaElement | null>(null)
 
@@ -620,20 +654,57 @@ export default function DunningDrawer({
     return liste
   }, [anpassung, basis.stufe, status, invoice.due_date, zinsenAn])
 
-  const handleSpeichern = async () => {
+  /**
+   * Erstellen — und auf Wunsch gleich verschicken.
+   *
+   * Beides derselbe Aufruf, weil es für den Nutzer ein Vorgang ist. Der
+   * Unterschied in der Antwort ist der wichtige: Die Mahnung entsteht in
+   * beiden Fällen, nur die E-Mail kann ausbleiben. Dann bleibt die Schublade
+   * **nicht** offen — das Dokument ist da, und der Satz dazu steht als
+   * Hinweis in der Belegübersicht, wo auch der Knopf zum erneuten Senden
+   * sitzt.
+   */
+  const handleErstellen = async (senden: boolean) => {
     if (!forderung || !status.stufe) return
-    setIstAmSpeichern(true)
+    if (senden && !mailEmpfaenger.trim()) {
+      setMailOffen(true)
+      setFehler('Zum Versenden fehlt die E-Mail-Adresse des Empfängers.')
+      return
+    }
+
+    setLaeuft(senden ? 'senden' : 'erstellen')
     setFehler(null)
     try {
-      await legeMahnungAn(invoice.id, anpassung, text)
-      toast.success(`${status.stufe.name} als Entwurf gespeichert`)
+      const ergebnis = await legeMahnungAn(invoice.id, anpassung, {
+        text,
+        senden,
+        mail: { empfaenger: mailEmpfaenger.trim(), betreff: mailBetreff, text: mailText },
+      })
+
+      if (ergebnis.versendet) {
+        toast.success(`${status.stufe.name} versendet`, {
+          description: `An ${ergebnis.empfaengerEmail}. Das Mahnschreiben liegt als PDF bei den Dokumenten.`,
+        })
+      } else if (ergebnis.versandFehler) {
+        // Zwei Nachrichten in einer: Das Dokument ist da, die E-Mail nicht.
+        // Eine reine Fehlermeldung verschwiege das Erste und liesse den
+        // Nutzer ein zweites Mal erstellen.
+        toast.warning(`${status.stufe.name} erstellt, aber nicht versendet`, {
+          description: `${ergebnis.versandFehler} Sie können sie unter „Dokumente" erneut senden.`,
+        })
+      } else {
+        toast.success(`${status.stufe.name} erstellt`, {
+          description: 'Das Mahnschreiben liegt als PDF bei den Dokumenten.',
+        })
+      }
+
       onCreated()
       onClose()
       router.refresh()
     } catch (err) {
-      setFehler(err instanceof Error ? err.message : 'Der Entwurf konnte nicht angelegt werden.')
+      setFehler(err instanceof Error ? err.message : 'Die Mahnung konnte nicht erstellt werden.')
     } finally {
-      setIstAmSpeichern(false)
+      setLaeuft(null)
     }
   }
 
@@ -682,7 +753,7 @@ export default function DunningDrawer({
 
             Drei Zeilen wie im Entwurfseditor (`components/drafts/draft-editor.tsx`):
             fest sitzender Kopf, rollende Mitte, fest sitzende Aktionsleiste.
-            „Als Entwurf speichern" ist damit nie weggescrollt, und der Titel
+            „Mahnung senden" ist damit nie weggescrollt, und der Titel
             sagt jederzeit, worum es geht. `min-h-0` an der Mitte, weil ein
             Flex-Kind sonst nicht unter seine Inhaltshöhe schrumpft und statt
             der Mitte die ganze Schublade rollte. */}
@@ -782,11 +853,18 @@ export default function DunningDrawer({
                     damit das Einzige, was wirklich geprüft werden muss. Die
                     Zahlen standen vorher darüber und schoben ihn aus dem Bild;
                     jetzt tragen sie ihn von unten. */}
-                {/* An wen, steht schon im Kopf der Schublade — hier genügt, was
-                    das Feld ist. */}
+                {/* Die Beschriftung sagt, **wohin** der Text geht, nicht nur,
+                    dass es einer ist. „Schreiben" stand hier vorher allein und
+                    liess offen, ob es der Brief oder die E-Mail ist — und seit
+                    es beide gibt, ist das die entscheidende Auskunft. Der
+                    zweite Text steht weiter unten unter „E-Mail-Text", mit
+                    derselben Art Satz darunter. */}
                 <Label htmlFor="dunning-text" className="text-xs text-zinc-500 dark:text-zinc-400">
-                  Schreiben
+                  Mahnschreiben
                 </Label>
+                <p className="mb-1 text-xs text-zinc-400 dark:text-zinc-500">
+                  Dieser Text steht im PDF, das Ihr Kunde als Mahnschreiben bekommt.
+                </p>
                 {/* `rows` ist nur der Stand vor der ersten Messung — gleich hoch
                     wie das kürzeste vorbereitete Schreiben, damit beim Öffnen
                     nichts springt. `resize-none`, weil ein von Hand gezogener
@@ -842,6 +920,96 @@ export default function DunningDrawer({
                     dem Datum, das auf der Rechnung steht.
                   </p>
                 )}
+
+                {/* Der zweite Text, hinter einer Aufklappstelle.
+                    Er ist vorbelegt und in den allermeisten Fällen richtig:
+                    Wer nichts ändern will, soll ihn nicht lesen müssen. Dass
+                    es ihn gibt und was er ist, sagt die zugeklappte Zeile
+                    trotzdem — sie nennt die Empfängeradresse, denn die ist
+                    das Einzige daran, was falsch sein kann, ohne dass man es
+                    merkt. Dasselbe Bauteil wie „Anpassen" darunter. */}
+                <details
+                  open={mailOffen}
+                  onToggle={(e) => setMailOffen(e.currentTarget.open)}
+                  className="mt-4 border-t border-zinc-200 pt-3 dark:border-zinc-700"
+                >
+                  <summary className="flex cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 text-sm text-zinc-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:text-zinc-400 [&::-webkit-details-marker]:hidden">
+                    <ChevronRight
+                      className={`h-4 w-4 shrink-0 transition-transform ${mailOffen ? 'rotate-90' : ''}`}
+                      aria-hidden="true"
+                    />
+                    E-Mail-Text
+                    {!mailOffen && (
+                      <span className="font-medium text-zinc-900 dark:text-zinc-100">
+                        {mailEmpfaenger.trim() || 'keine Adresse hinterlegt'}
+                      </span>
+                    )}
+                  </summary>
+
+                  <div className="mt-3 space-y-3">
+                    <p className="text-xs text-zinc-400 dark:text-zinc-500">
+                      Dieser Text steht in der E-Mail. Das Mahnschreiben von oben hängt als
+                      PDF an.
+                    </p>
+
+                    <div>
+                      <Label
+                        htmlFor="dunning-mail-to"
+                        className="text-xs text-zinc-500 dark:text-zinc-400"
+                      >
+                        An
+                      </Label>
+                      <Input
+                        id="dunning-mail-to"
+                        type="email"
+                        className="mt-1"
+                        placeholder="rechnung@kunde.de"
+                        value={mailEmpfaenger}
+                        onChange={(e) => {
+                          setMailEmpfaenger(e.target.value)
+                          setMailVomNutzer(true)
+                        }}
+                      />
+                    </div>
+
+                    <div>
+                      <Label
+                        htmlFor="dunning-mail-subject"
+                        className="text-xs text-zinc-500 dark:text-zinc-400"
+                      >
+                        Betreff
+                      </Label>
+                      <Input
+                        id="dunning-mail-subject"
+                        className="mt-1"
+                        value={mailBetreff}
+                        onChange={(e) => {
+                          setMailBetreff(e.target.value)
+                          setMailVomNutzer(true)
+                        }}
+                      />
+                    </div>
+
+                    <div>
+                      <Label
+                        htmlFor="dunning-mail-body"
+                        className="text-xs text-zinc-500 dark:text-zinc-400"
+                      >
+                        Nachricht
+                      </Label>
+                      <Textarea
+                        id="dunning-mail-body"
+                        rows={7}
+                        className="mt-1 text-sm leading-relaxed"
+                        value={mailText}
+                        onChange={(e) => {
+                          setMailText(e.target.value)
+                          setMailVomNutzer(true)
+                        }}
+                      />
+                    </div>
+                  </div>
+                </details>
               </>
             ) : (
               <p className="text-sm text-zinc-600 dark:text-zinc-400">
@@ -1016,7 +1184,7 @@ export default function DunningDrawer({
                 type="button"
                 variant="ghost"
                 onClick={handleBereitsBezahlt}
-                disabled={istAmBezahlen || istAmSpeichern}
+                disabled={istAmBezahlen || laeuft !== null}
                 className="w-full text-zinc-500 hover:text-zinc-900 sm:w-auto dark:text-zinc-400 dark:hover:text-zinc-100"
               >
                 {istAmBezahlen ? (
@@ -1028,17 +1196,50 @@ export default function DunningDrawer({
               </Button>
             </div>
 
-            <div className="flex gap-2">
-              <Button type="button" variant="outline" onClick={onClose} disabled={istAmSpeichern}>
+            {/* Zwei Wege aus dieser Schublade, und die Betonung sagt, welcher
+                der gewöhnliche ist.
+
+                **„Mahnung senden"** erzeugt das Schreiben und verschickt es in
+                einem Zug. Das ist, was jemand will, der auf „mahnen" geklickt
+                hat — ein Zwischenzustand, den man erst noch bestätigen muss,
+                ist kein Ziel, sondern eine Verzögerung.
+                **„Nur erstellen"** erzeugt dasselbe PDF ohne E-Mail: für den
+                Postweg, für die Ablage, für den Fall, dass man es vorher noch
+                jemandem zeigen will. Es ist die leisere Aktion, weil es
+                seltener gebraucht wird — nicht, weil es weniger wert wäre.
+
+                Gelöscht werden kann beides danach, solange keine E-Mail
+                hinausging; das steht in der Belegübersicht. */}
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={onClose}
+                disabled={laeuft !== null}
+              >
                 Abbrechen
               </Button>
               <Button
                 type="button"
-                onClick={handleSpeichern}
-                disabled={istAmSpeichern || istAmRechnen || !forderung || !status.mahnbar}
+                variant="outline"
+                onClick={() => handleErstellen(false)}
+                disabled={laeuft !== null || istAmRechnen || !forderung || !status.mahnbar}
+                title="Erzeugt das Mahnschreiben als PDF, ohne eine E-Mail zu verschicken"
               >
-                {istAmSpeichern && <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />}
-                Als Entwurf speichern
+                {laeuft === 'erstellen' && <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />}
+                Nur erstellen
+              </Button>
+              <Button
+                type="button"
+                onClick={() => handleErstellen(true)}
+                disabled={laeuft !== null || istAmRechnen || !forderung || !status.mahnbar}
+              >
+                {laeuft === 'senden' ? (
+                  <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <SendHorizontal className="mr-2 h-4 w-4" aria-hidden="true" />
+                )}
+                {status.stufe?.position === 1 ? 'Erinnerung senden' : 'Mahnung senden'}
               </Button>
             </div>
           </div>

@@ -2,9 +2,19 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { InterestResult } from './dunning-interest'
 import type { DunningStageDefinition } from './dunning-stages'
 import { istMahnbarerStatus, type Forderung } from './dunning-claim'
-import { resolveSellerContact } from './contact-persons'
+import { resolveReplyTo, resolveSellerContact } from './contact-persons'
+import { generateReminderPDF, type MahnschreibenInput } from './reminder-pdf'
+import { downloadFromS3, uploadToS3 } from './s3'
+import { getDefaultFromEmail, sendEmail, type SendEmailOptions } from './email'
+import { textToHtml } from './email-templates'
+import {
+  formatCurrencyForLanguage,
+  formatDateForLanguage,
+  type InvoiceLanguage,
+} from './invoice-translations'
 import type {
   BankDetails,
+  EmailSettings,
   Invoice,
   PartySnapshot,
   PaymentReminder,
@@ -33,9 +43,21 @@ import type {
  *    und `payment_reminders` hat bewusst kein `vat_amount`.
  *  * **Keine Rechnungsnummer.** Eine Mahnung ist kein Beleg nach § 14 UStG und
  *    darf den fortlaufenden Rechnungskreis nicht anfassen.
- *  * **Kein PDF, kein Versand, kein Statuswechsel der Rechnung.** Eine Rechnung
- *    wird `reminded`, wenn die Mahnung das Haus verlässt — nicht, wenn jemand
- *    einen Entwurf anlegt und ihn womöglich wieder verwirft.
+ *
+ * **Anlegen, Erzeugen, Versenden — drei Schritte, in dieser Reihenfolge.**
+ *
+ *  1. `erstelleMahnung` schreibt nur die Zeile. Sie bleibt als Baustein
+ *     bestehen, weil das Einfrieren für sich prüfbar sein soll.
+ *  2. `erstelleMahnungMitSchreiben` legt zusätzlich das PDF ab und trägt
+ *     `pdf_url` nach. Misslingt das, wird die eben angelegte Zeile wieder
+ *     eingesammelt: Eine Mahnung ohne Dokument ist kein Zwischenstand, den
+ *     man stehen lässt — man kann sie weder lesen noch verschicken, nur
+ *     verwerfen. Dasselbe tut `cancelInvoice` mit der Stornozeile, wenn die
+ *     Dokumente danach nicht entstehen.
+ *  3. `versendeMahnung` schickt sie als E-Mail mit dem Schreiben im Anhang
+ *     aus dem Haus — und **erst dort** wird die Rechnung `reminded`. Gemahnt
+ *     *wurde*, wenn das Schreiben draußen ist; bis dahin gibt es nichts, was
+ *     zurückgenommen werden müsste.
  */
 
 export class DunningServiceError extends Error {
@@ -54,6 +76,18 @@ export class DunningServiceError extends Error {
 /** Die Firma, in deren Namen gemahnt wird. Der Client trägt die Identität. */
 export interface DunningCtx {
   companyId: string
+}
+
+/**
+ * Dasselbe, plus die Kennung des angemeldeten Nutzers.
+ *
+ * Nur für das Ablegen einer Datei nötig: `uploadToS3` legt unter
+ * `invoices/{userId}/{invoiceId}/` ab, genau wie bei der Rechnung. Ein eigener
+ * Typ statt eines Feldes an `DunningCtx`, damit jede Funktion, die ihn
+ * verlangt, damit auch sagt, dass sie etwas ablegt.
+ */
+export interface DunningDokumentCtx extends DunningCtx {
+  userId: string
 }
 
 // Lose typisiert wie in lib/invoice-service.ts: die Clients dieses Projekts
@@ -612,7 +646,495 @@ export async function verwerfeMahnung(
 }
 
 // ---------------------------------------------------------------------------
-// 5. Hinweise ordnen
+// 5. Das Mahnschreiben als Datei
+// ---------------------------------------------------------------------------
+
+/**
+ * Die Außenwelt dieses Moduls: erzeugen, ablegen, abholen, verschicken.
+ *
+ * Dahinter stehen `lib/reminder-pdf.ts`, `lib/s3.ts` und `lib/email/`. Dass
+ * sie trotzdem als Parameter hereinkommen, hat genau einen Grund: Die
+ * wichtigste Zusicherung dieses Moduls ist, dass nach einem **gescheiterten**
+ * PDF keine Mahnung zurückbleibt — und ein Test, der das prüft, muss den
+ * Fehlschlag herbeiführen können, ohne S3-Zugang und ohne eine E-Mail an einen
+ * echten Schuldner zu schicken. Im Normalfall ändert sich nichts: Wer nichts
+ * übergibt, bekommt `WERKZEUGE`.
+ */
+export interface MahnWerkzeuge {
+  erzeugeSchreiben(input: MahnschreibenInput): Promise<Uint8Array>
+  legeAb(userId: string, invoiceId: string, dateiname: string, inhalt: Buffer): Promise<string>
+  holeAb(url: string): Promise<Buffer>
+  verschicke(options: SendEmailOptions): Promise<void>
+}
+
+export const WERKZEUGE: MahnWerkzeuge = {
+  erzeugeSchreiben: generateReminderPDF,
+  legeAb: (userId, invoiceId, dateiname, inhalt) =>
+    uploadToS3(userId, invoiceId, dateiname, inhalt, 'application/pdf'),
+  holeAb: downloadFromS3,
+  verschicke: sendEmail,
+}
+
+/**
+ * Der Ablagename.
+ *
+ * Die Kennung der Mahnung steckt mit darin, und das ist nicht Vorsicht,
+ * sondern nötig: Eine abgelöste Fassung derselben Stufe liegt daneben und
+ * behält ihren Verweis. Hieße die Datei nur nach der Stufe, überschriebe die
+ * neue Fassung das Schreiben der alten — die alte Zeile zeigte dann auf ein
+ * Dokument, das sie nie war.
+ */
+function ablagename(mahnung: PaymentReminder): string {
+  return `Mahnung-${mahnung.stage_position}-${mahnung.id}.pdf`
+}
+
+/**
+ * Der Name, unter dem das Schreiben beim Empfänger ankommt.
+ *
+ * Hier zählt Lesbarkeit, nicht Eindeutigkeit: Im Postfach des Schuldners liegt
+ * eine Datei, und „1. Mahnung RE-2026-001.pdf" sagt ihm, was er vor sich hat.
+ * Was in Dateinamen Ärger macht, wird ersetzt.
+ */
+export function anhangname(stageName: string, invoiceNumber: string | null): string {
+  const roh = [stageName, invoiceNumber].filter(Boolean).join(' ')
+  return `${roh.replace(/[\\/:*?"<>|]+/g, '-').trim() || 'Mahnung'}.pdf`
+}
+
+/**
+ * Das Schreiben erzeugen, ablegen und an der Mahnung vermerken.
+ *
+ * Alles aus dem eingefrorenen Datensatz — bis auf zwei Angaben, die dort nicht
+ * stehen: Nummer und Datum der gemahnten Rechnung (die Tabelle verweist über
+ * `invoice_id`) und das Logo, das Briefpapier ist und deshalb vom heutigen
+ * Stand kommt.
+ */
+async function legeSchreibenAb(
+  supabase: Db,
+  ctx: DunningDokumentCtx,
+  mahnung: PaymentReminder,
+  invoice: Invoice,
+  logoUrl: string | null,
+  werkzeuge: MahnWerkzeuge
+): Promise<PaymentReminder> {
+  let pdf: Uint8Array
+  try {
+    pdf = await werkzeuge.erzeugeSchreiben({
+      mahnung,
+      rechnung: {
+        nummer: invoice.invoice_number ?? '',
+        // Eine mahnbare Rechnung ist festgeschrieben und trägt ein Datum. Der
+        // Rückfall steht nur dafür ein, dass hier nichts Leeres aufs Blatt
+        // gerät, falls doch einmal eines fehlt.
+        datum: invoice.invoice_date ?? mahnung.reminder_date,
+      },
+      logoUrl: logoUrl ?? undefined,
+    })
+  } catch (err) {
+    // `generateReminderPDF` formuliert seine Gründe bereits in Sie-Form
+    // („kein Absender gespeichert"); sie werden durchgereicht, weil sie dem
+    // Nutzer sagen, was ihm fehlt.
+    throw new DunningServiceError(
+      500,
+      'SERVER_ERROR',
+      err instanceof Error ? err.message : 'Das Mahnschreiben konnte nicht erzeugt werden.'
+    )
+  }
+
+  let pdfUrl: string
+  try {
+    pdfUrl = await werkzeuge.legeAb(ctx.userId, invoice.id, ablagename(mahnung), Buffer.from(pdf))
+  } catch {
+    throw new DunningServiceError(
+      500,
+      'SERVER_ERROR',
+      'Das Mahnschreiben konnte nicht abgelegt werden.'
+    )
+  }
+
+  const { data, error } = await supabase
+    .from('payment_reminders')
+    .update({ pdf_url: pdfUrl })
+    .eq('id', mahnung.id)
+    .eq('company_id', ctx.companyId)
+    .select()
+    .single()
+
+  if (error || !data) {
+    throw new DunningServiceError(
+      500,
+      'SERVER_ERROR',
+      'Das Mahnschreiben konnte nicht an der Mahnung vermerkt werden.'
+    )
+  }
+  return data as PaymentReminder
+}
+
+/**
+ * Die eben angelegte Zeile wieder einsammeln.
+ *
+ * Fehler werden verschluckt: Der ursprüngliche Fehler ist der wichtigere und
+ * darf davon nicht verdeckt werden — dieselbe Abwägung wie beim geparkten
+ * Datensatz in `ersetzeMahnung`. `status = 'created'` steht dabei, weil die
+ * Löschregel der Tabelle ohnehin nichts anderes zulässt.
+ */
+async function nimmMahnungZurueck(supabase: Db, ctx: DunningCtx, reminderId: string): Promise<void> {
+  try {
+    await supabase
+      .from('payment_reminders')
+      .delete()
+      .eq('id', reminderId)
+      .eq('company_id', ctx.companyId)
+      .eq('status', 'created')
+  } catch {
+    // bewusst verschluckt
+  }
+}
+
+/**
+ * Eine Mahnung anlegen **und** ihr Schreiben erzeugen.
+ *
+ * Der Weg, den die Oberfläche geht. Entweder es entsteht eine Mahnung mit
+ * Dokument oder gar keine: Scheitert das PDF oder die Ablage, verschwindet die
+ * eben angelegte Zeile wieder, und der Nutzer bekommt den Grund zu lesen,
+ * statt eine leere Mahnung vorzufinden, die er nur noch verwerfen kann.
+ *
+ * Warum die Zeile trotzdem zuerst entsteht und nicht erst nach dem PDF: Der
+ * partielle eindeutige Index ist die einzige Stelle, die „zu dieser Stufe gibt
+ * es schon eine gültige Mahnung" verlässlich entscheidet. Ein PDF, das vor dem
+ * `INSERT` erzeugt würde, wäre bei zwei gleichzeitigen Anfragen für die
+ * Katz — und die Mahnung trägt ihre Kennung im Dateinamen, die es vorher gar
+ * nicht gibt.
+ */
+export async function erstelleMahnungMitSchreiben(
+  supabase: Db,
+  ctx: DunningDokumentCtx,
+  params: MahnungParams,
+  werkzeuge: MahnWerkzeuge = WERKZEUGE
+): Promise<PaymentReminder> {
+  const { invoice, company } = await ladeRechnungUndFirma(supabase, ctx, params.invoiceId)
+  const mahnung = await fuegeEin(supabase, baueAusRechnung(ctx, invoice, company, params, null))
+
+  try {
+    return await legeSchreibenAb(
+      supabase,
+      ctx,
+      mahnung,
+      invoice,
+      // Nur das eigene Logo: Steht ein fremder Verkäufer auf der Rechnung,
+      // wäre unser Briefkopf auf seinem Mahnschreiben falsch. Dieselbe
+      // Bedingung wie in `finalizeInvoice`.
+      invoice.seller_is_self ? ((company.logo_url as string | null) ?? null) : null,
+      werkzeuge
+    )
+  } catch (err) {
+    await nimmMahnungZurueck(supabase, ctx, mahnung.id)
+    throw err
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 6. Versand
+// ---------------------------------------------------------------------------
+
+/**
+ * Statusentscheidung für den Mahnungsversand.
+ *
+ * Gebaut nach `nextStatusAfterSend` in `lib/invoice-service.ts` und aus
+ * demselben Grund: Ein Versand bewegt eine Rechnung nur **vorwärts**. Gemahnt
+ * zu haben ist eine Station nach „verschickt" und vor „bezahlt" — also:
+ *
+ *  * `created` und `sent` gehen auf `reminded`. Das ist der Fortschritt, den
+ *    dieser Versand ausmacht.
+ *  * `reminded` bleibt. Die zweite Mahnung sagt nichts Neues über den Status.
+ *  * `paid`, `cancelled`, `uneinbringlich` bleiben. Eine bezahlte Rechnung
+ *    darf nicht auf „gemahnt" zurückfallen, nur weil jemand ein altes
+ *    Schreiben noch einmal verschickt — der Status wäre dann schlicht falsch,
+ *    und die Rechnung erschiene wieder unter den offenen Forderungen.
+ *  * `draft` bleibt. Eine Rechnung, die nie draußen war, ist nicht gemahnt.
+ *    (Der Versand lehnt sie ohnehin vorher ab, siehe `ladeFuerVersand`.)
+ *
+ * @returns den neuen Status oder `null`, wenn er unverändert bleibt.
+ */
+export function naechsterRechnungsstatusNachMahnung(
+  currentStatus: string
+): 'reminded' | null {
+  return currentStatus === 'created' || currentStatus === 'sent' ? 'reminded' : null
+}
+
+/**
+ * Der vorbereitete E-Mail-Text — das **Begleitschreiben**, nicht die Mahnung.
+ *
+ * Bewusst kurz und ohne Zahlenaufstellung: Was gefordert wird und warum, steht
+ * im angehängten Mahnschreiben. Stünde es hier noch einmal, gäbe es zwei
+ * Fassungen derselben Forderung, von denen nur eine das Dokument ist — und bei
+ * einem bearbeiteten Schreiben liefen sie auseinander. Die E-Mail sagt deshalb
+ * nur, was im Anhang liegt und bis wann gezahlt werden soll.
+ *
+ * **Eine Vorlage für beide Wege.** Die Mahn-Route legt diesen Text der
+ * Schublade schon vor dem Anlegen vor (`mail` in der Lage), und derselbe Text
+ * wird verschickt, wenn niemand ihn anfasst — auch beim Senden aus der
+ * Belegübersicht heraus, wo gar kein Textfeld steht. Zwei Vorlagen liefen
+ * irgendwann auseinander, und der Nutzer sähe etwas anderes, als beim
+ * Empfänger ankommt.
+ */
+export function baueMahnungsMail(
+  mahnung: Pick<
+    PaymentReminder,
+    'stage_name' | 'due_date' | 'total_amount' | 'language'
+  >,
+  invoiceNumber: string | null,
+  absenderName: string
+): { betreff: string; text: string } {
+  const sprache: InvoiceLanguage = mahnung.language === 'en' ? 'en' : 'de'
+  const nummer = invoiceNumber || (sprache === 'en' ? 'without number' : 'ohne Nummer')
+  const betrag = formatCurrencyForLanguage(mahnung.total_amount, sprache)
+  const frist = formatDateForLanguage(mahnung.due_date, sprache)
+
+  if (sprache === 'en') {
+    return {
+      betreff: `${mahnung.stage_name} – invoice ${nummer}`,
+      text: [
+        'Dear Sir or Madam,',
+        `please find attached our ${mahnung.stage_name.toLowerCase()} regarding invoice ${nummer}.`,
+        `The outstanding amount of ${betrag} is payable by ${frist}.`,
+        `Kind regards\n${absenderName}`,
+      ].join('\n\n'),
+    }
+  }
+
+  return {
+    betreff: `${mahnung.stage_name} – Rechnung ${nummer}`,
+    text: [
+      'Sehr geehrte Damen und Herren,',
+      `im Anhang finden Sie unsere ${mahnung.stage_name} zur Rechnung ${nummer}.`,
+      `Wir bitten Sie, den offenen Betrag von ${betrag} bis zum ${frist} zu überweisen.`,
+      `Mit freundlichen Grüßen\n${absenderName}`,
+    ].join('\n\n'),
+  }
+}
+
+// Die Firmenzeile ist im Projekt nirgends durchtypisiert — wie in
+// `baueVerkaeuferSnapshot` weiter oben.
+ 
+type Firma = any
+
+/**
+ * Die Mahnung samt Rechnung und Firma laden — und prüfen, ob sie überhaupt
+ * noch verschickt werden darf.
+ *
+ * Drei Gründe, aus denen hier abgebrochen wird, und jeder hat seinen eigenen
+ * Satz:
+ *
+ *  * **Abgelöst.** Eine Fassung, die durch eine neuere ersetzt wurde, ist aus
+ *    dem Verkehr gezogen. Sie zu verschicken hieße, dem Schuldner ein
+ *    Schreiben zu schicken, das wir selbst nicht mehr gelten lassen.
+ *  * **Ohne Schreiben.** Mahnungen aus der Zeit vor der PDF-Erzeugung tragen
+ *    kein `pdf_url`. Eine Mahn-E-Mail ohne Mahnung im Anhang wäre keine.
+ *  * **Die Rechnung ist nicht mehr mahnbar.** Bezahlt, storniert,
+ *    abgeschrieben — dann ist das Schreiben gegenstandslos, und es zu
+ *    verschicken wäre peinlich und nicht nur falsch.
+ */
+async function ladeFuerVersand(
+  supabase: Db,
+  ctx: DunningCtx,
+  reminderId: string
+): Promise<{ mahnung: PaymentReminder; invoice: Invoice; company: Firma }> {
+  const { data, error } = await supabase
+    .from('payment_reminders')
+    .select('*')
+    .eq('id', reminderId)
+    .eq('company_id', ctx.companyId)
+    .single()
+  if (error || !data) throw new DunningServiceError(404, 'NOT_FOUND', 'Mahnung nicht gefunden')
+
+  const mahnung = data as PaymentReminder
+
+  if (mahnung.superseded_by !== null) {
+    throw new DunningServiceError(
+      409,
+      'CONFLICT',
+      'Diese Mahnung wurde durch eine neuere Fassung abgelöst und kann nicht mehr versendet werden.'
+    )
+  }
+  if (!mahnung.pdf_url) {
+    throw new DunningServiceError(
+      400,
+      'VALIDATION_ERROR',
+      'Zu dieser Mahnung gibt es kein Mahnschreiben. Verwerfen Sie sie und legen Sie eine neue an.'
+    )
+  }
+
+  const { invoice, company } = await ladeRechnungUndFirma(supabase, ctx, mahnung.invoice_id)
+  return { mahnung, invoice, company }
+}
+
+/**
+ * Die Unterschrift unter dem Begleitschreiben: der eingefrorene Absender.
+ *
+ * Nicht der heutige Firmenname — das Mahnschreiben im Anhang ist mit dem
+ * Namen unterschrieben, der im Snapshot steht, und die E-Mail darf daneben
+ * keinen anderen nennen.
+ */
+function absenderName(mahnung: PaymentReminder, company: Firma): string {
+  const snapshot = mahnung.seller_snapshot as PartySnapshot | null
+  return snapshot?.name || (company.name as string) || ''
+}
+
+/**
+ * An wen das Schreiben geht.
+ *
+ * Reihenfolge nach Nähe zum Vorgang: die an der Mahnung festgehaltene Adresse,
+ * dann die der Rechnung, zuletzt die aus dem Empfänger-Snapshot.
+ */
+function empfaengerAdresse(mahnung: PaymentReminder, invoice: Invoice): string | null {
+  const kaeufer = mahnung.buyer_snapshot as PartySnapshot | null
+  return mahnung.recipient_email || invoice.recipient_email || kaeufer?.email || null
+}
+
+export interface VersandParams {
+  reminderId: string
+  /** Abweichende Empfängeradresse; ohne Angabe die hinterlegte. */
+  recipientEmail?: string | null
+  /** Betreff und Text der **E-Mail**; ohne Angabe der vorbereitete. */
+  subject?: string
+  body?: string
+}
+
+export interface VersandErgebnis {
+  mahnung: PaymentReminder
+  empfaengerEmail: string
+  /** Wahr, wenn dieselbe Mahnung schon einmal draußen war. */
+  erneut: boolean
+  /** Der neue Rechnungsstatus, oder `null`, wenn er unverändert blieb. */
+  rechnungsStatus: 'reminded' | null
+}
+
+/**
+ * Die Mahnung verschicken: E-Mail mit dem Mahnschreiben im Anhang.
+ *
+ * **Ein zweiter Versand ist erlaubt** — der Kunde hat die Mail verlegt, die
+ * Adresse war falsch, der Beleg wird noch einmal gebraucht. Verboten wäre nur
+ * eine Scheinsicherheit: Wer nicht erneut senden darf, legt stattdessen eine
+ * zweite Mahnung derselben Stufe an, und die zählt dann als weitere Mahnung
+ * mit.
+ *
+ * **`sent_at` bleibt dabei stehen.** Der Tag des ersten Versands ist der Tag,
+ * an dem das Schreiben den Schuldner erreicht hat; daran hängen die Fristen
+ * dieser Stufe und der Abstand zur nächsten. Ihn auf die Wiederholung zu
+ * setzen, machte die eigene Mahnung jünger, als sie ist — die nächste Stufe
+ * rückte nach hinten, obwohl nichts passiert ist.
+ */
+export async function versendeMahnung(
+  supabase: Db,
+  ctx: DunningCtx,
+  params: VersandParams,
+  werkzeuge: MahnWerkzeuge = WERKZEUGE
+): Promise<VersandErgebnis> {
+  const { mahnung, invoice, company } = await ladeFuerVersand(supabase, ctx, params.reminderId)
+
+  const empfaenger = params.recipientEmail?.trim() || empfaengerAdresse(mahnung, invoice)
+  if (!empfaenger) {
+    throw new DunningServiceError(
+      400,
+      'VALIDATION_ERROR',
+      'Für diese Mahnung ist keine E-Mail-Adresse hinterlegt. Bitte tragen Sie eine ein.'
+    )
+  }
+
+  const vorbereitet = baueMahnungsMail(
+    mahnung,
+    invoice.invoice_number,
+    absenderName(mahnung, company)
+  )
+  const betreff = params.subject?.trim() || vorbereitet.betreff
+  // Anders als beim Betreff gewinnt hier auch ein leerer Text: Wer alles
+  // löscht, will eine E-Mail ohne Begleitzeilen — das Schreiben hängt ja an.
+  const text = params.body ?? vorbereitet.text
+
+  // Absender, Antwortadresse und eigene Domain genau wie beim
+  // Rechnungsversand (`sendInvoice`). Eine Mahnung, die aus einer anderen
+  // Adresse käme als die Rechnung, sähe nach Inkassobüro aus.
+  const emailSettings = ((company.email_settings as EmailSettings) || { mode: 'default' })
+  const eigeneDomain =
+    emailSettings.mode === 'custom_domain' &&
+    emailSettings.domain_verified &&
+    !!emailSettings.from_email
+  const fromEmail = eigeneDomain ? emailSettings.from_email! : getDefaultFromEmail()
+  const fromName = eigeneDomain ? emailSettings.from_name : (company.name as string)
+  const from = fromName ? `${fromName} <${fromEmail}>` : fromEmail
+
+  let anhang: Buffer
+  try {
+    anhang = await werkzeuge.holeAb(mahnung.pdf_url!)
+  } catch {
+    throw new DunningServiceError(
+      500,
+      'SERVER_ERROR',
+      'Das Mahnschreiben konnte nicht geladen werden; es wurde nichts versendet.'
+    )
+  }
+
+  try {
+    await werkzeuge.verschicke({
+      from,
+      to: empfaenger,
+      subject: betreff,
+      htmlBody: textToHtml(text),
+      textBody: text,
+      replyTo: resolveReplyTo(invoice, emailSettings),
+      attachments: [
+        {
+          name: anhangname(mahnung.stage_name, invoice.invoice_number),
+          content: anhang.toString('base64'),
+          contentType: 'application/pdf',
+        },
+      ],
+    })
+  } catch (err) {
+    throw new DunningServiceError(
+      500,
+      'SERVER_ERROR',
+      err instanceof Error ? err.message : 'Die E-Mail konnte nicht versendet werden.'
+    )
+  }
+
+  // Ab hier ist das Schreiben aus dem Haus. Was jetzt noch misslingt, darf den
+  // Aufruf nicht scheitern lassen: Eine Fehlermeldung läse sich wie „nicht
+  // versendet" und brächte den Nutzer dazu, dem Schuldner dasselbe Schreiben
+  // gleich noch einmal zu schicken. Dieselbe Abwägung wie in `sendInvoice`.
+  const erneut = mahnung.sent_at !== null
+  const aenderung: Record<string, unknown> = {
+    status: 'sent',
+    recipient_email: empfaenger,
+    ...(erneut ? {} : { sent_at: new Date().toISOString() }),
+  }
+  const { data: aktualisiert } = await supabase
+    .from('payment_reminders')
+    .update(aenderung)
+    .eq('id', mahnung.id)
+    .eq('company_id', ctx.companyId)
+    .select()
+    .single()
+
+  const rechnungsStatus = naechsterRechnungsstatusNachMahnung(invoice.status)
+  if (rechnungsStatus) {
+    await supabase
+      .from('invoices')
+      .update({ status: rechnungsStatus })
+      .eq('id', invoice.id)
+      .eq('company_id', ctx.companyId)
+  }
+
+  return {
+    mahnung: (aktualisiert as PaymentReminder | null) ?? ({ ...mahnung, ...aenderung } as PaymentReminder),
+    empfaengerEmail: empfaenger,
+    erneut,
+    rechnungsStatus,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 7. Hinweise ordnen
 // ---------------------------------------------------------------------------
 
 /**

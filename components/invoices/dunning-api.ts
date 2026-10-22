@@ -42,11 +42,37 @@ export interface DunningVerlaufEintrag {
   /** Gesetzt heisst: durch eine neuere Fassung abgelöst, zählt nicht mehr. */
   superseded_by: string | null
   /**
-   * Das Mahnschreiben als Datei. Bislang immer `null` — die Erzeugung kommt
-   * erst noch. Die Dokumentenliste bietet den Knopf genau dann an, wenn hier
-   * etwas steht; mehr ist später nicht zu tun.
+   * Das Mahnschreiben als Datei. Die Dokumentenliste bietet den
+   * Herunterladen-Knopf genau dann an, wenn hier etwas steht. `null` tragen
+   * nur noch Mahnungen von vor der Erzeugung — neue entstehen nicht ohne.
    */
   pdf_url: string | null
+  /** Wann das Schreiben hinausging; `null`, solange es das nicht tat. */
+  sent_at: string | null
+  /** Die hinterlegte Empfängeradresse. */
+  recipient_email: string | null
+}
+
+/**
+ * Die vorbereitete **Begleit-E-Mail** — nicht das Mahnschreiben.
+ *
+ * Der Server baut sie aus der Mahnung, die entstünde, und verschickt genau
+ * diesen Text, wenn der Nutzer ihn nicht anfasst. Deshalb steht er in der
+ * Schublade schon da, bevor irgendetwas angelegt ist.
+ */
+export interface DunningMail {
+  /** Vorbelegte Empfängeradresse; kann fehlen. */
+  empfaenger: string | null
+  betreff: string
+  text: string
+}
+
+/** Eine eingerichtete Mahnstufe, wie die Dokumentenauswahl sie anbietet. */
+export interface DunningStufenOption {
+  position: number
+  name: string
+  /** Zu dieser Stufe besteht bereits eine gültige Mahnung — nicht noch einmal. */
+  bereitsErstellt: boolean
 }
 
 export interface DunningStatus {
@@ -64,6 +90,10 @@ export interface DunningStatus {
   /** Der Basiszinssatz ist ungeprüft; der Nutzer muss hinsehen. */
   stale: boolean
   hinweise: string[]
+  /** `null`, wenn es nichts zu mahnen gibt. */
+  mail: DunningMail | null
+  /** Alle eingerichteten Stufen — die Auswahl unter „Dokument hinzufügen". */
+  stufen: DunningStufenOption[]
   verlauf: DunningVerlaufEintrag[]
 }
 
@@ -138,18 +168,45 @@ export async function ladeMahnstatus(
 }
 
 /**
- * Den Entwurf anlegen.
+ * Die Mahnung anlegen — samt Mahnschreiben.
  *
  * Es wird genau das geschickt, was der Nutzer gesehen hat — dieselben Felder
  * wie bei der Abfrage. Der Server rechnet damit erneut und kommt deshalb auf
- * dieselbe Forderung; stimmte das nicht, stünde im Entwurf ein anderer Betrag
- * als im Prüfbildschirm, und der Prüfbildschirm wäre wertlos.
+ * dieselbe Forderung; stimmte das nicht, stünde in der Mahnung ein anderer
+ * Betrag als im Prüfbildschirm, und der Prüfbildschirm wäre wertlos.
+ *
+ * Zurück kommt die fertige Mahnung mit gefülltem `pdf_url`. Scheitert die
+ * Erzeugung des Schreibens, entsteht gar keine Mahnung und der Aufrufer
+ * bekommt den Grund als Fehler — es bleibt nichts Halbes zurück.
  */
+export interface MahnungAnlegenParams {
+  /** Der Brief, der **im PDF** steht. */
+  text: string
+  /** Gleich verschicken? Sonst entsteht nur das Dokument. */
+  senden: boolean
+  /** Betreff und Text der **E-Mail**; nur beim Senden von Belang. */
+  mail?: { empfaenger: string | null; betreff: string; text: string }
+}
+
+/**
+ * Was dabei herauskam.
+ *
+ * Erstellen und Senden sind ein Zug, aber nicht ein Schicksal: `mahnung` ist
+ * immer da, `versendet` sagt, ob die E-Mail hinausging, und `versandFehler`
+ * nennt den Grund, wenn nicht. Das Dokument bleibt in jedem Fall bestehen.
+ */
+export interface MahnungAnlegenErgebnis {
+  mahnung: DunningVerlaufEintrag
+  versendet: boolean
+  empfaengerEmail?: string
+  versandFehler?: string
+}
+
 export async function legeMahnungAn(
   invoiceId: string,
   anpassung: DunningAnpassung,
-  text: string
-): Promise<DunningVerlaufEintrag> {
+  params: MahnungAnlegenParams
+): Promise<MahnungAnlegenErgebnis> {
   const response = await fetch(`/api/invoices/${invoiceId}/dunning`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -159,22 +216,49 @@ export async function legeMahnungAn(
       interest: anpassung.interest === undefined ? undefined : anpassung.interest ? 'on' : 'off',
       baseRate: anpassung.baseRate,
       customerType: anpassung.customerType,
-      // Der bearbeitete Schreibtext. Noch gibt es weder Versand noch PDF; das
-      // Feld reist trotzdem mit, damit eine Änderung des Nutzers nicht
-      // stillschweigend verfällt, sobald die Route sie annimmt.
-      text,
+      // Der Brief fürs PDF.
+      text: params.text,
+      // Das Begleitschreiben der E-Mail. Es wird nur mitgeschickt, wenn auch
+      // gesendet wird — gespeichert wird es nirgends.
+      send: params.senden,
+      ...(params.senden && params.mail
+        ? {
+            recipientEmail: params.mail.empfaenger,
+            emailSubject: params.mail.betreff,
+            emailBody: params.mail.text,
+          }
+        : {}),
     }),
   })
   if (!response.ok) {
-    throw new Error(await fehlertext(response, 'Der Entwurf konnte nicht angelegt werden.'))
+    throw new Error(await fehlertext(response, 'Die Mahnung konnte nicht erstellt werden.'))
   }
-  return (await response.json()) as DunningVerlaufEintrag
+  return (await response.json()) as MahnungAnlegenErgebnis
 }
 
-/** Einen noch nicht versendeten Entwurf verwerfen. */
+/**
+ * Eine bereits erstellte Mahnung (noch einmal) per E-Mail verschicken.
+ *
+ * Ohne Text: Es gilt der vorbereitete, den der Server ohnehin baut. Ein
+ * eigener Bildschirm dafür wäre eine Frage an jemanden, der gerade nur auf
+ * „Senden" geklickt hat.
+ */
+export async function sendeMahnung(reminderId: string): Promise<{ empfaengerEmail: string }> {
+  const response = await fetch(`/api/dunning/${reminderId}/send`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  })
+  if (!response.ok) {
+    throw new Error(await fehlertext(response, 'Die Mahnung konnte nicht versendet werden.'))
+  }
+  return (await response.json()) as { empfaengerEmail: string }
+}
+
+/** Eine noch nicht versendete Mahnung löschen. */
 export async function verwirfMahnung(reminderId: string): Promise<void> {
   const response = await fetch(`/api/dunning/${reminderId}`, { method: 'DELETE' })
   if (!response.ok) {
-    throw new Error(await fehlertext(response, 'Der Entwurf konnte nicht verworfen werden.'))
+    throw new Error(await fehlertext(response, 'Die Mahnung konnte nicht gelöscht werden.'))
   }
 }

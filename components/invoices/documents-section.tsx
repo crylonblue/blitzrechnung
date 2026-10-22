@@ -3,12 +3,26 @@
 import { useState } from 'react'
 import { format } from 'date-fns'
 import { de } from 'date-fns/locale'
-import { BellRing, Clock, FileCode, FileText, LoaderCircle, Receipt } from 'lucide-react'
+import {
+  BellRing,
+  Clock,
+  FileCode,
+  FileText,
+  LoaderCircle,
+  Receipt,
+  SendHorizontal,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { getStatusClass, getStatusLabel } from '@/lib/invoice-utils'
 import type { Invoice } from '@/types'
-import { verwirfMahnung, type DunningStatus, type DunningVerlaufEintrag } from './dunning-api'
+import AddDocument from './add-document'
+import {
+  sendeMahnung,
+  verwirfMahnung,
+  type DunningStatus,
+  type DunningVerlaufEintrag,
+} from './dunning-api'
 
 /**
  * Die Dokumente einer Rechnung — in einer Liste, nicht verstreut.
@@ -25,13 +39,17 @@ import { verwirfMahnung, type DunningStatus, type DunningVerlaufEintrag } from '
  * Angaben — Name, Datum, Betrag und (bei Mahnungen) Zustand — plus denselben
  * Platz für die Datei.
  *
- * **Die fehlende Datei wird nicht verschwiegen.** Mahnungs-PDFs gibt es noch
- * nicht (`payment_reminders.pdf_url` ist bislang immer NULL). Statt den
- * Mangel zu kaschieren oder jede Zeile mit einem toten Knopf zu füllen, steht
- * **ein** Satz unter der Liste — und zwar genau so lange, wie tatsächlich eine
- * Mahnung ohne Datei dabei ist. Sobald die Erzeugung kommt, füllt sich der
- * Platz in der Zeile aus `pdf_url` und der Satz verschwindet von selbst: kein
- * Umbau, kein vergessener Hinweis.
+ * **Hier wird auch gehandelt, nicht nur gezeigt.** Eine Mahnung entsteht als
+ * fertiges Dokument und hat danach genau drei mögliche Fortsetzungen:
+ * herunterladen, per E-Mail senden, löschen. Alle drei stehen in ihrer Zeile —
+ * also an dem Blatt, um das es geht. Und weil der Abschnitt „Dokumente" heisst,
+ * entsteht ein neues Dokument auch hier: „Dokument hinzufügen" steht am Ende
+ * der Liste, dort, wo das nächste stehen wird.
+ *
+ * **Es gibt keinen Entwurf.** Eine Mahnung wird mit ihrem PDF angelegt; was
+ * ihr bis zum Versand fehlt, ist die E-Mail, nicht das Dokument. Deshalb heisst
+ * `created` hier „Erstellt" und nicht „Entwurf" — wer per Post mahnt, ist mit
+ * diesem Zustand fertig und druckt bloss noch aus.
  *
  * **Gezeigt wird nach Lage, nicht nach Schema.** Ohne Mahnung ist das hier
  * schlicht die Zeile der Rechnung mit ihren Downloads — keine leere Tabelle,
@@ -81,12 +99,12 @@ interface Zustand {
  *     gezogen; sie als „Versendet" oder „Erledigt" zu führen, hiesse, sie
  *     weiter als geltende Mahnung auszugeben. Auch `naechsteStufe` zählt sie
  *     nicht mehr mit (vgl. `gueltige()` in `lib/dunning-claim.ts`).
- *  2. `created` → „Entwurf". Hier weiche ich bewusst von der vorgeschlagenen
+ *  2. `created` → „Erstellt". Hier weiche ich bewusst von der vorgeschlagenen
  *     Zuordnung ab, nach der eine bezahlte Rechnung jede ihrer Mahnungen auf
- *     „Erledigt" setzt: Ein Entwurf **war nie draussen**. Was aus der Forderung
- *     wurde, sagt über ihn nichts — er bleibt ein liegengebliebenes Blatt, das
- *     verworfen gehört, und genau diesen Knopf trägt seine Zeile. „Erledigt"
- *     würde ihn zudecken, statt ihn aufzuräumen.
+ *     „Erledigt" setzt: Ein erstelltes Schreiben **ging nie per E-Mail
+ *     hinaus**. Was aus der Forderung wurde, sagt darüber nichts — es bleibt
+ *     ein Blatt, das man noch verschicken oder löschen kann, und genau diese
+ *     Knöpfe trägt seine Zeile. „Erledigt" würde sie zudecken.
  *  3. Rechnung `cancelled`/`uneinbringlich` → „Gegenstandslos", und erst
  *  4. Rechnung `paid` → „Erledigt". Beides sind Endzustände der Rechnung und
  *     schliessen einander aus; die Reihenfolge entscheidet hier nichts.
@@ -104,9 +122,10 @@ function zustandDerMahnung(mahnung: DunningVerlaufEintrag, rechnungsStatus: stri
 
   if (mahnung.status === 'created') {
     return {
-      label: getStatusLabel('draft'),
-      klasse: getStatusClass('draft'),
-      erklaerung: 'Angelegt, aber noch nicht versendet.',
+      label: getStatusLabel('created'),
+      klasse: getStatusClass('created'),
+      erklaerung:
+        'Erstellt und als PDF abgelegt, aber nicht per E-Mail verschickt. Zum Herunterladen und Ausdrucken bereit.',
     }
   }
 
@@ -133,7 +152,9 @@ function zustandDerMahnung(mahnung: DunningVerlaufEintrag, rechnungsStatus: stri
   return {
     label: getStatusLabel('sent'),
     klasse: getStatusClass('sent'),
-    erklaerung: 'Versendet; die Forderung ist weiterhin offen.',
+    erklaerung: mahnung.sent_at
+      ? `Am ${tag(mahnung.sent_at.split('T')[0])} per E-Mail verschickt; die Forderung ist weiterhin offen.`
+      : 'Per E-Mail verschickt; die Forderung ist weiterhin offen.',
   }
 }
 
@@ -228,8 +249,18 @@ interface DocumentsSectionProps {
   onXml: () => void
   pdfLaedt: boolean
   xmlLaedt: boolean
-  /** Nach dem Verwerfen eines Entwurfs: Rechnung und Mahnstatus neu laden. */
+  /** Nach jeder Änderung an einem Dokument: Rechnung und Mahnstatus neu laden. */
   onGeaendert: () => void
+  /** Name des Empfängers, von der Schublade schon aufgelöst. */
+  empfaenger: string
+  /** Name der eigenen Firma — die Unterschrift unter dem Mahnschreiben. */
+  absender: string
+  /** Darf diese Rechnung überhaupt gemahnt werden? Sonst gibt es nichts hinzuzufügen. */
+  istMahnbar: boolean
+  /** Die Mahnschublade meldet „ist längst bezahlt" — die Rechnung geht zu. */
+  onPaid: () => void
+  /** Mahnen ist der wahrscheinliche nächste Schritt — dann wird der Knopf betont. */
+  betont: boolean
 }
 
 export default function DocumentsSection({
@@ -242,26 +273,54 @@ export default function DocumentsSection({
   pdfLaedt,
   xmlLaedt,
   onGeaendert,
+  empfaenger,
+  absender,
+  istMahnbar,
+  onPaid,
+  betont,
 }: DocumentsSectionProps) {
-  const [verwerfeId, setVerwerfeId] = useState<string | null>(null)
+  const [laeuft, setLaeuft] = useState<{ id: string; was: 'senden' | 'loeschen' } | null>(null)
 
   const mahnungen = status?.verlauf ?? []
   const ausblick = ausblickText(status, mahnungen.length > 0)
+  const kannHinzufuegen = istMahnbar && (status?.stufen.length ?? 0) > 0
 
-  // Ohne Datei, ohne Mahnung und ohne Ausblick gäbe es nur eine Überschrift
-  // über einer Zeile ohne Inhalt — dann lieber null Pixel.
-  if (!hatPdf && !hatXml && mahnungen.length === 0 && !ausblick) return null
+  // Ohne Datei, ohne Mahnung, ohne Ausblick und ohne etwas zum Hinzufügen gäbe
+  // es nur eine Überschrift über einer Zeile ohne Inhalt — dann lieber null
+  // Pixel.
+  if (!hatPdf && !hatXml && mahnungen.length === 0 && !ausblick && !kannHinzufuegen) return null
 
-  const handleVerwerfen = async (reminderId: string) => {
-    setVerwerfeId(reminderId)
+  const handleLoeschen = async (reminderId: string) => {
+    setLaeuft({ id: reminderId, was: 'loeschen' })
     try {
       await verwirfMahnung(reminderId)
-      toast.success('Entwurf verworfen')
+      toast.success('Mahnung gelöscht')
       onGeaendert()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Der Entwurf konnte nicht verworfen werden.')
+      toast.error(err instanceof Error ? err.message : 'Die Mahnung konnte nicht gelöscht werden.')
     } finally {
-      setVerwerfeId(null)
+      setLaeuft(null)
+    }
+  }
+
+  /**
+   * Senden ohne Zwischenbildschirm.
+   *
+   * Der Text steht fest, bevor hier geklickt wird: Entweder er wurde in der
+   * Schublade geschrieben, oder es gilt der vorbereitete, den der Server
+   * ohnehin baut. Eine Rückfrage an dieser Stelle wäre eine Frage an jemanden,
+   * der gerade geantwortet hat.
+   */
+  const handleSenden = async (reminderId: string, stufenname: string) => {
+    setLaeuft({ id: reminderId, was: 'senden' })
+    try {
+      const { empfaengerEmail } = await sendeMahnung(reminderId)
+      toast.success(`${stufenname} versendet`, { description: `An ${empfaengerEmail}.` })
+      onGeaendert()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Die Mahnung konnte nicht versendet werden.')
+    } finally {
+      setLaeuft(null)
     }
   }
 
@@ -348,7 +407,16 @@ export default function DocumentsSection({
 
         {mahnungen.map((mahnung) => {
           const zustand = zustandDerMahnung(mahnung, invoice.status)
-          const istEntwurf = !mahnung.superseded_by && mahnung.status === 'created'
+          const gilt = !mahnung.superseded_by
+          // Löschen nur, solange nichts per E-Mail hinausging: Ein verschicktes
+          // Schreiben ist ein Handelsbrief und bleibt. (Die Löschregel der
+          // Tabelle setzt dasselbe noch einmal durch.)
+          const loeschbar = gilt && mahnung.status === 'created'
+          // Senden braucht ein Dokument. Eine gegenstandslose Mahnung — die
+          // Rechnung ist bezahlt oder storniert — wird nicht mehr verschickt;
+          // das wäre peinlich und nicht nur falsch.
+          const sendbar = gilt && Boolean(mahnung.pdf_url) && istMahnbar
+          const amLaufen = laeuft?.id === mahnung.id
 
           return (
             <Zeile
@@ -365,41 +433,69 @@ export default function DocumentsSection({
                 </span>
               }
             >
-              {/* Der Platz für die Datei. Noch wird `pdf_url` nirgends
-                  gefüllt; steht sie eines Tages da, erscheint der Knopf hier
-                  ohne weiteres Zutun. */}
-              {mahnung.pdf_url && (
+              {/* Die beiden Knöpfe, die ein erstelltes Mahnschreiben hat:
+                  ansehen und senden. Sie stehen nebeneinander und gleich
+                  gewichtet — welcher der richtige ist, entscheidet der
+                  Postweg, nicht die Software. */}
+              {(mahnung.pdf_url || sendbar) && (
                 <div className="mt-2 flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="min-w-0 flex-1"
-                    onClick={() => window.open(mahnung.pdf_url as string, '_blank')}
-                    aria-label={`${mahnung.stage_name} als PDF herunterladen`}
-                    title={`${mahnung.stage_name} als PDF herunterladen`}
-                  >
-                    <FileText className="h-4 w-4 shrink-0" />
-                    <span className="truncate">PDF</span>
-                  </Button>
+                  {mahnung.pdf_url && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="min-w-0 flex-1"
+                      onClick={() => window.open(mahnung.pdf_url as string, '_blank')}
+                      aria-label={`${mahnung.stage_name} als PDF herunterladen`}
+                      title={`${mahnung.stage_name} als PDF herunterladen`}
+                    >
+                      <FileText className="h-4 w-4 shrink-0" />
+                      <span className="truncate">PDF</span>
+                    </Button>
+                  )}
+                  {sendbar && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="min-w-0 flex-1"
+                      disabled={amLaufen}
+                      onClick={() => handleSenden(mahnung.id, mahnung.stage_name)}
+                      // „Erneut senden" sagt dem Nutzer, dass er nichts
+                      // Neues auslöst, sondern dasselbe Schreiben noch einmal
+                      // schickt — der Tag des ersten Versands bleibt stehen.
+                      title={
+                        mahnung.status === 'sent'
+                          ? 'Dasselbe Mahnschreiben noch einmal per E-Mail schicken'
+                          : 'Das Mahnschreiben als PDF-Anhang per E-Mail schicken'
+                      }
+                    >
+                      {amLaufen && laeuft?.was === 'senden' ? (
+                        <LoaderCircle className="h-4 w-4 shrink-0 animate-spin" />
+                      ) : (
+                        <SendHorizontal className="h-4 w-4 shrink-0" />
+                      )}
+                      <span className="truncate">
+                        {mahnung.status === 'sent' ? 'Erneut senden' : 'Senden'}
+                      </span>
+                    </Button>
+                  )}
                 </div>
               )}
 
-              {/* Ein Entwurf ist noch nichts Verschicktes — er muss sich
-                  zurücknehmen lassen, und zwar an dem Blatt, um das es geht,
-                  statt unter dem Mahnknopf weiter unten. So bleibt er auch
-                  dann erreichbar, wenn die Rechnung inzwischen bezahlt ist
-                  und es gar keinen Mahnknopf mehr gibt. */}
-              {istEntwurf && (
+              {/* Löschen bleibt der leise Textknopf: Es ist die einzige
+                  Aktion hier, die etwas wegnimmt, und sie steht an dem Blatt,
+                  um das es geht — also auch dann erreichbar, wenn die
+                  Rechnung inzwischen bezahlt ist. */}
+              {loeschbar && (
                 <button
                   type="button"
-                  onClick={() => handleVerwerfen(mahnung.id)}
-                  disabled={verwerfeId === mahnung.id}
+                  onClick={() => handleLoeschen(mahnung.id)}
+                  disabled={amLaufen}
                   className="mt-1 inline-flex items-center text-xs text-zinc-500 underline-offset-4 hover:text-zinc-900 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 disabled:opacity-50 dark:text-zinc-400 dark:hover:text-zinc-100"
                 >
-                  {verwerfeId === mahnung.id && (
+                  {amLaufen && laeuft?.was === 'loeschen' && (
                     <LoaderCircle className="mr-1 h-3 w-3 animate-spin" />
                   )}
-                  Entwurf verwerfen
+                  Löschen
                 </button>
               )}
             </Zeile>
@@ -421,16 +517,32 @@ export default function DocumentsSection({
         )}
       </ul>
 
-      {/* Die fehlende Abrufbarkeit, einmal und ehrlich.
-          Nicht in jede Zeile: Bei drei Mahnungen stünde derselbe Satz dreimal,
-          und ein ausgegrauter Knopf je Zeile wäre ein Versprechen, das nichts
-          tut. Die Bedingung hängt an den Daten, nicht an einem Merkzettel —
-          sobald die Mahnungen `pdf_url` tragen, ist der Satz von selbst weg. */}
+      {/* Neue Dokumente entstehen dort, wo die Dokumente stehen. Der Knopf
+          sitzt deshalb unter der Liste und nicht im Aktionsstapel weiter
+          unten — und weil der Ausblick („1. Mahnung ist ab … vorgesehen")
+          direkt darüber endet, steht die Auskunft unmittelbar neben der
+          Handlung, die sie auslöst. */}
+      {kannHinzufuegen && status && (
+        <AddDocument
+          invoice={invoice}
+          status={status}
+          empfaenger={empfaenger}
+          absender={absender}
+          betont={betont}
+          onCreated={onGeaendert}
+          onPaid={onPaid}
+        />
+      )}
+
+      {/* Mahnungen aus der Zeit vor der PDF-Erzeugung. Der Satz steht einmal
+          unter der Liste statt in jeder Zeile und hängt an den Daten, nicht an
+          einem Merkzettel: Sind alle Mahnungen mit Schreiben entstanden, ist
+          er von selbst weg. */}
       {mahnungen.some((mahnung) => !mahnung.pdf_url) && (
         <p className="mt-3 text-xs text-zinc-400 dark:text-zinc-500">
-          Mahnschreiben werden noch nicht als PDF erzeugt. Was gefordert wurde,
-          ist oben festgehalten — eine Datei zum Herunterladen gibt es dazu
-          noch nicht.
+          Zu älteren Mahnungen gibt es kein PDF — sie entstanden, bevor
+          Mahnschreiben als Datei erzeugt wurden. Was gefordert wurde, ist oben
+          festgehalten; versenden lassen sie sich nicht mehr.
         </p>
       )}
     </div>

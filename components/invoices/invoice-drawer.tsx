@@ -18,7 +18,6 @@ import {
   LoaderCircle,
 } from 'lucide-react'
 import SendInvoiceModal from './send-invoice-modal'
-import DunningSection from './dunning-section'
 import DocumentsSection from './documents-section'
 import { useMahnstatus } from './use-dunning-status'
 import { Button } from '@/components/ui/button'
@@ -360,24 +359,6 @@ const handleDownloadPdf = async () => {
     router.refresh()
   }
 
-  // Mahnwesen — bewusst nicht an vorhandene PDF/XML geknüpft: Eine offene
-  // Rechnung ohne erzeugte Datei muss sich trotzdem mahnen lassen.
-  const mahnblock =
-    invoice && istMahnbar ? (
-      <DunningSection
-        invoice={invoice}
-        empfaenger={buyerName}
-        absender={companyName || 'Ihr Unternehmen'}
-        status={mahnstatus}
-        betont={betonung === 'mahnung'}
-        onChanged={nachMahnaenderung}
-        onPaid={() => {
-          loadInvoice(invoice.id)
-          closeDrawer()
-        }}
-      />
-    ) : null
-
   /** Der Versandknopf, einmal betont und einmal gewöhnlich. */
   const versandKnopf = (
     <Button
@@ -576,24 +557,28 @@ const handleDownloadPdf = async () => {
                 pdfLaedt={isDownloadingPdf}
                 xmlLaedt={isDownloadingXml}
                 onGeaendert={nachMahnaenderung}
+                empfaenger={buyerName}
+                absender={companyName || 'Ihr Unternehmen'}
+                istMahnbar={istMahnbar}
+                betont={betonung === 'mahnung'}
+                onPaid={() => {
+                  loadInvoice(invoice.id)
+                  closeDrawer()
+                }}
               />
 
               {/* Aktionsbereich — ein Stapel, eine Trennlinie.
-                  Reihenfolge: betonte Aktion, die jeweils andere Hauptaktion,
-                  zuletzt der leise Storno. Die Downloads stehen hier nicht
-                  mehr: Sie gehören zur Rechnung als Dokument und damit in die
-                  Liste darüber, nicht zwischen Versand und Storno.
-                  `empty:hidden` fängt den Randfall ab, dass die Rechnung zwar
-                  mahnbar ist, das Mahnwesen aber nichts anzubieten hat und
-                  auch keine Datei existiert — dann bliebe sonst eine
-                  Trennlinie ohne Inhalt stehen. */}
-              {(istMahnbar || hatDateien) && (
+                  Hier steht jetzt nur noch, was die **Rechnung** betrifft: sie
+                  versenden, sie stornieren. Das Mahnen ist in die
+                  Dokumentenliste darüber gewandert, wo auch die Mahnungen
+                  stehen — ein Knopf namens „Dokument hinzufügen" gehört unter
+                  die Dokumente und nicht zwischen Versand und Storno.
+                  `empty:hidden` fängt den Randfall ab, dass es weder Datei
+                  noch Storno gibt — dann bliebe sonst eine Trennlinie ohne
+                  Inhalt stehen. */}
+              {hatDateien && (
                 <div className="mt-6 space-y-2 border-t border-zinc-200 pt-4 empty:hidden dark:border-zinc-700">
-                  {betonung === 'mahnung' && mahnblock}
-                  {betonung === 'email' && hatDateien && versandKnopf}
-
-                  {betonung !== 'mahnung' && mahnblock}
-                  {betonung !== 'email' && hatDateien && versandKnopf}
+                  {versandKnopf}
 
                   {/* Storno: selten gebraucht, folgenreich, nicht rückgängig zu
                       machen — und deshalb kein Kasten im Gewicht eines

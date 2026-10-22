@@ -4,9 +4,11 @@ import { assertCompanyMembership, InvoiceServiceError } from '@/lib/invoice-serv
 import { meldeFehler } from '@/lib/observability'
 import {
   DunningServiceError,
-  erstelleMahnung,
+  baueMahnungsMail,
+  erstelleMahnungMitSchreiben,
   ladeMahnungen,
   sortiereHinweise,
+  versendeMahnung,
 } from '@/lib/dunning-service'
 import {
   berechneForderung,
@@ -24,10 +26,16 @@ import type { Invoice, PaymentReminder } from '@/types'
  * Der Weg vom Mahnen-Dialog zum Mahnwesen.
  *
  * `GET` beantwortet die Frage „kann ich diese Rechnung mahnen, und was käme
- * dabei heraus?" — ohne eine Zeile zu schreiben. `POST` legt daraus einen
- * **Entwurf** an. Verschickt wird hier nichts, es entsteht kein PDF, und der
- * Status der Rechnung bleibt unangetastet: `reminded` sagt aus, dass gemahnt
- * *wurde*, und das stimmt erst, wenn das Schreiben draußen ist.
+ * dabei heraus?" — ohne eine Zeile zu schreiben. `POST` legt die Mahnung an
+ * **und erzeugt ihr Mahnschreiben**: Danach steht sie in der Belegübersicht
+ * und lässt sich herunterladen. Misslingt das PDF, entsteht gar keine Mahnung
+ * (siehe `erstelleMahnungMitSchreiben`) — eine Mahnung ohne Dokument wäre eine
+ * Zeile, die man nur noch verwerfen kann.
+ *
+ * Verschickt wird hier trotzdem nichts: Das ist ein eigener Schritt unter
+ * `app/api/dunning/[reminderId]/send`, und erst er hebt die Rechnung auf
+ * `reminded`. `reminded` sagt aus, dass gemahnt *wurde*, und das stimmt erst,
+ * wenn das Schreiben draußen ist.
  *
  * **Warum diese Route nicht wirft, wo die Bibliothek wirft.**
  * `berechneForderung` wirft bei einer bezahlten, stornierten oder noch nicht
@@ -169,6 +177,23 @@ interface Mahnlage {
   customerType: CustomerType
   stale: boolean
   hinweise: string[]
+  /**
+   * Die vorbereitete **Begleit-E-Mail** — nicht das Mahnschreiben.
+   *
+   * Sie reist mit, damit die Schublade beide Texte zeigen kann, bevor
+   * irgendetwas angelegt ist, und zwar genau den Text, der ohne Bearbeitung
+   * auch hinausginge. Gebaut wird er in `baueMahnungsMail`, also an derselben
+   * Stelle wie beim Versand aus der Belegübersicht; zwei Vorlagen liefen
+   * irgendwann auseinander. `null`, wenn es nichts zu mahnen gibt.
+   */
+  mail: { empfaenger: string | null; betreff: string; text: string } | null
+  /**
+   * Alle eingerichteten Mahnstufen, für die Auswahl unter „Dokument
+   * hinzufügen". `bereitsErstellt` heißt: zu dieser Stufe steht schon eine
+   * gültige Mahnung — der eindeutige Index ließe keine zweite zu, und das soll
+   * die Auswahl sagen statt es den Nutzer probieren zu lassen.
+   */
+  stufen: Array<{ position: number; name: string; bereitsErstellt: boolean }>
   verlauf: Array<{
     id: string
     stage_position: number
@@ -180,12 +205,15 @@ interface Mahnlage {
     /** Gesetzt heißt: durch eine neuere Fassung abgelöst, zählt nicht mehr. */
     superseded_by: string | null
     /**
-     * Das Mahnschreiben als Datei. Heute immer `null` — es gibt noch keine
-     * Erzeugung. Das Feld reist trotzdem mit, weil die Dokumentenliste in der
-     * Schublade den Herunterladen-Knopf allein daran hängt: Sobald die Spalte
-     * gefüllt wird, erscheint er, ohne dass Route oder Oberfläche sich ändern.
+     * Das Mahnschreiben als Datei. Die Dokumentenliste hängt den
+     * Herunterladen-Knopf allein daran. `null` tragen nur noch Mahnungen aus
+     * der Zeit vor der Erzeugung — neue entstehen nicht ohne Schreiben.
      */
     pdf_url: string | null
+    /** Wann das Schreiben das Haus verlassen hat; `null`, solange es das nicht tat. */
+    sent_at: string | null
+    /** Die hinterlegte Empfängeradresse — der Versandbildschirm belegt sie vor. */
+    recipient_email: string | null
   }>
 }
 
@@ -255,6 +283,8 @@ async function bewerte(
     total_amount: m.total_amount,
     superseded_by: m.superseded_by,
     pdf_url: m.pdf_url,
+    sent_at: m.sent_at,
+    recipient_email: m.recipient_email,
   }))
 
   const basis: Mahnlage = {
@@ -269,6 +299,8 @@ async function bewerte(
     customerType,
     stale: false,
     hinweise: [],
+    mail: null,
+    stufen: [],
     verlauf,
   }
 
@@ -320,6 +352,20 @@ async function bewerte(
     throw new AnpassungsFehler(`Eine Mahnstufe ${anpassungen.stage} ist nicht eingerichtet.`)
   }
 
+  // Die Auswahl für „Dokument hinzufügen". Sie steht hier und nicht erst im
+  // Erfolgsfall: Auch wenn die gerechnete Forderung scheitert, soll die
+  // Oberfläche sagen können, welche Stufen es überhaupt gibt. Abgelöste
+  // Fassungen zählen nicht mit — sie geben ihre Stufe wieder frei (vgl.
+  // `gueltige()` in `lib/dunning-claim.ts`).
+  const belegteStufen = new Set(
+    mahnungen.filter((m) => m.superseded_by === null).map((m) => m.stage_position)
+  )
+  basis.stufen = alleStufen.map((s) => ({
+    position: s.position,
+    name: s.name,
+    bereitsErstellt: belegteStufen.has(s.position),
+  }))
+
   // Wählt der Nutzer eine Stufe, werden die darunterliegenden ausgeblendet —
   // dann liefert `naechsteStufe` genau diese Stufe und rechnet ihre Frist
   // gegen denselben Bezugspunkt (Verzugsbeginn bzw. Frist der letzten gültigen
@@ -344,7 +390,7 @@ async function bewerte(
     // Der partielle eindeutige Index ließe sie ohnehin nicht zweimal zu; hier
     // steht der Satz dazu, statt später ein Datenbankfehler.
     return leer(
-      `Zu dieser Rechnung besteht bereits eine gültige Mahnung der Stufe ${anpassungen.stage}. Verwerfen Sie den Entwurf oder lösen Sie die versendete Mahnung ab, bevor Sie diese Stufe erneut mahnen.`
+      `Zu dieser Rechnung besteht bereits eine gültige Mahnung der Stufe ${anpassungen.stage}. Löschen Sie die bestehende Mahnung oder lösen Sie sie ab, bevor Sie diese Stufe erneut mahnen.`
     )
   }
 
@@ -377,10 +423,34 @@ async function bewerte(
     return leer(err instanceof Error ? err.message : 'Diese Rechnung kann nicht gemahnt werden.')
   }
 
+  // Die Begleit-E-Mail, vorbereitet aus der Mahnung, die hier **entstünde**.
+  // Dieselbe Vorlage wie beim Versand: Was die Schublade zeigt, geht auch
+  // hinaus, wenn niemand sie anfasst.
+  const { data: firma } = await supabase
+    .from('companies')
+    .select('name')
+    .eq('id', companyId)
+    .single()
+  const kaeufer = invoice.buyer_snapshot as { email?: string } | null
+  const mail = {
+    ...baueMahnungsMail(
+      {
+        stage_name: stufe.name,
+        due_date: forderung.neueFrist,
+        total_amount: forderung.summe,
+        language: invoice.language || 'de',
+      },
+      invoice.invoice_number,
+      (firma?.name as string | undefined) || ''
+    ),
+    empfaenger: invoice.recipient_email || kaeufer?.email || null,
+  }
+
   return {
     lage: {
       ...basis,
       mahnbar: true,
+      mail,
       forderung: {
         offenerBetrag: forderung.offenerBetrag,
         zinsen: forderung.zinsen,
@@ -457,7 +527,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 }
 
 // ---------------------------------------------------------------------------
-// POST — den Entwurf anlegen
+// POST — die Mahnung anlegen, erzeugen und auf Wunsch verschicken
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -472,10 +542,16 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const invoice = await ladeUndPruefe(supabase, user.id, id)
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
     const anpassungen = ausBody(body)
-    // Der Dialog schickt den bearbeiteten Schreibtext mit. Ohne Angabe bleibt
-    // es beim Text der Stufe; ein leerer String heisst "kein Text" und ist
-    // etwas anderes als "nicht angegeben".
+    // Zwei Texte, zwei Felder:
+    //
+    //  * `text` ist das **Mahnschreiben** — der Brief, der im PDF steht und
+    //    eingefroren wird. Ohne Angabe bleibt es beim Text der Stufe; ein
+    //    leerer String heisst "kein Text" und ist etwas anderes als "nicht
+    //    angegeben".
+    //  * `emailSubject`/`emailBody` sind das **Begleitschreiben** der E-Mail.
+    //    Sie werden nirgends gespeichert: Sie gelten für diesen einen Versand.
     const schreibtext = typeof body.text === 'string' ? body.text : undefined
+    const sofortSenden = body.send === true
 
     const bewertung = await bewerte(supabase, invoice, anpassungen)
     if (!bewertung.lage.mahnbar || !bewertung.stufe || !bewertung.forderung || !bewertung.verzugsbeginnTag) {
@@ -491,9 +567,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       await merkeSchuldnertyp(supabase, invoice, anpassungen.customerType)
     }
 
-    const mahnung = await erstelleMahnung(
+    const mahnung = await erstelleMahnungMitSchreiben(
       supabase,
-      { companyId: invoice.company_id },
+      // Die Nutzerkennung bestimmt den Ablageort der Datei — dieselbe
+      // Ordnerstruktur wie bei den Rechnungsdokumenten.
+      { companyId: invoice.company_id, userId: user.id },
       {
         invoiceId: invoice.id,
         stufe: bewertung.stufe,
@@ -509,7 +587,58 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       }
     )
 
-    return NextResponse.json(mahnung, { status: 201 })
+    if (!sofortSenden) {
+      return NextResponse.json({ mahnung, versendet: false }, { status: 201 })
+    }
+
+    /**
+     * Erstellen und Senden in einem Zug — aber nicht als ein Schicksal.
+     *
+     * Scheitert der Versand, bleibt das Dokument stehen. Es ist erzeugt,
+     * abgelegt und herunterladbar; die Mahnung deswegen wieder einzusammeln
+     * hiesse, eine gelungene Arbeit wegen eines fremden Postfachs
+     * wegzuwerfen. Der Nutzer erfährt beides — die Mahnung ist da, die E-Mail
+     * ging nicht — und kann sie aus der Belegübersicht erneut senden.
+     *
+     * Deshalb auch 201 und kein Fehlerstatus: Angelegt wurde, was angelegt
+     * werden sollte. Was fehlt, steht in `versandFehler`.
+     */
+    try {
+      const versand = await versendeMahnung(
+        supabase,
+        { companyId: invoice.company_id },
+        {
+          reminderId: mahnung.id,
+          recipientEmail: typeof body.recipientEmail === 'string' ? body.recipientEmail : null,
+          subject: typeof body.emailSubject === 'string' ? body.emailSubject : undefined,
+          body: typeof body.emailBody === 'string' ? body.emailBody : undefined,
+        }
+      )
+      return NextResponse.json(
+        {
+          mahnung: versand.mahnung,
+          versendet: true,
+          empfaengerEmail: versand.empfaengerEmail,
+          rechnungsStatus: versand.rechnungsStatus,
+        },
+        { status: 201 }
+      )
+    } catch (versandFehler) {
+      if (!(versandFehler instanceof DunningServiceError)) {
+        meldeFehler(versandFehler, { bereich: 'dunning.anlegen.versand', invoiceId: id })
+      }
+      return NextResponse.json(
+        {
+          mahnung,
+          versendet: false,
+          versandFehler:
+            versandFehler instanceof DunningServiceError
+              ? versandFehler.message
+              : 'Die E-Mail konnte nicht versendet werden.',
+        },
+        { status: 201 }
+      )
+    }
   } catch (err) {
     return antwortAufFehler(err, 'dunning.anlegen', id)
   }
