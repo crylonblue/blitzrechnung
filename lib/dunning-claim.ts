@@ -489,7 +489,19 @@ export function berechneForderung(input: ForderungInput): Forderung {
     // payment_reminders_total_is_sum rechnet in NUMERIC exakt nach und duldet
     // keinen Rundungsrest.
     summe: round2(offenerBetrag + zinsen + gebuehr + pauschale),
-    neueFrist: addDays(stichtag, stufe.grace_days),
+    // `grace_days` ist eine **Nach**frist — sie setzt voraus, dass eine Frist
+    // abgelaufen ist. Steht die Faelligkeit der Rechnung noch bevor, gibt es
+    // nichts nachzufristen: Dann nennt die Erinnerung den Termin der Rechnung
+    // selbst. Sonst entstuende ein zweites, widersprechendes Zahlungsziel —
+    // bei einer in drei Wochen faelligen Rechnung frueher als die Rechnung
+    // verlangt, bei einer uebermorgen faelligen spaeter. Und weil dieser Wert
+    // als payment_reminders.due_date eingefroren wird und `naechsteStufe` die
+    // Folgestufe dagegen rechnet, schaltete Stufe 2 sonst frei, bevor die
+    // Rechnung ueberhaupt faellig ist.
+    neueFrist:
+      invoice.due_date && invoice.due_date > stichtag
+        ? invoice.due_date
+        : addDays(stichtag, stufe.grace_days),
     stale,
     hinweise,
     zinsDetails,

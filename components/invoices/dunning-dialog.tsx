@@ -79,6 +79,67 @@ function zinsErlaeuterung(zinsDetails: InterestResult | null): string | null {
   return `${satz}, seit ${TAG(abschnitte[0].from)}, ${tage} ${tage === 1 ? 'Tag' : 'Tage'}`
 }
 
+/**
+ * Der Tag, an dem die Rechnung nach ihrem eigenen Text fällig **wird** — oder
+ * `null`, wenn dieser Tag schon vorbei ist oder gar keiner hinterlegt ist.
+ *
+ * Das ist die Unterscheidung, an der dieser Dialog zwei grundverschiedene
+ * Schreiben auseinanderhält: die Mahnung nach Fälligkeit und die freundliche
+ * Erinnerung davor.
+ *
+ * Warum `invoice.due_date` und nicht `status.verzugsbeginn`: Der
+ * Verzugsbeginn ist der spätere von Fälligkeit und Rechnungsdatum + 30 Tage
+ * (§ 286 Abs. 3 BGB, siehe `lib/dunning-claim.ts`) — eine Rechengrösse für
+ * Zinsen. Der Empfänger kennt sie nicht; er kennt das Datum, das auf seiner
+ * Rechnung steht. Ein Schreiben, das ihn an eine Frist erinnert, muss von
+ * genau dieser sprechen.
+ *
+ * Der Verzugsbeginn bleibt trotzdem die **Vorbedingung**: Trägt der Nutzer
+ * unter „Anpassen" ein nachweislich vereinbartes, früheres Zahlungsziel ein,
+ * rechnet der Server Verzug und Zinsen — dann ist dies keine Vorab-Erinnerung
+ * mehr, und die Aufstellung daneben würde dem freundlichen Text widersprechen.
+ * Dieselbe Grenze wie in `lib/dunning-claim.ts`: Verzug besteht erst **nach**
+ * Ablauf des Tages (§ 187 Abs. 1 BGB), deshalb `>` und nicht `>=`.
+ *
+ * „Heute" als UTC-Tag, wie es auch die Route tut (`heute()` in
+ * `app/api/invoices/[id]/dunning/route.ts`) — so fällt diese Einschätzung mit
+ * dem Stichtag zusammen, auf den der Server gerechnet hat.
+ */
+function faelligkeitNochVoraus(invoice: Invoice, verzugsbeginn: string): string | null {
+  if (!invoice.due_date) return null
+  const heute = new Date().toISOString().split('T')[0]
+  if (heute > verzugsbeginn) return null
+  return heute < invoice.due_date ? invoice.due_date : null
+}
+
+/**
+ * Die Frist, die das Schreiben tatsächlich einräumt.
+ *
+ * `forderung.neueFrist` ist Stichtag + `grace_days` der Stufe. Nach
+ * Fälligkeit ist das genau richtig: eine Nachfrist auf eine Zahlung, die
+ * längst hätte kommen müssen.
+ *
+ * **Vor** Fälligkeit geht die Rechnung nicht auf. Bei sieben Nachfristtagen
+ * und einer Rechnung, die erst in drei Wochen fällig wird, stünde in der
+ * Erinnerung ein Termin **vor** dem, den die Rechnung selbst nennt — das
+ * Schreiben verlangte früher Geld, als der Empfänger es schuldet. Und auch
+ * der umgekehrte Fall taugt nicht: Wird die Rechnung übermorgen fällig,
+ * verschöbe „Stichtag + 7" den Termin um fünf Tage nach hinten; die
+ * Erinnerung räumte also mehr Zeit ein, als der Erinnernde geben wollte.
+ *
+ * Beides kommt daher, dass `grace_days` eine **Nachfrist** ist — ein Begriff,
+ * der vor Fälligkeit keinen Gegenstand hat. Vor Fälligkeit gibt es nur eine
+ * Frist, und die steht bereits auf der Rechnung. Die Erinnerung verweist
+ * darauf; sie setzt keine neue.
+ *
+ * Hinweis für später: Der Server friert weiterhin `neueFrist` in
+ * `payment_reminders.due_date` ein. Das ist ausserhalb dieser Datei und
+ * gemeldet.
+ */
+function zahlungsfrist(neueFrist: string, nochNichtFaellig: string | null): string {
+  return nochNichtFaellig ?? neueFrist
+}
+
 interface SchreibenInput {
   invoice: Invoice
   /** Name der eigenen Firma — die Unterschrift unter dem Schreiben. */
@@ -107,9 +168,34 @@ function baueSchreiben({ invoice, absender, status }: SchreibenInput): string {
   // Ansprechperson — „Sehr geehrte Muster GmbH" wäre falsch.
   const anrede = 'Sehr geehrte Damen und Herren,'
 
-  const einstieg =
-    position === 1
-      ? `unsere Rechnung ${nummer}${vom} über ${EUR(forderung.offenerBetrag)} ist seit dem ${TAG(status.verzugsbeginn)} fällig und bei uns noch nicht eingegangen. Vermutlich ist sie in Ihrem Haus untergegangen.`
+  const nochNichtFaellig = faelligkeitNochVoraus(invoice, status.verzugsbeginn)
+
+  /**
+   * Vor Fälligkeit **ein** Text, unabhängig von der Stufe.
+   *
+   * Die Stufen drücken eine Eskalation aus, und eine Eskalation setzt voraus,
+   * dass etwas ausgeblieben ist. Vor dem Fälligkeitstag ist nichts
+   * ausgeblieben: Der Empfänger darf bis dahin zahlen und hat dieses Recht
+   * nicht dadurch verwirkt, dass wir ihn früh anschreiben. Jeder der drei
+   * bisherigen Einstiege wäre hier unwahr — „ist fällig und noch nicht
+   * eingegangen" ebenso wie „Sie befinden sich in Verzug". Deshalb tritt vor
+   * Fälligkeit eine einzige, freundliche Formulierung an ihre Stelle: Sie
+   * erinnert an den bevorstehenden Termin und stellt nichts fest.
+   *
+   * Die Texte **nach** Fälligkeit bleiben Wort für Wort, wie sie waren.
+   */
+  const einstieg = nochNichtFaellig
+    ? `unsere Rechnung ${nummer}${vom} über ${EUR(forderung.offenerBetrag)} wird am ${TAG(nochNichtFaellig)} fällig. Mit diesem Schreiben möchten wir Sie vorab freundlich daran erinnern.`
+    : position === 1
+      // Faellig ist die Rechnung an ihrem eigenen Termin, nicht am
+      // Verzugsbeginn. Die beiden fallen auseinander, sobald der
+      // 30-Tage-Boden aus § 286 Abs. 3 BGB greift — bei einem verkuerzten
+      // Zahlungsziel liegt der Verzugsbeginn Wochen nach der Faelligkeit.
+      // Hier stand bisher der Verzugsbeginn, das Schreiben nannte dem
+      // Empfaenger also ein Datum, an dem seine Rechnung nicht faellig war.
+      // Stufe 2 und 3 unten benutzen den Verzugsbeginn dagegen richtig:
+      // dort geht es um Verzug, nicht um Faelligkeit.
+      ? `unsere Rechnung ${nummer}${vom} über ${EUR(forderung.offenerBetrag)} war am ${TAG(invoice.due_date ?? status.verzugsbeginn)} zur Zahlung fällig und ist bei uns noch nicht eingegangen. Vermutlich ist sie in Ihrem Haus untergegangen.`
       : position === 2
         ? `trotz unserer Zahlungserinnerung ist unsere Rechnung ${nummer}${vom} über ${EUR(forderung.offenerBetrag)} bis heute nicht ausgeglichen. Sie befinden sich seit dem ${TAG(status.verzugsbeginn)} in Verzug.`
         : `auf unsere bisherigen Schreiben haben Sie nicht reagiert. Unsere Rechnung ${nummer}${vom} über ${EUR(forderung.offenerBetrag)} ist weiterhin offen; Sie befinden sich seit dem ${TAG(status.verzugsbeginn)} in Verzug.`
@@ -129,10 +215,15 @@ function baueSchreiben({ invoice, absender, status }: SchreibenInput): string {
 
   const bitte = `Wir bitten Sie, ${
     posten.length > 0 ? 'den Gesamtbetrag' : `den Betrag von ${EUR(forderung.summe)}`
-  } bis zum ${TAG(forderung.neueFrist)} auf das unten genannte Konto zu überweisen.`
+  } bis zum ${TAG(zahlungsfrist(forderung.neueFrist, nochNichtFaellig))} auf das unten genannte Konto zu überweisen.`
 
+  // Die Ankündigung des gerichtlichen Schritts setzt voraus, dass die Zahlung
+  // überhaupt schon geschuldet ist. Vor Fälligkeit ist sie gegenstandslos —
+  // und als Drohung gegenüber jemandem, der noch gar nicht zahlen muss, das
+  // Gegenteil der freundlichen Erinnerung, als die dieses Schreiben gedacht
+  // ist.
   const folge =
-    position >= 3
+    position >= 3 && !nochNichtFaellig
       ? 'Geht die Zahlung bis dahin nicht ein, geben wir die Forderung ohne weitere Ankündigung zur gerichtlichen Geltendmachung ab.'
       : null
 
@@ -346,6 +437,10 @@ export default function DunningDialog({
 
   const forderung = status.forderung
 
+  // Dieselbe Frage wie im Schreiben: Steht die Fälligkeit der Rechnung noch
+  // bevor? Dann ist dies eine Erinnerung und keine Mahnung.
+  const nochNichtFaellig = faelligkeitNochVoraus(invoice, status.verzugsbeginn)
+
   /**
    * Gibt es überhaupt etwas aufzuschlüsseln?
    *
@@ -498,10 +593,24 @@ export default function DunningDialog({
                 </div>
               </dl>
 
+              {/* Dieselbe Frist wie im Schreiben darunter — und vor
+                  Fälligkeit auch dieselbe Beschriftung: „neu" wäre sie dann
+                  gerade nicht, sie steht unverändert auf der Rechnung. Die
+                  Begründung steht bei `zahlungsfrist`. */}
               <p className="mt-4 text-sm">
-                <span className="text-zinc-600 dark:text-zinc-400">Neue Zahlungsfrist: </span>
-                <span className="font-medium">{TAG(forderung.neueFrist)}</span>
+                <span className="text-zinc-600 dark:text-zinc-400">
+                  {nochNichtFaellig ? 'Zahlungsfrist der Rechnung: ' : 'Neue Zahlungsfrist: '}
+                </span>
+                <span className="font-medium">
+                  {TAG(zahlungsfrist(forderung.neueFrist, nochNichtFaellig))}
+                </span>
               </p>
+              {nochNichtFaellig && (
+                <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
+                  Eine Erinnerung vor Fälligkeit verkürzt die Frist nicht — es bleibt bei
+                  dem Datum, das auf der Rechnung steht.
+                </p>
+              )}
             </>
           ) : (
             <p className="text-sm text-zinc-600 dark:text-zinc-400">

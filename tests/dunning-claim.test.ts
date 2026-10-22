@@ -436,3 +436,50 @@ test("eine Stornorechnung ist nicht mahnbar — auch mit positivem Betrag", () =
     /Gutschrift/
   );
 });
+
+/**
+ * Die neue Zahlungsfrist einer Erinnerung VOR Fälligkeit.
+ *
+ * `grace_days` ist eine Nachfrist — sie setzt voraus, dass eine Frist
+ * abgelaufen ist. Seit Erinnerungen auch vor Fälligkeit erzeugt werden können,
+ * gibt es den Fall, in dem nichts abgelaufen ist. Stichtag + Nachfrist wäre
+ * dann ein zweites, widersprechendes Zahlungsziel: bei einer in drei Wochen
+ * fälligen Rechnung früher als die Rechnung verlangt, bei einer übermorgen
+ * fälligen später.
+ *
+ * Der Wert wird ausserdem als `payment_reminders.due_date` eingefroren, und
+ * `naechsteStufe` rechnet die Folgestufe dagegen — eine erfundene Frist liesse
+ * also Stufe 2 freischalten, bevor die Rechnung überhaupt fällig ist.
+ */
+test("vor Fälligkeit nennt die Erinnerung den Termin der Rechnung selbst", () => {
+  const f = forderung({
+    invoice: rechnung({ invoice_date: "2026-02-01", due_date: "2026-03-03" }),
+    verzugsbeginn: "2026-03-03",
+    stichtag: "2026-02-10", // zwanzig Tage vor Fälligkeit
+  });
+  assert.equal(f.neueFrist, "2026-03-03");
+});
+
+test("nach Fälligkeit gilt weiterhin Stichtag plus Nachfrist", () => {
+  const s = stufe({ grace_days: 7 });
+  const f = forderung({
+    invoice: rechnung({ invoice_date: "2026-01-15", due_date: "2026-02-14" }),
+    stufe: s,
+    verzugsbeginn: "2026-02-14",
+    stichtag: "2026-03-02",
+  });
+  assert.equal(f.neueFrist, "2026-03-09");
+});
+
+test("eine abgelaufene Frist wird nicht als künftiger Termin genannt", () => {
+  // Sonderfall des 30-Tage-Bodens: Die Rechnung ist laut Aufdruck längst
+  // fällig, Verzug besteht aber noch nicht. Den vergangenen Termin zu nennen
+  // wäre sinnlos — hier gibt es eine echte Nachfrist.
+  const f = forderung({
+    invoice: rechnung({ invoice_date: "2026-02-01", due_date: "2026-02-15" }),
+    stufe: stufe({ grace_days: 7 }),
+    verzugsbeginn: "2026-03-03", // invoice_date + 30, der Boden greift
+    stichtag: "2026-02-20",
+  });
+  assert.equal(f.neueFrist, "2026-02-27");
+});

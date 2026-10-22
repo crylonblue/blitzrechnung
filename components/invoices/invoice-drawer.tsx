@@ -8,12 +8,30 @@ import { Invoice, PartySnapshot, LineItem } from '@/types'
 import { createClient } from '@/lib/supabase/client'
 import { format } from 'date-fns'
 import { de } from 'date-fns/locale'
-import { User, ShoppingCart, FileText, FileCode, Check, SendHorizontal, Ban, ExternalLink } from 'lucide-react'
+import {
+  User,
+  ShoppingCart,
+  FileText,
+  FileCode,
+  Check,
+  SendHorizontal,
+  Ban,
+  ExternalLink,
+  LoaderCircle,
+} from 'lucide-react'
 import SendInvoiceModal from './send-invoice-modal'
 import DunningSection from './dunning-section'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import {
   Select,
   SelectContent,
@@ -23,6 +41,7 @@ import {
 } from '@/components/ui/select'
 import { toast } from 'sonner'
 import { isOverdue, getStatusLabel, getStatusClass } from '@/lib/invoice-utils'
+import { istMahnbarerBeleg, istMahnbarerStatus } from '@/lib/dunning-claim'
 
 type InvoiceStatus = 'created' | 'sent' | 'reminded' | 'paid' | 'cancelled'
 
@@ -45,6 +64,9 @@ export default function InvoiceDrawer() {
   const [isSavingEmail, setIsSavingEmail] = useState(false)
   const [showSendModal, setShowSendModal] = useState(false)
   const [isCancelling, setIsCancelling] = useState(false)
+  // Der Storno läuft über ein eigenes Modal statt über `window.confirm` —
+  // siehe den Dialog am Ende der Datei.
+  const [stornoDialogOffen, setStornoDialogOffen] = useState(false)
   const [cancellationInvoice, setCancellationInvoice] = useState<{ id: string; invoice_number: string } | null>(null)
   const [originalInvoice, setOriginalInvoice] = useState<{ id: string; invoice_number: string } | null>(null)
 
@@ -212,12 +234,6 @@ const handleDownloadPdf = async () => {
   const handleCreateCancellation = async () => {
     if (!invoice) return
 
-    // Confirm with user
-    const confirmed = window.confirm(
-      `Möchten Sie wirklich eine Stornorechnung für ${invoice.invoice_number} erstellen?\n\nDie Originalrechnung wird als "storniert" markiert.`
-    )
-    if (!confirmed) return
-
     setIsCancelling(true)
     try {
       const response = await fetch(`/api/invoices/${invoice.id}/cancel`, {
@@ -230,7 +246,12 @@ const handleDownloadPdf = async () => {
       }
 
       toast.success(`Stornorechnung ${data.cancellationInvoice.invoice_number} erstellt`)
-      
+
+      // Erst nach dem Erfolg schliessen: Schlägt der Storno fehl, bleibt der
+      // Dialog stehen und trägt die Fehlermeldung, statt den Nutzer mit einem
+      // Toast vor einer unveränderten Schublade zurückzulassen.
+      setStornoDialogOffen(false)
+
       // Reload invoice to show updated status
       loadInvoice(invoice.id)
       router.refresh()
@@ -288,10 +309,31 @@ const handleDownloadPdf = async () => {
         ? 'mahnung'
         : null
 
-  // Mahnwesen — bewusst nicht an vorhandene PDF/XML geknüpft: Eine überfällige
+  /**
+   * Darf diese Rechnung überhaupt gemahnt werden?
+   *
+   * Früher hing der Mahnbereich an `isOverdue` — er erschien also erst, wenn
+   * die Rechnung überfällig war. Eine Erinnerung **vor** Fälligkeit ist aber
+   * zulässig und nützlich (sie stellt nur keinen Verzug fest, siehe den
+   * vorbereiteten Text in `dunning-dialog.tsx`), und sie zu verstecken hiess,
+   * sie unmöglich zu machen.
+   *
+   * Die Bedingung wird deshalb aus `lib/dunning-claim.ts` abgeleitet statt als
+   * zweite Liste gepflegt: Dieselben zwei Fragen stellt die Route, bevor sie
+   * rechnet — ist der **Beleg** seiner Natur nach eine Forderung (kein
+   * Storno), und steht er in einem **Status**, in dem noch etwas offen ist
+   * (nicht Entwurf, bezahlt, storniert oder uneinbringlich). Was hier
+   * durchkommt, entscheidet am Ende ohnehin der Server: `DunningSection`
+   * zeigt nichts, solange die Route `mahnbar: false` meldet.
+   */
+  const istMahnbar = Boolean(
+    invoice && istMahnbarerBeleg(invoice) && istMahnbarerStatus(invoice.status)
+  )
+
+  // Mahnwesen — bewusst nicht an vorhandene PDF/XML geknüpft: Eine offene
   // Rechnung ohne erzeugte Datei muss sich trotzdem mahnen lassen.
   const mahnblock =
-    invoice && isOverdue(invoice) ? (
+    invoice && istMahnbar ? (
       <DunningSection
         invoice={invoice}
         empfaenger={buyerName}
@@ -492,49 +534,85 @@ const handleDownloadPdf = async () => {
                   Reihenfolge: betonte Aktion, die beiden Downloads in einer
                   Zeile, die jeweils andere Hauptaktion, zuletzt der leise
                   Storno. `empty:hidden` fängt den Randfall ab, dass die
-                  Rechnung zwar überfällig ist, das Mahnwesen aber nichts
+                  Rechnung zwar mahnbar ist, das Mahnwesen aber nichts
                   anzubieten hat und auch keine Datei existiert — dann bliebe
                   sonst eine Trennlinie ohne Inhalt stehen. */}
-              {(isOverdue(invoice) || hatDateien) && (
+              {(istMahnbar || hatDateien) && (
                 <div className="mt-6 space-y-2 border-t border-zinc-200 pt-4 empty:hidden dark:border-zinc-700">
                   {betonung === 'mahnung' && mahnblock}
                   {betonung === 'email' && hatDateien && versandKnopf}
 
                   {/* Die beiden Downloads sind Nebenaktionen und teilen sich
-                      eine Zeile. Kurze Beschriftung auf dem Knopf, der
-                      vollständige Name für Screenreader und Mauszeiger im
-                      aria-label bzw. title — „XML" allein sagt niemandem,
-                      was er bekommt. `flex-1` statt eines festen Rasters:
-                      Fehlt eine der beiden Dateien, füllt die andere die
-                      Zeile, statt halb stehen zu bleiben. */}
+                      eine Zeile. `flex-1` statt eines festen Rasters: Fehlt
+                      eine der beiden Dateien, füllt die andere die Zeile,
+                      statt halb stehen zu bleiben.
+
+                      Es sind **zwei verschiedene Dokumente**, und bis hierher
+                      stand an beiden dieselbe Beschriftung „XRechnung/ZUGFeRD"
+                      — als wären die Formate austauschbar. Sie sind es nicht:
+
+                       * Das **PDF** ist der ZUGFeRD-Hybrid. `lib/pdf-generator.ts`
+                         ruft `embedFacturX` mit `Flavor.ZUGFERD` auf und legt
+                         die Rechnungsdaten als XML in das PDF hinein — ein
+                         Dokument, das ein Mensch ansehen und eine Software
+                         auslesen kann.
+                       * Die **XML-Datei** ist die XRechnung
+                         (`lib/zugferd-generator.ts`, CustomizationID
+                         `…kosit:xrechnung_3.0`): reines XML ohne Ansicht, das
+                         Format, das öffentliche Auftraggeber verlangen.
+
+                      Warum die Formatnamen auf die Knöpfe und der Rat
+                      darunter: Auf einem Knopf von rund 196 px stehen nach
+                      Innenabstand und Zeichen noch etwa 140 px für Text, also
+                      knapp zwanzig Zeichen — „PDF (ZUGFeRD)" und
+                      „XML (XRechnung)" passen, der Satz, der sagt *wann man
+                      welche nimmt*, in keiner Kürzung. Der gehört deshalb in
+                      eine gemeinsame Zeile unter das Paar, wo er beide Knöpfe
+                      zugleich erklärt und nicht zweimal halb dasteht. */}
                   {hatDateien && (
-                    <div className="flex gap-2">
-                      {hatPdf && (
-                        <Button
-                          variant="outline"
-                          className="min-w-0 flex-1"
-                          onClick={handleDownloadPdf}
-                          disabled={isDownloadingPdf}
-                          aria-label="Rechnung als PDF herunterladen"
-                          title="Rechnung als PDF herunterladen"
-                        >
-                          <FileText className="h-4 w-4 mr-2 shrink-0" />
-                          <span className="truncate">{isDownloadingPdf ? 'Lädt...' : 'PDF'}</span>
-                        </Button>
-                      )}
-                      {hatXml && (
-                        <Button
-                          variant="outline"
-                          className="min-w-0 flex-1"
-                          onClick={handleDownloadXml}
-                          disabled={isDownloadingXml}
-                          aria-label="E-Rechnung als XML herunterladen (XRechnung/ZUGFeRD)"
-                          title="E-Rechnung als XML herunterladen (XRechnung/ZUGFeRD)"
-                        >
-                          <FileCode className="h-4 w-4 mr-2 shrink-0" />
-                          <span className="truncate">{isDownloadingXml ? 'Lädt...' : 'XML'}</span>
-                        </Button>
-                      )}
+                    <div>
+                      <div className="flex gap-2">
+                        {hatPdf && (
+                          <Button
+                            variant="outline"
+                            className="min-w-0 flex-1"
+                            onClick={handleDownloadPdf}
+                            disabled={isDownloadingPdf}
+                            aria-label="Rechnung als PDF mit eingebetteter ZUGFeRD-Datei herunterladen"
+                            title="Rechnung als PDF mit eingebetteter ZUGFeRD-Datei herunterladen"
+                          >
+                            <FileText className="h-4 w-4 mr-2 shrink-0" />
+                            <span className="truncate">
+                              {isDownloadingPdf ? 'Lädt...' : 'PDF (ZUGFeRD)'}
+                            </span>
+                          </Button>
+                        )}
+                        {hatXml && (
+                          <Button
+                            variant="outline"
+                            className="min-w-0 flex-1"
+                            onClick={handleDownloadXml}
+                            disabled={isDownloadingXml}
+                            aria-label="Rechnung als XRechnung im XML-Format herunterladen"
+                            title="Rechnung als XRechnung im XML-Format herunterladen"
+                          >
+                            <FileCode className="h-4 w-4 mr-2 shrink-0" />
+                            <span className="truncate">
+                              {isDownloadingXml ? 'Lädt...' : 'XML (XRechnung)'}
+                            </span>
+                          </Button>
+                        )}
+                      </div>
+
+                      {/* Satzweise an die vorhandenen Dateien geknüpft: Fehlt
+                          eine der beiden, wäre der Satz über sie eine Auskunft
+                          über etwas, das hier gar nicht angeboten wird. */}
+                      <p className="mt-1.5 text-xs text-zinc-400 dark:text-zinc-500">
+                        {hatPdf &&
+                          'Das PDF trägt die ZUGFeRD-Daten in sich und lässt sich lesen wie auslesen — damit kommen die meisten Empfänger aus. '}
+                        {hatXml &&
+                          'Die XML-Datei ist die XRechnung; sie verlangen vor allem Behörden und öffentliche Auftraggeber.'}
+                      </p>
                     </div>
                   )}
 
@@ -543,15 +621,15 @@ const handleDownloadPdf = async () => {
 
                   {/* Storno: selten gebraucht, folgenreich, nicht rückgängig zu
                       machen — und deshalb kein Kasten im Gewicht eines
-                      Downloads. Leiser Textknopf, abgesetzt vom Stapel; der
-                      Bestätigungsdialog bleibt unverändert davor. */}
+                      Downloads. Leiser Textknopf, abgesetzt vom Stapel; die
+                      Bestätigung steht davor, jetzt als eigenes Modal. */}
                   {hatDateien && canBeCancelled && (
                     <div className="flex justify-center pt-1">
                       <Button
                         variant="ghost"
                         size="sm"
                         className="text-zinc-500 hover:bg-orange-50 hover:text-orange-700 dark:text-zinc-400"
-                        onClick={handleCreateCancellation}
+                        onClick={() => setStornoDialogOffen(true)}
                         disabled={isCancelling}
                       >
                         {isCancelling ? 'Erstelle Stornorechnung...' : 'Rechnung stornieren'}
@@ -563,6 +641,57 @@ const handleDownloadPdf = async () => {
             </div>
           </div>
         ) : null}
+
+        {/* Stornieren bestätigen.
+
+            Vorher stand hier `window.confirm` — der einzige Browserdialog in
+            diesem Ablauf, während das Projekt überall sonst eigene Modale
+            benutzt. Der Aufbau ist der des Löschen-Dialogs im Entwurfseditor
+            (`components/drafts/draft-editor.tsx`): `Dialog` aus
+            `components/ui/dialog.tsx` — Radix fängt damit den Fokus, schliesst
+            auf Escape und beschriftet sich über Titel und Beschreibung —,
+            abbrechen links, die folgenreiche Schaltfläche rechts als
+            `destructive`, der laufende Vorgang als Spinner darin.
+
+            Die Schaltfläche heisst nicht „Stornieren", sondern nennt das, was
+            entsteht: Der Klick legt einen Beleg mit eigener fortlaufender
+            Nummer an, und das ist etwas anderes als ein Schalter, den man
+            wieder umlegt. */}
+        {invoice && (
+          <Dialog open={stornoDialogOffen} onOpenChange={setStornoDialogOffen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Rechnung stornieren?</DialogTitle>
+                <DialogDescription>
+                  Zu Rechnung {invoice.invoice_number || 'ohne Nummer'} wird eine
+                  Stornorechnung mit einer eigenen fortlaufenden Nummer erstellt. Die
+                  Rechnung selbst wird dadurch als „Storniert“ markiert.
+                </DialogDescription>
+              </DialogHeader>
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                Das lässt sich nicht rückgängig machen: Die Stornorechnung ist ein Beleg
+                und bleibt bestehen, auch wenn Sie es sich anders überlegen.
+              </p>
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => setStornoDialogOffen(false)}
+                  disabled={isCancelling}
+                >
+                  Abbrechen
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={handleCreateCancellation}
+                  disabled={isCancelling}
+                >
+                  {isCancelling && <LoaderCircle className="h-4 w-4 mr-2 animate-spin" />}
+                  Stornorechnung erstellen
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
 
         {/* Send Invoice Modal */}
         {invoice && (
