@@ -258,6 +258,65 @@ const handleDownloadPdf = async () => {
   // Check if this is a cancellation invoice
   const isCancellationInvoice = invoice && (invoice as any).invoice_type === 'cancellation'
 
+  // Welche Dateien es überhaupt gibt. Die Bedingung ist unverändert die alte
+  // des Download-Blocks — nur benannt, damit sie unten zweimal lesbar bleibt.
+  const hatPdf = Boolean(invoice?.pdf_url || invoice?.invoice_file_reference)
+  const hatXml = Boolean(invoice?.xml_url)
+  const hatDateien = hatPdf || hatXml
+
+  /**
+   * Was ist der wahrscheinliche nächste Schritt?
+   *
+   * Fünf gleich schwere Knöpfe sagen nichts darüber. Genau eine Aktion wird
+   * deshalb betont — die, die der Zustand nahelegt:
+   *
+   * - `created`: die Rechnung war noch nie draussen (einziger Status, in dem
+   *   das sicher ist — siehe nextStatusAfterSend in lib/invoice-service).
+   *   Nächster Schritt ist der Versand, auch wenn sie schon überfällig ist.
+   * - `sent`/`reminded` und überfällig: die Rechnung ist zugestellt und nicht
+   *   bezahlt — dann ist die Mahnstufe dran.
+   * - sonst (bezahlt, storniert, abgeschrieben, oder versendet und noch nicht
+   *   fällig): nichts wird betont. Es gibt keinen drängenden nächsten Schritt,
+   *   und einen zu behaupten wäre schlechter als zu schweigen. Oben stehen
+   *   dann die Downloads.
+   */
+  const betonung: 'email' | 'mahnung' | null = !invoice
+    ? null
+    : invoice.status === 'created'
+      ? 'email'
+      : (invoice.status === 'sent' || invoice.status === 'reminded') && isOverdue(invoice)
+        ? 'mahnung'
+        : null
+
+  // Mahnwesen — bewusst nicht an vorhandene PDF/XML geknüpft: Eine überfällige
+  // Rechnung ohne erzeugte Datei muss sich trotzdem mahnen lassen.
+  const mahnblock =
+    invoice && isOverdue(invoice) ? (
+      <DunningSection
+        invoice={invoice}
+        empfaenger={buyerName}
+        absender={companyName || 'Ihr Unternehmen'}
+        betont={betonung === 'mahnung'}
+        onChanged={() => loadInvoice(invoice.id)}
+        onPaid={() => {
+          loadInvoice(invoice.id)
+          closeDrawer()
+        }}
+      />
+    ) : null
+
+  /** Der Versandknopf, einmal betont und einmal gewöhnlich. */
+  const versandKnopf = (
+    <Button
+      variant={betonung === 'email' ? 'default' : 'outline'}
+      className="w-full"
+      onClick={() => setShowSendModal(true)}
+    >
+      <SendHorizontal className="h-4 w-4 mr-2" />
+      Per E-Mail versenden
+    </Button>
+  )
+
   return (
     <Sheet open={isOpen} onOpenChange={(open) => !open && closeDrawer()}>
       <SheetContent
@@ -429,70 +488,75 @@ const handleDownloadPdf = async () => {
                 </p>
               </div>
 
-              {/* Mahnwesen — ausschliesslich bei überfälligen Rechnungen, und
-                  bewusst ausserhalb der Download-Gruppe darunter: Die hängt an
-                  vorhandener PDF/XML, eine überfällige Rechnung ohne erzeugte
-                  Datei muss sich trotzdem mahnen lassen. */}
-              {isOverdue(invoice) && (
-                <DunningSection
-                  invoice={invoice}
-                  empfaenger={buyerName}
-                  absender={companyName || 'Ihr Unternehmen'}
-                  onChanged={() => loadInvoice(invoice.id)}
-                  onPaid={() => {
-                    loadInvoice(invoice.id)
-                    closeDrawer()
-                  }}
-                />
-              )}
+              {/* Aktionsbereich — ein Stapel, eine Trennlinie.
+                  Reihenfolge: betonte Aktion, die beiden Downloads in einer
+                  Zeile, die jeweils andere Hauptaktion, zuletzt der leise
+                  Storno. `empty:hidden` fängt den Randfall ab, dass die
+                  Rechnung zwar überfällig ist, das Mahnwesen aber nichts
+                  anzubieten hat und auch keine Datei existiert — dann bliebe
+                  sonst eine Trennlinie ohne Inhalt stehen. */}
+              {(isOverdue(invoice) || hatDateien) && (
+                <div className="mt-6 space-y-2 border-t border-zinc-200 pt-4 empty:hidden dark:border-zinc-700">
+                  {betonung === 'mahnung' && mahnblock}
+                  {betonung === 'email' && hatDateien && versandKnopf}
 
-              {/* Download Buttons */}
-              {(invoice.pdf_url || invoice.invoice_file_reference || invoice.xml_url) && (
-                <div className="mt-6 pt-4 border-t border-zinc-200 dark:border-zinc-700 space-y-2">
-                  {(invoice.pdf_url || invoice.invoice_file_reference) && (
-                    <Button
-                      variant="outline"
-                      className="w-full"
-                      onClick={handleDownloadPdf}
-                      disabled={isDownloadingPdf}
-                    >
-                      <FileText className="h-4 w-4 mr-2" />
-                      {isDownloadingPdf ? 'Lädt...' : 'PDF herunterladen'}
-                    </Button>
+                  {/* Die beiden Downloads sind Nebenaktionen und teilen sich
+                      eine Zeile. Kurze Beschriftung auf dem Knopf, der
+                      vollständige Name für Screenreader und Mauszeiger im
+                      aria-label bzw. title — „XML" allein sagt niemandem,
+                      was er bekommt. `flex-1` statt eines festen Rasters:
+                      Fehlt eine der beiden Dateien, füllt die andere die
+                      Zeile, statt halb stehen zu bleiben. */}
+                  {hatDateien && (
+                    <div className="flex gap-2">
+                      {hatPdf && (
+                        <Button
+                          variant="outline"
+                          className="min-w-0 flex-1"
+                          onClick={handleDownloadPdf}
+                          disabled={isDownloadingPdf}
+                          aria-label="Rechnung als PDF herunterladen"
+                          title="Rechnung als PDF herunterladen"
+                        >
+                          <FileText className="h-4 w-4 mr-2 shrink-0" />
+                          <span className="truncate">{isDownloadingPdf ? 'Lädt...' : 'PDF'}</span>
+                        </Button>
+                      )}
+                      {hatXml && (
+                        <Button
+                          variant="outline"
+                          className="min-w-0 flex-1"
+                          onClick={handleDownloadXml}
+                          disabled={isDownloadingXml}
+                          aria-label="E-Rechnung als XML herunterladen (XRechnung/ZUGFeRD)"
+                          title="E-Rechnung als XML herunterladen (XRechnung/ZUGFeRD)"
+                        >
+                          <FileCode className="h-4 w-4 mr-2 shrink-0" />
+                          <span className="truncate">{isDownloadingXml ? 'Lädt...' : 'XML'}</span>
+                        </Button>
+                      )}
+                    </div>
                   )}
-                  {invoice.xml_url && (
-                    <Button
-                      variant="outline"
-                      className="w-full"
-                      onClick={handleDownloadXml}
-                      disabled={isDownloadingXml}
-                    >
-                      <FileCode className="h-4 w-4 mr-2" />
-                      {isDownloadingXml ? 'Lädt...' : 'XML herunterladen (XRechnung/ZUGFeRD)'}
-                    </Button>
-                  )}
-                  
-                  {/* Send Email Button */}
-                  <Button
-                    variant="outline"
-                    className="w-full"
-                    onClick={() => setShowSendModal(true)}
-                  >
-                    <SendHorizontal className="h-4 w-4 mr-2" />
-                    Per E-Mail versenden
-                  </Button>
-                  
-                  {/* Cancel Invoice Button */}
-                  {canBeCancelled && (
-                    <Button
-                      variant="outline"
-                      className="w-full text-orange-600 hover:text-orange-700 hover:bg-orange-50 border-orange-200 hover:border-orange-300"
-                      onClick={handleCreateCancellation}
-                      disabled={isCancelling}
-                    >
-                      <Ban className="h-4 w-4 mr-2" />
-                      {isCancelling ? 'Erstelle Stornorechnung...' : 'Rechnung stornieren'}
-                    </Button>
+
+                  {betonung !== 'mahnung' && mahnblock}
+                  {betonung !== 'email' && hatDateien && versandKnopf}
+
+                  {/* Storno: selten gebraucht, folgenreich, nicht rückgängig zu
+                      machen — und deshalb kein Kasten im Gewicht eines
+                      Downloads. Leiser Textknopf, abgesetzt vom Stapel; der
+                      Bestätigungsdialog bleibt unverändert davor. */}
+                  {hatDateien && canBeCancelled && (
+                    <div className="flex justify-center pt-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-zinc-500 hover:bg-orange-50 hover:text-orange-700 dark:text-zinc-400"
+                        onClick={handleCreateCancellation}
+                        disabled={isCancelling}
+                      >
+                        {isCancelling ? 'Erstelle Stornorechnung...' : 'Rechnung stornieren'}
+                      </Button>
+                    </div>
                   )}
                 </div>
               )}

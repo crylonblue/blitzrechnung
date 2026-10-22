@@ -20,6 +20,11 @@ import { ladeMahnstatus, verwirfMahnung, type DunningStatus } from './dunning-ap
  * Der Knopf trägt den **Namen der Stufe**, nicht das Wort „Mahnen". Stufe 1
  * ist eine Zahlungserinnerung; sie „Mahnung" zu nennen beschreibt sie falsch
  * und lässt den ersten Klick schwerer wiegen, als er ist.
+ *
+ * Die Rahmung (Trennlinie, Abstand nach oben) liegt bewusst nicht hier,
+ * sondern beim Aktionsbereich der Schublade: Mahnstufe, Downloads, Versand
+ * und Storno stehen dort in **einem** Stapel, und eine eigene Trennlinie
+ * mitten darin würde ihn zerschneiden.
  */
 
 /** „21.10." — im Verlauf zählt der Tag, nicht das Jahr. */
@@ -38,6 +43,12 @@ interface DunningSectionProps {
   onChanged: () => void
   /** Die Rechnung ist bezahlt — die Schublade geht zu. */
   onPaid: () => void
+  /**
+   * Die Mahnstufe ist der wahrscheinliche nächste Schritt und steht im
+   * Aktionsbereich ganz oben — dann trägt der Knopf auch das Gewicht dafür.
+   * Sonst bleibt er eine Nebenaktion unter den Downloads.
+   */
+  betont?: boolean
 }
 
 export default function DunningSection({
@@ -46,6 +57,7 @@ export default function DunningSection({
   absender,
   onChanged,
   onPaid,
+  betont = false,
 }: DunningSectionProps) {
   const router = useRouter()
   const [status, setStatus] = useState<DunningStatus | null>(null)
@@ -98,6 +110,20 @@ export default function DunningSection({
   const zeigeKnopf = status.mahnbar && status.stufe !== null && status.istFaellig
 
   /**
+   * Zweifel am Zugang: `created` ist der einzige Status, in dem die Rechnung
+   * nachweislich noch nie draussen war — jeder Versand hebt sie auf `sent`
+   * (siehe nextStatusAfterSend in lib/invoice-service), `reminded` und `paid`
+   * stehen ohnehin weiter. `uneinbringlich` erreicht diese Zeile nicht, weil
+   * eine abgeschriebene Forderung serverseitig gar nicht mahnbar ist.
+   *
+   * Bewusst nur ein Hinweis, keine Sperre: `created` kann genauso heissen,
+   * dass die Rechnung per Post ging und niemand den Status gepflegt hat. Das
+   * kann die Software nicht wissen — und wer per Post verschickt, darf
+   * deswegen nicht ausgesperrt werden.
+   */
+  const zugangFraglich = invoice.status === 'created'
+
+  /**
    * Die Verlaufszeile, aus höchstens zwei Teilen: was zuletzt geschrieben
    * wurde und was als nächstes möglich ist — „Zahlungserinnerung am 21.10. ·
    * 1. Mahnung ab 04.11. möglich".
@@ -119,9 +145,27 @@ export default function DunningSection({
   }
 
   return (
-    <div className="mt-6 border-t border-zinc-200 pt-4 dark:border-zinc-700">
+    <div>
+      {/* Der Hinweis steht über dem Knopf, nicht darunter: Die Zeile darunter
+          gehört dem Mahnverlauf, und wer liest, soll den Zweifel vor dem Klick
+          sehen. Volltext samt Ausweg im title — wie bei „Zum Fertigstellen
+          fehlt noch: …" im Entwurfseditor. */}
+      {zeigeKnopf && zugangFraglich && (
+        <p
+          className="mb-2 text-xs text-zinc-500 dark:text-zinc-400"
+          title={'Verzug setzt nach § 286 Abs. 3 BGB den Zugang der Rechnung voraus. Haben Sie die Rechnung per Post verschickt, setzen Sie den Status oben auf „Versendet".'}
+        >
+          Diese Rechnung ist nicht als versendet markiert. Verzug setzt voraus,
+          dass sie beim Empfänger angekommen ist.
+        </p>
+      )}
+
       {zeigeKnopf && status.stufe && (
-        <Button variant="outline" className="w-full" onClick={() => setDialogOffen(true)}>
+        <Button
+          variant={betont ? 'default' : 'outline'}
+          className="w-full"
+          onClick={() => setDialogOffen(true)}
+        >
           <BellRing className="mr-2 h-4 w-4" />
           {status.stufe.name}
         </Button>
