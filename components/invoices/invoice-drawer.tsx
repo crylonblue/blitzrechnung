@@ -18,8 +18,7 @@ import {
   LoaderCircle,
 } from 'lucide-react'
 import SendInvoiceModal from './send-invoice-modal'
-import DunningSection from './dunning-section'
-import DocumentsSection from './documents-section'
+import DunningAxis from './dunning-axis'
 import { useMahnstatus } from './use-dunning-status'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -301,28 +300,21 @@ const handleDownloadPdf = async () => {
   const hatDateien = hatPdf || hatXml
 
   /**
-   * Was ist der wahrscheinliche nächste Schritt?
+   * Wird der Versand der **Rechnung** betont?
    *
-   * Fünf gleich schwere Knöpfe sagen nichts darüber. Genau eine Aktion wird
-   * deshalb betont — die, die der Zustand nahelegt:
+   * Nur bei `created` — dem einzigen Status, in dem sicher ist, dass sie noch
+   * nie draussen war (siehe `nextStatusAfterSend` in `lib/invoice-service`).
+   * Dann ist der Versand der nächste Schritt, auch wenn sie bereits überfällig
+   * ist.
    *
-   * - `created`: die Rechnung war noch nie draussen (einziger Status, in dem
-   *   das sicher ist — siehe nextStatusAfterSend in lib/invoice-service).
-   *   Nächster Schritt ist der Versand, auch wenn sie schon überfällig ist.
-   * - `sent`/`reminded` und überfällig: die Rechnung ist zugestellt und nicht
-   *   bezahlt — dann ist die Mahnstufe dran.
-   * - sonst (bezahlt, storniert, abgeschrieben, oder versendet und noch nicht
-   *   fällig): nichts wird betont. Es gibt keinen drängenden nächsten Schritt,
-   *   und einen zu behaupten wäre schlechter als zu schweigen. Oben stehen
-   *   dann die Downloads.
+   * Der zweite Fall von früher ist entfallen: Bei einer zugestellten,
+   * überfälligen Rechnung wurde hier das Mahnen betont. Das entscheidet jetzt
+   * die Achse (`dunning-axis.tsx`), und sie kann es besser — sie kennt die
+   * Leiter der Firma und weiss, welche Stufe dran ist. Zwei Stellen, die
+   * dieselbe Betonung aus verschiedenen Quellen ableiten, laufen irgendwann
+   * auseinander.
    */
-  const betonung: 'email' | 'mahnung' | null = !invoice
-    ? null
-    : invoice.status === 'created'
-      ? 'email'
-      : (invoice.status === 'sent' || invoice.status === 'reminded') && isOverdue(invoice)
-        ? 'mahnung'
-        : null
+  const betontDenVersand = invoice?.status === 'created'
 
   /**
    * Darf diese Rechnung überhaupt gemahnt werden?
@@ -330,7 +322,7 @@ const handleDownloadPdf = async () => {
    * Früher hing der Mahnbereich an `isOverdue` — er erschien also erst, wenn
    * die Rechnung überfällig war. Eine Erinnerung **vor** Fälligkeit ist aber
    * zulässig und nützlich (sie stellt nur keinen Verzug fest, siehe den
-   * vorbereiteten Text in `dunning-dialog.tsx`), und sie zu verstecken hiess,
+   * vorbereiteten Text in `dunning-drawer.tsx`), und sie zu verstecken hiess,
    * sie unmöglich zu machen.
    *
    * Die Bedingung wird deshalb aus `lib/dunning-claim.ts` abgeleitet statt als
@@ -360,28 +352,10 @@ const handleDownloadPdf = async () => {
     router.refresh()
   }
 
-  // Mahnwesen — bewusst nicht an vorhandene PDF/XML geknüpft: Eine offene
-  // Rechnung ohne erzeugte Datei muss sich trotzdem mahnen lassen.
-  const mahnblock =
-    invoice && istMahnbar ? (
-      <DunningSection
-        invoice={invoice}
-        empfaenger={buyerName}
-        absender={companyName || 'Ihr Unternehmen'}
-        status={mahnstatus}
-        betont={betonung === 'mahnung'}
-        onChanged={nachMahnaenderung}
-        onPaid={() => {
-          loadInvoice(invoice.id)
-          closeDrawer()
-        }}
-      />
-    ) : null
-
   /** Der Versandknopf, einmal betont und einmal gewöhnlich. */
   const versandKnopf = (
     <Button
-      variant={betonung === 'email' ? 'default' : 'outline'}
+      variant={betontDenVersand ? 'default' : 'outline'}
       className="w-full"
       onClick={() => setShowSendModal(true)}
     >
@@ -561,12 +535,11 @@ const handleDownloadPdf = async () => {
                 </p>
               </div>
 
-              {/* Was es zu dieser Rechnung gibt: die Rechnung selbst mit ihren
-                  Dateien und jede erzeugte Mahnung mit Datum, Stufe, Betrag
-                  und Zustand. Steht **vor** dem Aktionsbereich: erst was ist,
-                  dann was man tut — und der Ausblick auf die nächste Stufe
-                  endet direkt über dem Knopf, der sie auslöst. */}
-              <DocumentsSection
+              {/* Der Mahnweg dieser Rechnung als eine Spur: was war, was dran
+                  ist, was kommt. Steht **vor** dem Aktionsbereich, weil der
+                  fällige Schritt seinen Knopf selbst trägt — der Aktionsstapel
+                  darunter betrifft nur noch die Rechnung. */}
+              <DunningAxis
                 invoice={invoice}
                 status={mahnstatus}
                 hatPdf={hatPdf}
@@ -576,24 +549,27 @@ const handleDownloadPdf = async () => {
                 pdfLaedt={isDownloadingPdf}
                 xmlLaedt={isDownloadingXml}
                 onGeaendert={nachMahnaenderung}
+                empfaenger={buyerName}
+                absender={companyName || 'Ihr Unternehmen'}
+                istMahnbar={istMahnbar}
+                onPaid={() => {
+                  loadInvoice(invoice.id)
+                  closeDrawer()
+                }}
               />
 
               {/* Aktionsbereich — ein Stapel, eine Trennlinie.
-                  Reihenfolge: betonte Aktion, die jeweils andere Hauptaktion,
-                  zuletzt der leise Storno. Die Downloads stehen hier nicht
-                  mehr: Sie gehören zur Rechnung als Dokument und damit in die
-                  Liste darüber, nicht zwischen Versand und Storno.
-                  `empty:hidden` fängt den Randfall ab, dass die Rechnung zwar
-                  mahnbar ist, das Mahnwesen aber nichts anzubieten hat und
-                  auch keine Datei existiert — dann bliebe sonst eine
-                  Trennlinie ohne Inhalt stehen. */}
-              {(istMahnbar || hatDateien) && (
+                  Hier steht jetzt nur noch, was die **Rechnung** betrifft: sie
+                  versenden, sie stornieren. Das Mahnen ist in die
+                  Dokumentenliste darüber gewandert, wo auch die Mahnungen
+                  stehen — ein Knopf namens „Dokument hinzufügen" gehört unter
+                  die Dokumente und nicht zwischen Versand und Storno.
+                  `empty:hidden` fängt den Randfall ab, dass es weder Datei
+                  noch Storno gibt — dann bliebe sonst eine Trennlinie ohne
+                  Inhalt stehen. */}
+              {hatDateien && (
                 <div className="mt-6 space-y-2 border-t border-zinc-200 pt-4 empty:hidden dark:border-zinc-700">
-                  {betonung === 'mahnung' && mahnblock}
-                  {betonung === 'email' && hatDateien && versandKnopf}
-
-                  {betonung !== 'mahnung' && mahnblock}
-                  {betonung !== 'email' && hatDateien && versandKnopf}
+                  {versandKnopf}
 
                   {/* Storno: selten gebraucht, folgenreich, nicht rückgängig zu
                       machen — und deshalb kein Kasten im Gewicht eines
