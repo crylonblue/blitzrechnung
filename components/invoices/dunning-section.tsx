@@ -1,10 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { BellRing } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { Invoice } from '@/types'
-import DunningDialog from './dunning-dialog'
+import DunningDrawer from './dunning-drawer'
 import type { DunningStatus } from './dunning-api'
 
 /**
@@ -27,7 +27,7 @@ import type { DunningStatus } from './dunning-api'
  * Verzug, und es gibt keinen Zinsanspruch. Dass sie trotzdem angeboten wird,
  * kostet nichts — betont wird sie nicht (das macht die Schublade weiterhin nur
  * bei einer überfälligen Rechnung), und der vorbereitete Text in
- * `dunning-dialog.tsx` behauptet in diesem Fall nichts Fälliges.
+ * `dunning-drawer.tsx` behauptet in diesem Fall nichts Fälliges.
  *
  * Der Knopf trägt den **Namen der Stufe**, nicht das Wort „Mahnen". Stufe 1
  * ist eine Zahlungserinnerung; sie „Mahnung" zu nennen beschreibt sie falsch
@@ -72,7 +72,32 @@ export default function DunningSection({
   onPaid,
   betont = false,
 }: DunningSectionProps) {
-  const [dialogOffen, setDialogOffen] = useState(false)
+  const [schubladeOffen, setSchubladeOffen] = useState(false)
+
+  /**
+   * Einmal eingehängt, bleibt eingehängt.
+   *
+   * Vor dem ersten Klick steht die Schublade nicht im Baum — sie rechnet beim
+   * Öffnen auf dem Stand, den die Rechnungsschublade schon geholt hat, und
+   * braucht vorher nichts zu tun. Beim Schliessen wird sie aber **nicht**
+   * wieder ausgehängt, und das ist der Unterschied zum Dialog von vorher:
+   * Wer das Bauteil im selben Augenblick entfernt, in dem es zugeht, nimmt
+   * ihm die Bewegung nach rechts hinaus — das Element ist fort, bevor sie
+   * beginnt, und die Schublade verschwindet schlagartig statt zu gleiten.
+   * Beim Dialog fiel das kaum auf (er blendete aus), bei einer Schublade ist
+   * die Bewegung das, woran man sie erkennt.
+   *
+   * Dass sie eingehängt bleibt, kostet nichts: Alle ihre Effekte steigen bei
+   * `!isOpen` sofort aus, und ihr Zustand setzt sich beim Öffnen ohnehin
+   * zurück (siehe den Effekt auf `isOpen` in `dunning-drawer.tsx`).
+   */
+  const [jeGeoeffnet, setJeGeoeffnet] = useState(false)
+
+  /**
+   * Das Ziel für den Fokus nach dem Schliessen. Radix kennt den Knopf nicht
+   * von selbst — Begründung am `onCloseAutoFocus` in `dunning-drawer.tsx`.
+   */
+  const knopfRef = useRef<HTMLButtonElement>(null)
 
   /**
    * Nichts geladen, nicht mahnbar oder keine Stufe mehr übrig: null Pixel.
@@ -86,7 +111,7 @@ export default function DunningSection({
    * freundlichen Erinnerung vor Fälligkeit —, konnte es serverseitig immer,
    * nur kam er hier nicht hin.
    *
-   * Die Entscheidung bleibt trotzdem sichtbar: Der Dialog klappt „Anpassen"
+   * Die Entscheidung bleibt trotzdem sichtbar: Die Schublade klappt „Anpassen"
    * von selbst auf, wenn die Stufe noch nicht dran ist, und der Serverhinweis
    * sagt, dass vor Verzug weder Zinsen noch Pauschale anfallen.
    */
@@ -122,26 +147,31 @@ export default function DunningSection({
       )}
 
       <Button
+        ref={knopfRef}
         variant={betont ? 'default' : 'outline'}
         className="w-full"
-        onClick={() => setDialogOffen(true)}
+        onClick={() => {
+          setJeGeoeffnet(true)
+          setSchubladeOffen(true)
+        }}
       >
         <BellRing className="mr-2 h-4 w-4" />
         {status.stufe.name}
       </Button>
 
-      {/* Erst bei Bedarf einhängen: Der Dialog rechnet beim Öffnen auf dem
-          Stand, den die Schublade schon geholt hat. */}
-      {dialogOffen && (
-        <DunningDialog
+      {/* Erst bei Bedarf einhängen, dann aber eingehängt lassen — warum,
+          steht bei `jeGeoeffnet`. */}
+      {jeGeoeffnet && (
+        <DunningDrawer
           invoice={invoice}
           empfaenger={empfaenger}
           absender={absender}
           basis={status}
-          isOpen={dialogOffen}
-          onClose={() => setDialogOffen(false)}
+          isOpen={schubladeOffen}
+          onClose={() => setSchubladeOffen(false)}
           onCreated={onChanged}
           onPaid={onPaid}
+          oeffnerRef={knopfRef}
         />
       )}
     </div>

@@ -11,6 +11,10 @@ import { cn } from "@/lib/utils"
  * Zusammenspiel verstehen lassen:
  *
  *   50  Schublade (`sheet.tsx`): Abdunklung und Inhalt.
+ *   55  Mahn-Schublade (`components/invoices/dunning-drawer.tsx`): über der
+ *       Rechnungsschublade, aus der sie geöffnet wird — unter Dialog und Menüs.
+ *       Sie sitzt direkt auf dem Radix-Grundelement, weil `sheet.tsx` seine
+ *       Abdunklung selbst einhängt und sie von aussen nicht erreichbar ist.
  *   60  Dialog: Abdunklung und Inhalt — **über** der Schublade.
  *   70  Popover und Auswahlmenü (`popover.tsx`, `select.tsx`) — über beidem.
  *
@@ -26,8 +30,10 @@ import { cn } from "@/lib/utils"
  * ist unbedienbar. Sie liegen damit auch über der Schublade — dort werden sie
  * ebenso benutzt, und die Reihenfolge stimmt in diesem Fall genauso.
  *
- * Die drei Ebenen reichen aus, weil Dialoge sich nicht stapeln und ein Popover
- * nichts trägt, worauf wieder ein Dialog aufginge.
+ * Mehr Ebenen braucht es nicht: Dialoge stapeln sich nicht, und ein Popover
+ * trägt nichts, worauf wieder ein Dialog aufginge. Die Lücke zwischen 55 und 60
+ * hält dem Fall den Platz frei, dass aus der Mahn-Schublade doch einmal ein
+ * Dialog aufgeht — heute tut es keiner.
  */
 
 function Dialog({

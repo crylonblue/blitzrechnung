@@ -330,7 +330,7 @@ const handleDownloadPdf = async () => {
    * Früher hing der Mahnbereich an `isOverdue` — er erschien also erst, wenn
    * die Rechnung überfällig war. Eine Erinnerung **vor** Fälligkeit ist aber
    * zulässig und nützlich (sie stellt nur keinen Verzug fest, siehe den
-   * vorbereiteten Text in `dunning-dialog.tsx`), und sie zu verstecken hiess,
+   * vorbereiteten Text in `dunning-drawer.tsx`), und sie zu verstecken hiess,
    * sie unmöglich zu machen.
    *
    * Die Bedingung wird deshalb aus `lib/dunning-claim.ts` abgeleitet statt als
