@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { ChevronRight, CircleCheck, LoaderCircle } from 'lucide-react'
+import * as SchubladePrimitive from '@radix-ui/react-dialog'
+import { ChevronRight, CircleCheck, LoaderCircle, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -10,14 +11,6 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { DatePicker } from '@/components/ui/date-picker'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
 import {
   Select,
   SelectContent,
@@ -39,7 +32,14 @@ import {
 } from './dunning-api'
 
 /**
- * Der Prüfbildschirm.
+ * Der Prüfbildschirm — eine Schublade, kein Dialog.
+ *
+ * Diese Anwendung benutzt Schubladen überall dort, wo *gearbeitet* wird:
+ * Entwurfseditor, Rechnungsansicht, Kontaktbearbeitung. Ein Mahnschreiben zu
+ * lesen, zu prüfen und zu ändern ist genau das. Als Dialog musste sich der
+ * Bildschirm künstlich auf `min(42rem, 88svh)` deckeln und das Textfeld auf
+ * 22 rem, damit die Zahlen nicht aus dem Bild gedrückt wurden — eine
+ * Schublade hat die volle Höhe von Haus aus, und der Brief darf atmen.
  *
  * Kein Formular: Was aufgeht, ist das fertige Ergebnis. Jede Frage, die hier
  * gestellt würde, kostet beim ersten Mahnen genau die Entschlossenheit, die
@@ -89,7 +89,7 @@ function zinsErlaeuterung(zinsDetails: InterestResult | null): string | null {
  * Der Tag, an dem die Rechnung nach ihrem eigenen Text fällig **wird** — oder
  * `null`, wenn dieser Tag schon vorbei ist oder gar keiner hinterlegt ist.
  *
- * Das ist die Unterscheidung, an der dieser Dialog zwei grundverschiedene
+ * Das ist die Unterscheidung, an der diese Schublade zwei grundverschiedene
  * Schreiben auseinanderhält: die Mahnung nach Fälligkeit und die freundliche
  * Erinnerung davor.
  *
@@ -279,7 +279,51 @@ function startetOffen(stand: DunningStatus): boolean {
   return stand.stale
 }
 
-interface DunningDialogProps {
+/**
+ * Die Ebene dieser Schublade — und warum sie in jede Richtung stimmt.
+ *
+ * Die Staffelung der Anwendung steht im Kopf von `components/ui/dialog.tsx`:
+ *
+ *   50  Schublade (`sheet.tsx`): Abdunklung und Inhalt.
+ *   60  Dialog (`dialog.tsx`): Abdunklung und Inhalt.
+ *   70  Popover und Auswahlmenü (`popover.tsx`, `select.tsx`).
+ *
+ * Diese Schublade geht **aus der Rechnungsschublade heraus** auf und liegt
+ * deshalb auf 55:
+ *
+ *  * **über 50**, sonst entschiede bei Gleichstand die Reihenfolge im DOM —
+ *    und die fiel schon einmal zugunsten der Rechnungsschublade aus: Ihre
+ *    Knöpfe standen neben der Abdunklung in voller Helligkeit und sahen aus,
+ *    als gehörten sie zum Mahnschreiben. Die Abdunklung muss mit hoch, sonst
+ *    läge die Schublade zwar oben, die Rechnung darunter aber unverdunkelt.
+ *  * **unter 60**, weil aus dieser Schublade heraus noch ein Dialog aufgehen
+ *    kann (heute keiner — eine Rückfrage vor dem Versand wäre der nächste
+ *    Kandidat), und ein Dialog ist modal: Er muss über dem liegen, was ihn
+ *    geöffnet hat.
+ *  * **unter 70**, weil in dieser Schublade das Datumsfeld („Verzug seit")
+ *    und die Stufenauswahl benutzt werden. Ein Menü, das hinter der Fläche
+ *    verschwindet, aus der es kommt, ist unbedienbar.
+ *
+ * Warum dafür nicht `components/ui/sheet.tsx` benutzt wird: `SheetContent`
+ * reicht zwar `className` an seinen Inhalt durch, hängt die Abdunklung aber
+ * selbst und ohne Durchgriff ein (`<SheetOverlay />`, fest auf `z-50`).
+ * Von aussen ist die Abdunklung damit nicht erreichbar — und ohne sie wäre
+ * das Höherlegen halb. Die Vorgabe in `sheet.tsx` zu verschieben, hiesse
+ * sechs andere Schubladen mitzuverschieben (`draft-drawer`, `product-drawer`,
+ * `issuer-drawer`, `contact-drawer`, `contact-edit-drawer`, `invoice-drawer`),
+ * die alle auf 50 richtig liegen. Also wird hier dasselbe Grundelement
+ * benutzt, auf dem `sheet.tsx` und `dialog.tsx` ohnehin beide aufsitzen
+ * (`@radix-ui/react-dialog`) — keine neue Abhängigkeit, nur eine Fläche mit
+ * eigener Ebene. Aussehen und Bewegung sind aus `sheet.tsx` übernommen, damit
+ * sie sich nicht wie ein Fremdkörper öffnet.
+ *
+ * Dass es dasselbe Radix-Modul ist, trägt auch das Verschachteln: Escape und
+ * der Klick auf die Abdunklung treffen die oberste Fläche des gemeinsamen
+ * Stapels, also diese — die Rechnungsschublade bleibt offen, und der Fokus
+ * kehrt beim Schliessen auf den Knopf zurück, der sie geöffnet hat.
+ */
+
+interface DunningDrawerProps {
   invoice: Invoice
   /** Name des Empfängers, so wie ihn die Schublade schon aufgelöst hat. */
   empfaenger: string
@@ -293,9 +337,15 @@ interface DunningDialogProps {
   onCreated: () => void
   /** Rechnung ist bezahlt — die Schublade schliesst sich. */
   onPaid: () => void
+  /**
+   * Der Knopf, der diese Schublade geöffnet hat — dorthin kehrt der Fokus
+   * beim Schliessen zurück. Warum das von Hand geschehen muss, steht am
+   * `onCloseAutoFocus` weiter unten.
+   */
+  oeffnerRef?: React.RefObject<HTMLButtonElement | null>
 }
 
-export default function DunningDialog({
+export default function DunningDrawer({
   invoice,
   empfaenger,
   absender,
@@ -304,7 +354,8 @@ export default function DunningDialog({
   onClose,
   onCreated,
   onPaid,
-}: DunningDialogProps) {
+  oeffnerRef,
+}: DunningDrawerProps) {
   const router = useRouter()
   const supabase = createClient()
 
@@ -338,8 +389,8 @@ export default function DunningDialog({
    */
   const [kundentypGefragt, setKundentypGefragt] = useState(false)
 
-  // Beim Öffnen auf den Stand zurück, den die Schublade geholt hat. Ein Dialog,
-  // der die Einstellungen des letzten Males noch trägt, mahnt beim zweiten Mal
+  // Beim Öffnen auf den Stand zurück, den die Rechnungsschublade geholt hat. Eine
+  // Fläche, die die Einstellungen des letzten Males noch trägt, mahnt beim zweiten Mal
   // anders als beim ersten, ohne dass jemand etwas geändert hätte.
   useEffect(() => {
     if (!isOpen) return
@@ -404,20 +455,20 @@ export default function DunningDialog({
   /**
    * Das Textfeld misst sich an seinem Inhalt.
    *
-   * Die vorbereiteten Schreiben sind in der Dialogbreite je nach Stufe rund
-   * 14 bis 24 Zeilen lang: am kürzesten die Zahlungserinnerung ohne
-   * Aufstellung, am längsten die letzte Mahnung mit allen Posten und einem
-   * langen Firmennamen. Bei `rows={10}` endete der Text deshalb ohne jedes
-   * Zeichen dafür, dass es weitergeht. Eine feste Höhe für den längsten Fall
-   * stünde im Regelfall halb leer im Weg — also wächst das Feld mit und hört
-   * an einer Grenze auf (`max-h` an der Klasse: 22 rem, rund 15 Zeilen).
+   * Die vorbereiteten Schreiben sind in dieser Breite je nach Stufe rund 14
+   * bis 24 Zeilen lang: am kürzesten die Zahlungserinnerung ohne Aufstellung,
+   * am längsten die letzte Mahnung mit allen Posten und einem langen
+   * Firmennamen. Bei einer festen Zeilenzahl endete der Text deshalb ohne
+   * jedes Zeichen dafür, dass es weitergeht; eine feste Höhe für den längsten
+   * Fall stünde im Regelfall halb leer im Weg. Also wächst das Feld mit.
    *
-   * Warum diese Grenze und nicht mehr: Der Dialog ist auf 42 rem gedeckelt;
-   * Kopf, Fusszeile und Innenabstand nehmen davon rund 12 rem. Ein Feld, das
-   * darüber hinauswüchse, verdrängte die Zahlen darunter aus dem Bild und
-   * machte den Dialog zu einem Textfeld mit Rahmen. Ab der Grenze rollt das
-   * Feld in sich — was in aller Regel nur noch den selbst getippten Langbrief
-   * trifft, nicht mehr den vorbereiteten Text.
+   * **Ohne obere Grenze**, und das ist der Gewinn der Schublade. Im Dialog
+   * war das Feld auf 22 rem gedeckelt: Kopf, Fusszeile und Innenabstand
+   * nahmen von den 42 rem Dialoghöhe rund 12 rem, ein höheres Feld hätte die
+   * Zahlen darunter aus dem Bild gedrängt. Hier rollt stattdessen die Mitte
+   * der Schublade (siehe den Aufbau unten), und der Brief steht am Stück da —
+   * ein Feld, das in sich rollt, während daneben die Fläche auch rollt, ist
+   * beim Korrekturlesen das Unangenehmste von beidem.
    */
   useEffect(() => {
     const feld = textfeld.current
@@ -493,8 +544,8 @@ export default function DunningDialog({
   /**
    * Die Zahlen als Streifen, nicht als Tabelle.
    *
-   * Die Hauptsache dieses Dialogs ist der Brief — er ist das, was beim Kunden
-   * ankommt und was geprüft werden will. Die Aufstellung stand vorher als
+   * Die Hauptsache dieser Schublade ist der Brief — er ist das, was beim Kunden
+   * ankommt und was geprüft werden will. Die Aufstellung stand davor als
    * mehrzeilige Tabelle darüber und nahm im Regelfall (Zahlungserinnerung,
    * keine Zinsen, keine Pauschale) den halben oberen Rand für genau zwei
    * Zahlen ein. Sie steht deshalb jetzt **unter** dem Brief, und jeder Posten
@@ -614,322 +665,385 @@ export default function DunningDialog({
     : `Rechnung ${invoice.invoice_number || 'ohne Nummer'}`
 
   return (
-    <Dialog open={isOpen} onOpenChange={(offen) => !offen && onClose()}>
-      {/* Drei Zeilen: Kopf und Fuss stehen, nur die Mitte rollt — „Senden" ist
-          damit nie weggescrollt, und der Titel sagt jederzeit, worum es geht.
+    <SchubladePrimitive.Root open={isOpen} onOpenChange={(offen) => !offen && onClose()}>
+      <SchubladePrimitive.Portal>
+        {/* Die Abdunklung muss mit auf 55 — sonst läge die Schublade zwar über
+            der Rechnung, die Rechnung darunter aber unverdunkelt und sähe aus,
+            als könnte man sie noch bedienen. Begründung der Ebene: oben. */}
+        <SchubladePrimitive.Overlay className="data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-55 bg-black/50" />
 
-          Die Höhe hat zwei Grenzen, und die kleinere gewinnt. `88svh` hält den
-          Dialog auf kleinen und auf durch Browserleisten verkürzten Schirmen
-          im Bild (`svh` statt `vh`: die mobile Adressleiste zählt mit). Die
-          feste Grenze von 42 rem ist die eigentliche Neuerung: Ein Dialog, der
-          auf einem hohen Monitor von Kante zu Kante läuft, ist kein Dialog
-          mehr, sondern eine Seite — er braucht einen sichtbaren Rand, damit
-          erkennbar bleibt, dass dahinter etwas liegt, zu dem man zurückkehrt. */}
-      <DialogContent className="sm:max-w-xl max-h-[min(42rem,88svh)] grid-rows-[auto_minmax(0,1fr)_auto]">
-        <DialogHeader>
-          <DialogTitle>{titel}</DialogTitle>
-          <DialogDescription>An {empfaenger}</DialogDescription>
-        </DialogHeader>
+        {/* Breite: 42 rem — die Breite, die diese Anwendung ihren
+            Arbeitsflächen gibt (Entwurf, Produkt, Absender, Kontakt). Die
+            Rechnungsschublade darunter ist mit 28 rem eine Leseansicht; hier
+            wird geschrieben, und der Brief ist die Hauptsache. Dass die obere
+            Fläche breiter ist, ist zugleich das Zeichen, dass es zwei sind:
+            Sie tritt links über die Kante der Rechnung hinaus, statt sie nur
+            Pixel für Pixel zu ersetzen.
 
-        <div className="overflow-y-auto pr-1">
-          {/* Die einzige Frage — und sie steht ganz oben, weil ihre Antwort
-              die Beträge im Brief darunter verändert. Eine Frage unterhalb
-              dessen, was von ihr abhängt, wird erst gelesen, wenn man das
-              Ergebnis schon geglaubt hat. Schmal gehalten: eine Zeile statt
-              eines Kastens, denn sie erscheint ohnehin nur, wenn Zinsen oder
-              Pauschale im Spiel sind. */}
-          {kundentypGefragt && (
-            <fieldset className="mb-4 rounded-md border border-zinc-200 px-3 py-2 dark:border-zinc-700">
-              {/* Sichtbar als Text, für Hilfsmittel als `legend` — sonst
-                  spräche der Screenreader die Frage bei jedem Feld doppelt. */}
-              <legend className="sr-only">Wer schuldet den Betrag?</legend>
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                <span aria-hidden="true" className="text-sm text-zinc-600 dark:text-zinc-400">
-                  Wer schuldet den Betrag?
-                </span>
-                {(
-                  [
-                    { wert: 'business', label: 'Unternehmen' },
-                    { wert: 'consumer', label: 'Privatperson' },
-                  ] as { wert: DunningCustomerType; label: string }[]
-                ).map(({ wert, label }) => (
-                  <label key={wert} className="flex items-center gap-2 text-sm">
-                    <input
-                      type="radio"
-                      name="dunning-customer-type"
-                      value={wert}
-                      checked={anpassung.customerType === wert}
-                      className="size-4 accent-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:accent-zinc-100"
-                      onChange={() =>
-                        setAnpassung((prev) => ({ ...prev, customerType: wert }))
-                      }
-                    />
-                    {label}
-                  </label>
-                ))}
-              </div>
-              <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                Zinssatz und Pauschale hängen davon ab. Ohne Angabe rechnen wir mit dem
-                niedrigeren Satz.
-              </p>
-            </fieldset>
-          )}
+            Drei Zeilen wie im Entwurfseditor (`components/drafts/draft-editor.tsx`):
+            fest sitzender Kopf, rollende Mitte, fest sitzende Aktionsleiste.
+            „Als Entwurf speichern" ist damit nie weggescrollt, und der Titel
+            sagt jederzeit, worum es geht. `min-h-0` an der Mitte, weil ein
+            Flex-Kind sonst nicht unter seine Inhaltshöhe schrumpft und statt
+            der Mitte die ganze Schublade rollte. */}
+        <SchubladePrimitive.Content
+          className="bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right fixed inset-y-0 right-0 z-55 flex h-full w-full max-w-[42rem] flex-col border-l shadow-lg transition ease-out data-[state=closed]:duration-150 data-[state=open]:duration-200"
+          /**
+           * Der Fokus zurück auf den Knopf, der die Schublade geöffnet hat.
+           *
+           * Das muss hier von Hand stehen: Radix' modale Fläche gibt den Fokus
+           * nicht an das Element zurück, das vor dem Öffnen den Fokus hatte,
+           * sondern an ihren eigenen `Trigger` — und einen solchen gibt es
+           * hier nicht, weil der Mahnknopf in `dunning-section.tsx` den Zustand
+           * selbst umlegt. Ohne diese Zeile landete der Fokus nach dem
+           * Schliessen auf `<body>`: Wer mit der Tastatur arbeitet, stünde
+           * wieder am Anfang der Seite statt in der Rechnungsschublade, aus
+           * der er gekommen ist. (Das war schon am Dialog so und ist hier
+           * mitrepariert.)
+           *
+           * `document.contains` fängt den Fall ab, in dem der Knopf das
+           * Schliessen nicht überlebt — „Rechnung ist bereits bezahlt" nimmt
+           * die ganze Rechnungsschublade mit.
+           */
+          onCloseAutoFocus={(e) => {
+            const knopf = oeffnerRef?.current
+            if (!knopf || !document.contains(knopf)) return
+            e.preventDefault()
+            knopf.focus()
+          }}
+        >
+          <div className="flex shrink-0 items-start justify-between gap-4 border-b px-6 py-4">
+            <div className="min-w-0">
+              <SchubladePrimitive.Title className="text-lg font-semibold leading-tight">
+                {titel}
+              </SchubladePrimitive.Title>
+              <SchubladePrimitive.Description className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                An {empfaenger}
+              </SchubladePrimitive.Description>
+            </div>
+            {/* Im Kopf statt freischwebend in der Ecke: Der Titel kann zwei
+                Zeilen lang werden (Stufenname plus Rechnungsnummer), und ein
+                absolut gesetzter Knopf läge dann darauf. */}
+            <SchubladePrimitive.Close asChild>
+              <Button variant="outline" size="icon" className="shrink-0">
+                <X className="h-4 w-4" aria-hidden="true" />
+                <span className="sr-only">Schliessen</span>
+              </Button>
+            </SchubladePrimitive.Close>
+          </div>
 
-          {forderung ? (
-            <>
-              {/* Der Brief zuerst — er ist das, was beim Kunden ankommt, und
-                  damit das Einzige, was wirklich geprüft werden muss. Die
-                  Zahlen standen vorher darüber und schoben ihn aus dem Bild;
-                  jetzt tragen sie ihn von unten. */}
-              {/* An wen, steht schon im Kopf des Dialogs — hier genügt, was
-                  das Feld ist. */}
-              <Label htmlFor="dunning-text" className="text-xs text-zinc-500 dark:text-zinc-400">
-                Schreiben
-              </Label>
-              {/* `rows` ist nur der Stand vor der ersten Messung — gleich hoch
-                  wie das kürzeste vorbereitete Schreiben, damit beim Öffnen
-                  nichts springt. `resize-none`, weil ein von Hand gezogener
-                  Griff beim nächsten Tastendruck wieder zurückschnappen würde;
-                  die Höhenmessung ist der bessere Griff. */}
-              <Textarea
-                id="dunning-text"
-                ref={textfeld}
-                rows={14}
-                value={text}
-                onChange={(e) => {
-                  setText(e.target.value)
-                  setTextVomNutzer(true)
-                }}
-                className="mt-1 max-h-[22rem] min-h-32 resize-none text-sm leading-relaxed"
-              />
-
-              {/* Die Zahlen: ein Streifen, kein Block. Was 0 ist, steht nicht
-                  da — eine Zeile „Pauschale 0,00 €" erklärt nichts und sieht
-                  aus wie ein Fehler. Im Regelfall bleiben genau zwei Angaben,
-                  und die passen nebeneinander. */}
-              <dl
-                className={`mt-3 flex flex-wrap gap-x-6 gap-y-2 rounded-md bg-zinc-50 px-3 py-2 transition-opacity dark:bg-zinc-800/60 ${
-                  istAmRechnen ? 'opacity-50' : ''
-                }`}
-                aria-busy={istAmRechnen}
-              >
-                {kennzahlen.map(({ label, wert, stark }) => (
-                  <div key={label}>
-                    <dt className="text-xs text-zinc-500 dark:text-zinc-400">{label}</dt>
-                    {/* „Gesamtforderung" ist die Aussage, die übrigen Posten
-                        sind nur ihre Herkunft — deshalb trägt sie allein das
-                        Gewicht statt eines Trennstrichs, der beim Umbrechen
-                        ohnehin an der falschen Stelle landete. */}
-                    <dd className={`text-sm tabular-nums ${stark ? 'font-semibold' : ''}`}>
-                      {wert}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-
-              {/* Die Klammer zu den Zinsen steht als Fussnote und nicht mehr
-                  unter ihrer Beschriftung: Dort machte sie die Spalte so
-                  breit, dass der Streifen umbrach. */}
-              {forderung.zinsen > 0 && zinsText && (
-                <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
-                  Verzugszinsen: {zinsText}
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+            {/* Die einzige Frage — und sie steht ganz oben, weil ihre Antwort
+                die Beträge im Brief darunter verändert. Eine Frage unterhalb
+                dessen, was von ihr abhängt, wird erst gelesen, wenn man das
+                Ergebnis schon geglaubt hat. Schmal gehalten: eine Zeile statt
+                eines Kastens, denn sie erscheint ohnehin nur, wenn Zinsen oder
+                Pauschale im Spiel sind. */}
+            {kundentypGefragt && (
+              <fieldset className="mb-4 rounded-md border border-zinc-200 px-3 py-2 dark:border-zinc-700">
+                {/* Sichtbar als Text, für Hilfsmittel als `legend` — sonst
+                    spräche der Screenreader die Frage bei jedem Feld doppelt. */}
+                <legend className="sr-only">Wer schuldet den Betrag?</legend>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                  <span aria-hidden="true" className="text-sm text-zinc-600 dark:text-zinc-400">
+                    Wer schuldet den Betrag?
+                  </span>
+                  {(
+                    [
+                      { wert: 'business', label: 'Unternehmen' },
+                      { wert: 'consumer', label: 'Privatperson' },
+                    ] as { wert: DunningCustomerType; label: string }[]
+                  ).map(({ wert, label }) => (
+                    <label key={wert} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="radio"
+                        name="dunning-customer-type"
+                        value={wert}
+                        checked={anpassung.customerType === wert}
+                        className="size-4 accent-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:accent-zinc-100"
+                        onChange={() =>
+                          setAnpassung((prev) => ({ ...prev, customerType: wert }))
+                        }
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+                <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                  Zinssatz und Pauschale hängen davon ab. Ohne Angabe rechnen wir mit dem
+                  niedrigeren Satz.
                 </p>
-              )}
-              {nochNichtFaellig && (
-                <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
-                  Eine Erinnerung vor Fälligkeit verkürzt die Frist nicht — es bleibt bei
-                  dem Datum, das auf der Rechnung steht.
-                </p>
-              )}
-            </>
-          ) : (
-            <p className="text-sm text-zinc-600 dark:text-zinc-400">
-              {status.grund || 'Für diese Rechnung lässt sich derzeit keine Forderung beziffern.'}
-            </p>
-          )}
+              </fieldset>
+            )}
 
-          {status.hinweise.length > 0 && (
-            <ul className="mt-4 max-h-28 space-y-1 overflow-y-auto rounded-md bg-zinc-100 p-3 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
-              {status.hinweise.map((hinweis, index) => (
-                <li key={index}>{hinweis}</li>
-              ))}
-            </ul>
-          )}
+            {forderung ? (
+              <>
+                {/* Der Brief zuerst — er ist das, was beim Kunden ankommt, und
+                    damit das Einzige, was wirklich geprüft werden muss. Die
+                    Zahlen standen vorher darüber und schoben ihn aus dem Bild;
+                    jetzt tragen sie ihn von unten. */}
+                {/* An wen, steht schon im Kopf der Schublade — hier genügt, was
+                    das Feld ist. */}
+                <Label htmlFor="dunning-text" className="text-xs text-zinc-500 dark:text-zinc-400">
+                  Schreiben
+                </Label>
+                {/* `rows` ist nur der Stand vor der ersten Messung — gleich hoch
+                    wie das kürzeste vorbereitete Schreiben, damit beim Öffnen
+                    nichts springt. `resize-none`, weil ein von Hand gezogener
+                    Griff beim nächsten Tastendruck wieder zurückschnappen würde;
+                    die Höhenmessung ist der bessere Griff. */}
+                <Textarea
+                  id="dunning-text"
+                  ref={textfeld}
+                  rows={14}
+                  value={text}
+                  onChange={(e) => {
+                    setText(e.target.value)
+                    setTextVomNutzer(true)
+                  }}
+                  className="mt-1 min-h-32 resize-none text-sm leading-relaxed"
+                />
 
-          {/* Kein eigenes Bauteil: components/ui/ hat weder Collapsible noch
-              Accordion, und <details>/<summary> bringt Tastaturbedienung und
-              die Zustandsansage ohne neue Abhängigkeit mit — so wie bei der
-              manuellen Rechnungsnummer im Entwurfseditor. */}
-          <details
-            open={anpassenOffen}
-            onToggle={(e) => setAnpassenOffen(e.currentTarget.open)}
-            className="mt-4 border-t border-zinc-200 pt-3 dark:border-zinc-700"
-          >
-            <summary className="flex cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 text-sm text-zinc-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:text-zinc-400 [&::-webkit-details-marker]:hidden">
-              <ChevronRight
-                className={`h-4 w-4 shrink-0 transition-transform ${anpassenOffen ? 'rotate-90' : ''}`}
-                aria-hidden="true"
-              />
-              Anpassen
-              {/* Abweichende Werte müssen auch zugeklappt dastehen — sonst
-                  versteckt der Bereich genau das, was man wissen muss.
-                  Aufgeklappt stehen sie zwei Zeilen tiefer an ihren Feldern;
-                  sie dann hier zu wiederholen wäre Lärm. */}
-              {!anpassenOffen && abweichungen.length > 0 && (
-                <span className="font-medium text-zinc-900 dark:text-zinc-100">
-                  {abweichungen.join(' · ')}
-                </span>
-              )}
-            </summary>
+                {/* Die Zahlen: ein Streifen, kein Block. Was 0 ist, steht nicht
+                    da — eine Zeile „Pauschale 0,00 €" erklärt nichts und sieht
+                    aus wie ein Fehler. Im Regelfall bleiben genau zwei Angaben,
+                    und die passen nebeneinander. */}
+                <dl
+                  className={`mt-3 flex flex-wrap gap-x-6 gap-y-2 rounded-md bg-zinc-50 px-3 py-2 transition-opacity dark:bg-zinc-800/60 ${
+                    istAmRechnen ? 'opacity-50' : ''
+                  }`}
+                  aria-busy={istAmRechnen}
+                >
+                  {kennzahlen.map(({ label, wert, stark }) => (
+                    <div key={label}>
+                      <dt className="text-xs text-zinc-500 dark:text-zinc-400">{label}</dt>
+                      {/* „Gesamtforderung" ist die Aussage, die übrigen Posten
+                          sind nur ihre Herkunft — deshalb trägt sie allein das
+                          Gewicht statt eines Trennstrichs, der beim Umbrechen
+                          ohnehin an der falschen Stelle landete. */}
+                      <dd className={`text-sm tabular-nums ${stark ? 'font-semibold' : ''}`}>
+                        {wert}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
 
-            <div className="mt-3 space-y-4">
-              <div>
-                <Label className="text-xs text-zinc-500 dark:text-zinc-400">Stufe</Label>
-                {stufenOptionen.length > 1 ? (
-                  <Select
-                    value={String(anpassung.stage ?? status.stufe?.position ?? '')}
-                    onValueChange={(wert) =>
-                      setAnpassung((prev) => ({ ...prev, stage: Number(wert) }))
-                    }
-                  >
-                    <SelectTrigger className="mt-1 w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {stufenOptionen.map((stufe) => (
-                        <SelectItem key={stufe.position} value={String(stufe.position)}>
-                          {stufe.position}. {stufe.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  // Eine Auswahl mit einem einzigen Eintrag ist keine Auswahl.
-                  <p className="mt-1 text-sm">
-                    {status.stufe ? `${status.stufe.position}. ${status.stufe.name}` : '—'}
+                {/* Die Klammer zu den Zinsen steht als Fussnote und nicht mehr
+                    unter ihrer Beschriftung: Dort machte sie die Spalte so
+                    breit, dass der Streifen umbrach. */}
+                {forderung.zinsen > 0 && zinsText && (
+                  <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
+                    Verzugszinsen: {zinsText}
                   </p>
                 )}
-              </div>
+                {nochNichtFaellig && (
+                  <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
+                    Eine Erinnerung vor Fälligkeit verkürzt die Frist nicht — es bleibt bei
+                    dem Datum, das auf der Rechnung steht.
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                {status.grund || 'Für diese Rechnung lässt sich derzeit keine Forderung beziffern.'}
+              </p>
+            )}
 
-              <div>
-                <Label className="text-xs text-zinc-500 dark:text-zinc-400">Verzug seit</Label>
-                <div className="mt-1">
-                  <DatePicker
-                    value={anpassung.defaultSince ?? status.verzugsbeginn}
-                    onChange={(datum) =>
-                      setAnpassung((prev) => ({ ...prev, defaultSince: datum ?? undefined }))
-                    }
+            {/* Die Hinweise des Servers, in seiner Reihenfolge — sie ist eine
+                Rangfolge, der wichtigste steht oben.
+
+                Ohne eigenen Rollbalken: Im Dialog rollte die Liste ab 7 rem in
+                sich (`max-h-28`), weil der Platz knapp war; ein Kasten, der in
+                einem rollenden Bereich noch einmal für sich rollt, versteckt
+                seine letzten Zeilen zuverlässig. Die Schublade hat die Höhe,
+                also stehen alle Hinweise da. */}
+            {status.hinweise.length > 0 && (
+              <ul className="mt-4 space-y-1 rounded-md bg-zinc-100 p-3 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                {status.hinweise.map((hinweis, index) => (
+                  <li key={index}>{hinweis}</li>
+                ))}
+              </ul>
+            )}
+
+            {/* Kein eigenes Bauteil: components/ui/ hat weder Collapsible noch
+                Accordion, und <details>/<summary> bringt Tastaturbedienung und
+                die Zustandsansage ohne neue Abhängigkeit mit — so wie bei der
+                manuellen Rechnungsnummer im Entwurfseditor. */}
+            <details
+              open={anpassenOffen}
+              onToggle={(e) => setAnpassenOffen(e.currentTarget.open)}
+              className="mt-4 border-t border-zinc-200 pt-3 dark:border-zinc-700"
+            >
+              <summary className="flex cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 text-sm text-zinc-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:text-zinc-400 [&::-webkit-details-marker]:hidden">
+                <ChevronRight
+                  className={`h-4 w-4 shrink-0 transition-transform ${anpassenOffen ? 'rotate-90' : ''}`}
+                  aria-hidden="true"
+                />
+                Anpassen
+                {/* Abweichende Werte müssen auch zugeklappt dastehen — sonst
+                    versteckt der Bereich genau das, was man wissen muss.
+                    Aufgeklappt stehen sie zwei Zeilen tiefer an ihren Feldern;
+                    sie dann hier zu wiederholen wäre Lärm. */}
+                {!anpassenOffen && abweichungen.length > 0 && (
+                  <span className="font-medium text-zinc-900 dark:text-zinc-100">
+                    {abweichungen.join(' · ')}
+                  </span>
+                )}
+              </summary>
+
+              <div className="mt-3 space-y-4">
+                <div>
+                  <Label className="text-xs text-zinc-500 dark:text-zinc-400">Stufe</Label>
+                  {stufenOptionen.length > 1 ? (
+                    <Select
+                      value={String(anpassung.stage ?? status.stufe?.position ?? '')}
+                      onValueChange={(wert) =>
+                        setAnpassung((prev) => ({ ...prev, stage: Number(wert) }))
+                      }
+                    >
+                      <SelectTrigger className="mt-1 w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {stufenOptionen.map((stufe) => (
+                          <SelectItem key={stufe.position} value={String(stufe.position)}>
+                            {stufe.position}. {stufe.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    // Eine Auswahl mit einem einzigen Eintrag ist keine Auswahl.
+                    <p className="mt-1 text-sm">
+                      {status.stufe ? `${status.stufe.position}. ${status.stufe.name}` : '—'}
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <Label className="text-xs text-zinc-500 dark:text-zinc-400">Verzug seit</Label>
+                  <div className="mt-1">
+                    <DatePicker
+                      value={anpassung.defaultSince ?? status.verzugsbeginn}
+                      onChange={(datum) =>
+                        setAnpassung((prev) => ({ ...prev, defaultSince: datum ?? undefined }))
+                      }
+                    />
+                  </div>
+                  <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
+                    Ab diesem Tag laufen die Zinsen. Bei Privatpersonen frühestens 30 Tage nach
+                    Rechnungserhalt (§ 286 Abs. 3 BGB).
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-between gap-4">
+                  <Label htmlFor="dunning-interest" className="text-sm">
+                    Verzugszinsen berechnen
+                  </Label>
+                  <Switch
+                    id="dunning-interest"
+                    checked={zinsenAn}
+                    onCheckedChange={(an) => setAnpassung((prev) => ({ ...prev, interest: an }))}
                   />
                 </div>
-                <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
-                  Ab diesem Tag laufen die Zinsen. Bei Privatpersonen frühestens 30 Tage nach
-                  Rechnungserhalt (§ 286 Abs. 3 BGB).
-                </p>
-              </div>
 
-              <div className="flex items-center justify-between gap-4">
-                <Label htmlFor="dunning-interest" className="text-sm">
-                  Verzugszinsen berechnen
-                </Label>
-                <Switch
-                  id="dunning-interest"
-                  checked={zinsenAn}
-                  onCheckedChange={(an) => setAnpassung((prev) => ({ ...prev, interest: an }))}
-                />
+                {/* Der Basiszinssatz gehört zum Schalter darüber: Sind die Zinsen
+                    aus, ist das Feld wirkungslos. Deaktiviert statt ausgeblendet
+                    — Ausblenden liesse beim Umlegen des Schalters alles darunter
+                    springen, und wer gerade im Feld steht, verlöre den Fokus ins
+                    Nichts. So bleibt stattdessen sichtbar, woran der Satz hängt,
+                    und das Umlegen bewegt nur die Beschriftung darunter. */}
+                <div>
+                  <Label htmlFor="dunning-base-rate" className="text-xs text-zinc-500 dark:text-zinc-400">
+                    Basiszinssatz (% p. a.)
+                  </Label>
+                  <Input
+                    id="dunning-base-rate"
+                    type="number"
+                    step="0.01"
+                    inputMode="decimal"
+                    disabled={!zinsenAn}
+                    className="mt-1"
+                    placeholder={
+                      status.zinsDetails?.segments[0]
+                        ? PROZENT(status.zinsDetails.segments[0].baseRate)
+                        : 'hinterlegter Satz'
+                    }
+                    value={basiszinsText}
+                    onChange={(e) => {
+                      const roh = e.target.value
+                      setBasiszinsText(roh)
+                      const zahl = Number(roh)
+                      setAnpassung((prev) => ({
+                        ...prev,
+                        baseRate: roh === '' || Number.isNaN(zahl) ? undefined : zahl,
+                      }))
+                    }}
+                  />
+                  <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
+                    {!zinsenAn
+                      ? 'Wird erst gebraucht, wenn Verzugszinsen berechnet werden.'
+                      : status.stale
+                        ? 'Der hinterlegte Basiszinssatz ist nicht geprüft. Bitte bestätigen oder korrigieren Sie ihn.'
+                        : 'Leer lassen, um den hinterlegten Satz der Deutschen Bundesbank zu verwenden.'}
+                  </p>
+                </div>
               </div>
+            </details>
 
-              {/* Der Basiszinssatz gehört zum Schalter darüber: Sind die Zinsen
-                  aus, ist das Feld wirkungslos. Deaktiviert statt ausgeblendet
-                  — Ausblenden liesse beim Umlegen des Schalters alles darunter
-                  springen, und wer gerade im Feld steht, verlöre den Fokus ins
-                  Nichts. So bleibt stattdessen sichtbar, woran der Satz hängt,
-                  und das Umlegen bewegt nur die Beschriftung darunter. */}
-              <div>
-                <Label htmlFor="dunning-base-rate" className="text-xs text-zinc-500 dark:text-zinc-400">
-                  Basiszinssatz (% p. a.)
-                </Label>
-                <Input
-                  id="dunning-base-rate"
-                  type="number"
-                  step="0.01"
-                  inputMode="decimal"
-                  disabled={!zinsenAn}
-                  className="mt-1"
-                  placeholder={
-                    status.zinsDetails?.segments[0]
-                      ? PROZENT(status.zinsDetails.segments[0].baseRate)
-                      : 'hinterlegter Satz'
-                  }
-                  value={basiszinsText}
-                  onChange={(e) => {
-                    const roh = e.target.value
-                    setBasiszinsText(roh)
-                    const zahl = Number(roh)
-                    setAnpassung((prev) => ({
-                      ...prev,
-                      baseRate: roh === '' || Number.isNaN(zahl) ? undefined : zahl,
-                    }))
-                  }}
-                />
-                <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
-                  {!zinsenAn
-                    ? 'Wird erst gebraucht, wenn Verzugszinsen berechnet werden.'
-                    : status.stale
-                      ? 'Der hinterlegte Basiszinssatz ist nicht geprüft. Bitte bestätigen oder korrigieren Sie ihn.'
-                      : 'Leer lassen, um den hinterlegten Satz der Deutschen Bundesbank zu verwenden.'}
-                </p>
-              </div>
+            {fehler && <p className="mt-4 message-error text-sm">{fehler}</p>}
+          </div>
+
+          {/* Die Aktionsleiste sitzt fest am unteren Rand — `shrink-0` reicht,
+              weil die Schublade selbst volle Höhe hat und nicht rollt (im
+              Entwurfseditor steht zusätzlich `sticky`, weil derselbe Baustein
+              dort auch auf einer eigenen Seite ohne feste Höhe lebt). */}
+          <div className="flex shrink-0 flex-col-reverse gap-2 border-t px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+            {/* Zurückhaltend und links: der häufigste Ausgang einer Mahnung ist,
+                dass bezahlt wurde — aber er ist nicht das, wozu diese Schublade
+                aufgefordert hat.
+
+                Er setzt die Rechnung allerdings auf „bezahlt", und neben dem
+                gleich aussehenden „Abbrechen" wurde er dafür zu leicht
+                verwechselt. Statt einer Rückfrage — die Änderung lässt sich im
+                Status-Umschalter zurücknehmen — bekommt er dasselbe wie das
+                „Löschen" im Entwurfseditor: eigene Zone links, eigenes Zeichen.
+                Das Häkchen sagt, dass hier etwas festgestellt und nicht
+                abgebrochen wird; auf schmalen Bildschirmen, wo die Fusszeile zur
+                Spalte wird, trennt ihn zusätzlich eine Linie vom Rest. */}
+            <div className="mt-2 border-t border-zinc-200 pt-3 dark:border-zinc-700 sm:mt-0 sm:border-t-0 sm:pt-0">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={handleBereitsBezahlt}
+                disabled={istAmBezahlen || istAmSpeichern}
+                className="w-full text-zinc-500 hover:text-zinc-900 sm:w-auto dark:text-zinc-400 dark:hover:text-zinc-100"
+              >
+                {istAmBezahlen ? (
+                  <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <CircleCheck className="mr-2 h-4 w-4" aria-hidden="true" />
+                )}
+                Rechnung ist bereits bezahlt
+              </Button>
             </div>
-          </details>
 
-          {fehler && <p className="mt-4 message-error text-sm">{fehler}</p>}
-        </div>
-
-        <DialogFooter className="sm:justify-between">
-          {/* Zurückhaltend und links: der häufigste Ausgang einer Mahnung ist,
-              dass bezahlt wurde — aber er ist nicht das, wozu dieser Dialog
-              aufgefordert hat.
-
-              Er setzt die Rechnung allerdings auf „bezahlt", und neben dem
-              gleich aussehenden „Abbrechen" wurde er dafür zu leicht
-              verwechselt. Statt einer Rückfrage — die Änderung lässt sich im
-              Status-Umschalter zurücknehmen — bekommt er dasselbe wie das
-              „Löschen" im Entwurfseditor: eigene Zone links, eigenes Zeichen.
-              Das Häkchen sagt, dass hier etwas festgestellt und nicht
-              abgebrochen wird; auf schmalen Bildschirmen, wo die Fusszeile zur
-              Spalte wird, trennt ihn zusätzlich eine Linie vom Rest. */}
-          <div className="mt-2 border-t border-zinc-200 pt-3 dark:border-zinc-700 sm:mt-0 sm:border-t-0 sm:pt-0">
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={handleBereitsBezahlt}
-              disabled={istAmBezahlen || istAmSpeichern}
-              className="w-full text-zinc-500 hover:text-zinc-900 sm:w-auto dark:text-zinc-400 dark:hover:text-zinc-100"
-            >
-              {istAmBezahlen ? (
-                <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <CircleCheck className="mr-2 h-4 w-4" aria-hidden="true" />
-              )}
-              Rechnung ist bereits bezahlt
-            </Button>
+            <div className="flex gap-2">
+              <Button type="button" variant="outline" onClick={onClose} disabled={istAmSpeichern}>
+                Abbrechen
+              </Button>
+              <Button
+                type="button"
+                onClick={handleSpeichern}
+                disabled={istAmSpeichern || istAmRechnen || !forderung || !status.mahnbar}
+              >
+                {istAmSpeichern && <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />}
+                Als Entwurf speichern
+              </Button>
+            </div>
           </div>
-
-          <div className="flex gap-2">
-            <Button type="button" variant="outline" onClick={onClose} disabled={istAmSpeichern}>
-              Abbrechen
-            </Button>
-            <Button
-              type="button"
-              onClick={handleSpeichern}
-              disabled={istAmSpeichern || istAmRechnen || !forderung || !status.mahnbar}
-            >
-              {istAmSpeichern && <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />}
-              Als Entwurf speichern
-            </Button>
-          </div>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </SchubladePrimitive.Content>
+      </SchubladePrimitive.Portal>
+    </SchubladePrimitive.Root>
   )
 }
