@@ -13,9 +13,17 @@ import { ladeMahnstatus, verwirfMahnung, type DunningStatus } from './dunning-ap
  * Das Mahnwesen in der Rechnungs-Schublade.
  *
  * Der ganze sichtbare Teil des Mahnwesens besteht aus diesem Block: ein Knopf
- * und eine Zeile Verlauf, beides nur bei überfälligen Rechnungen. Kein
- * Menüpunkt, keine Spalte in der Tabelle, kein eigener Bildschirm — wer nie
- * mahnt, sieht davon nichts.
+ * und eine Zeile Verlauf, beides nur bei Rechnungen, an denen überhaupt noch
+ * etwas offen ist (siehe `istMahnbar` in der Schublade). Kein Menüpunkt, keine
+ * Spalte in der Tabelle, kein eigener Bildschirm — wer nie mahnt, sieht davon
+ * nichts.
+ *
+ * Auch eine **noch nicht fällige** Rechnung gehört dazu. Eine Erinnerung vor
+ * Fälligkeit ist keine Mahnung: Es ist nichts überfällig, es besteht kein
+ * Verzug, und es gibt keinen Zinsanspruch. Dass sie trotzdem angeboten wird,
+ * kostet nichts — betont wird sie nicht (das macht die Schublade weiterhin nur
+ * bei einer überfälligen Rechnung), und der vorbereitete Text in
+ * `dunning-dialog.tsx` behauptet in diesem Fall nichts Fälliges.
  *
  * Der Knopf trägt den **Namen der Stufe**, nicht das Wort „Mahnen". Stufe 1
  * ist eine Zahlungserinnerung; sie „Mahnung" zu nennen beschreibt sie falsch
@@ -104,10 +112,22 @@ export default function DunningSection({
   const letzte = status.verlauf.length > 0 ? status.verlauf[status.verlauf.length - 1] : null
   const entwurf = status.verlauf.find((eintrag) => eintrag.status === 'created') ?? null
 
-  // Der Knopf nur, wenn die Stufe auch wirklich dran ist. Ist sie es noch
-  // nicht, sagt die Verlaufszeile ab wann — das ist die ehrlichere Auskunft
-  // als ein Knopf, der dann eine Fehlermeldung bringt.
-  const zeigeKnopf = status.mahnbar && status.stufe !== null && status.istFaellig
+  /**
+   * Der Knopf, sobald der Server eine Stufe benennen kann.
+   *
+   * Früher hing er zusätzlich an `status.istFaellig` — mit der Begründung, ein
+   * Knopf, der nur eine Fehlermeldung bringt, sei schlechter als keiner. Diese
+   * Begründung trägt nicht: `app/api/invoices/[id]/dunning/route.ts` prüft
+   * `istFaellig` an keiner Stelle. Weder `GET` noch `POST` lehnen deshalb ab;
+   * `istFaellig` ist eine **Auskunft** über den Zeitplan der Stufen, keine
+   * Sperre. Wer früher mahnen will — etwa mit einer freundlichen Erinnerung
+   * vor Fälligkeit —, konnte es serverseitig immer, nur kam er hier nicht hin.
+   *
+   * Die Entscheidung bleibt trotzdem sichtbar: Der Dialog klappt „Anpassen"
+   * von selbst auf, wenn die Stufe noch nicht dran ist, und der Serverhinweis
+   * sagt, dass vor Verzug weder Zinsen noch Pauschale anfallen.
+   */
+  const zeigeKnopf = status.mahnbar && status.stufe !== null
 
   /**
    * Zweifel am Zugang: `created` ist der einzige Status, in dem die Rechnung
@@ -139,7 +159,11 @@ export default function DunningSection({
     // eskalieren gibt, ist ein Ergebnis und keine Lücke.
     verlaufsTeile.push('alle Mahnstufen durchlaufen')
   } else if (status.stufe && !status.istFaellig && status.faelligAb) {
-    verlaufsTeile.push(`${status.stufe.name} ab ${kurz(status.faelligAb)} möglich`)
+    // „vorgesehen ab", nicht mehr „ab … möglich": Seit der Knopf auch vor
+    // diesem Tag steht, wäre „möglich" eine Absage, die der Knopf daneben
+    // widerlegt. Das Datum bleibt die nützliche Auskunft — es sagt, wann die
+    // Stufe nach dem eingerichteten Zeitplan an der Reihe ist.
+    verlaufsTeile.push(`${status.stufe.name} vorgesehen ab ${kurz(status.faelligAb)}`)
   } else if (!letzte && status.stufe) {
     verlaufsTeile.push('noch nicht gemahnt')
   }
