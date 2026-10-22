@@ -179,6 +179,13 @@ interface Mahnlage {
     total_amount: number
     /** Gesetzt heißt: durch eine neuere Fassung abgelöst, zählt nicht mehr. */
     superseded_by: string | null
+    /**
+     * Das Mahnschreiben als Datei. Heute immer `null` — es gibt noch keine
+     * Erzeugung. Das Feld reist trotzdem mit, weil die Dokumentenliste in der
+     * Schublade den Herunterladen-Knopf allein daran hängt: Sobald die Spalte
+     * gefüllt wird, erscheint er, ohne dass Route oder Oberfläche sich ändern.
+     */
+    pdf_url: string | null
   }>
 }
 
@@ -247,6 +254,7 @@ async function bewerte(
     due_date: m.due_date,
     total_amount: m.total_amount,
     superseded_by: m.superseded_by,
+    pdf_url: m.pdf_url,
   }))
 
   const basis: Mahnlage = {

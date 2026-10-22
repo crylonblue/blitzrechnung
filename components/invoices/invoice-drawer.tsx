@@ -11,8 +11,6 @@ import { de } from 'date-fns/locale'
 import {
   User,
   ShoppingCart,
-  FileText,
-  FileCode,
   Check,
   SendHorizontal,
   Ban,
@@ -21,6 +19,8 @@ import {
 } from 'lucide-react'
 import SendInvoiceModal from './send-invoice-modal'
 import DunningSection from './dunning-section'
+import DocumentsSection from './documents-section'
+import { useMahnstatus } from './use-dunning-status'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -69,6 +69,21 @@ export default function InvoiceDrawer() {
   const [stornoDialogOffen, setStornoDialogOffen] = useState(false)
   const [cancellationInvoice, setCancellationInvoice] = useState<{ id: string; invoice_number: string } | null>(null)
   const [originalInvoice, setOriginalInvoice] = useState<{ id: string; invoice_number: string } | null>(null)
+
+  /**
+   * Der Mahnstatus, einmal für die ganze Schublade.
+   *
+   * Gefragt wird nur dort, wo es etwas zu holen gibt: nicht bei Entwürfen
+   * (die den Empfänger nie erreicht haben) und nicht bei Stornorechnungen
+   * (eine Gutschrift wird nicht gemahnt). Für alle anderen wird er geholt —
+   * **auch** für bezahlte, stornierte und abgeschriebene Rechnungen. Das ist
+   * neu und der Kern dieser Änderung: Bisher verschwand mit dem Mahnblock
+   * auch der Verlauf, sobald die Rechnung bezahlt war. Genau dann will man
+   * aber nachsehen können, was man geschickt hat.
+   */
+  const mahnstatusId =
+    invoice && istMahnbarerBeleg(invoice) && invoice.status !== 'draft' ? invoice.id : null
+  const { status: mahnstatus, neuLaden: mahnstatusNeuLaden } = useMahnstatus(mahnstatusId)
 
   useEffect(() => {
     if (isOpen && invoiceId) {
@@ -330,6 +345,21 @@ const handleDownloadPdf = async () => {
     invoice && istMahnbarerBeleg(invoice) && istMahnbarerStatus(invoice.status)
   )
 
+  /**
+   * Nach einer Mahnänderung: beides neu holen.
+   *
+   * Die Rechnung, weil sich ihr Status geändert haben kann, und der
+   * Mahnstatus, weil Verlauf und Ausblick daran hängen. Früher stand dieses
+   * Paar auseinander — die Schublade lud die Rechnung, der Mahnblock seinen
+   * eigenen Stand. Mit einer Quelle gibt es auch nur einen Auffrischpunkt.
+   */
+  const nachMahnaenderung = () => {
+    if (!invoice) return
+    mahnstatusNeuLaden()
+    loadInvoice(invoice.id)
+    router.refresh()
+  }
+
   // Mahnwesen — bewusst nicht an vorhandene PDF/XML geknüpft: Eine offene
   // Rechnung ohne erzeugte Datei muss sich trotzdem mahnen lassen.
   const mahnblock =
@@ -338,8 +368,9 @@ const handleDownloadPdf = async () => {
         invoice={invoice}
         empfaenger={buyerName}
         absender={companyName || 'Ihr Unternehmen'}
+        status={mahnstatus}
         betont={betonung === 'mahnung'}
-        onChanged={() => loadInvoice(invoice.id)}
+        onChanged={nachMahnaenderung}
         onPaid={() => {
           loadInvoice(invoice.id)
           closeDrawer()
@@ -530,91 +561,36 @@ const handleDownloadPdf = async () => {
                 </p>
               </div>
 
+              {/* Was es zu dieser Rechnung gibt: die Rechnung selbst mit ihren
+                  Dateien und jede erzeugte Mahnung mit Datum, Stufe, Betrag
+                  und Zustand. Steht **vor** dem Aktionsbereich: erst was ist,
+                  dann was man tut — und der Ausblick auf die nächste Stufe
+                  endet direkt über dem Knopf, der sie auslöst. */}
+              <DocumentsSection
+                invoice={invoice}
+                status={mahnstatus}
+                hatPdf={hatPdf}
+                hatXml={hatXml}
+                onPdf={handleDownloadPdf}
+                onXml={handleDownloadXml}
+                pdfLaedt={isDownloadingPdf}
+                xmlLaedt={isDownloadingXml}
+                onGeaendert={nachMahnaenderung}
+              />
+
               {/* Aktionsbereich — ein Stapel, eine Trennlinie.
-                  Reihenfolge: betonte Aktion, die beiden Downloads in einer
-                  Zeile, die jeweils andere Hauptaktion, zuletzt der leise
-                  Storno. `empty:hidden` fängt den Randfall ab, dass die
-                  Rechnung zwar mahnbar ist, das Mahnwesen aber nichts
-                  anzubieten hat und auch keine Datei existiert — dann bliebe
-                  sonst eine Trennlinie ohne Inhalt stehen. */}
+                  Reihenfolge: betonte Aktion, die jeweils andere Hauptaktion,
+                  zuletzt der leise Storno. Die Downloads stehen hier nicht
+                  mehr: Sie gehören zur Rechnung als Dokument und damit in die
+                  Liste darüber, nicht zwischen Versand und Storno.
+                  `empty:hidden` fängt den Randfall ab, dass die Rechnung zwar
+                  mahnbar ist, das Mahnwesen aber nichts anzubieten hat und
+                  auch keine Datei existiert — dann bliebe sonst eine
+                  Trennlinie ohne Inhalt stehen. */}
               {(istMahnbar || hatDateien) && (
                 <div className="mt-6 space-y-2 border-t border-zinc-200 pt-4 empty:hidden dark:border-zinc-700">
                   {betonung === 'mahnung' && mahnblock}
                   {betonung === 'email' && hatDateien && versandKnopf}
-
-                  {/* Die beiden Downloads sind Nebenaktionen und teilen sich
-                      eine Zeile. `flex-1` statt eines festen Rasters: Fehlt
-                      eine der beiden Dateien, füllt die andere die Zeile,
-                      statt halb stehen zu bleiben.
-
-                      Es sind **zwei verschiedene Dokumente**, und bis hierher
-                      stand an beiden dieselbe Beschriftung „XRechnung/ZUGFeRD"
-                      — als wären die Formate austauschbar. Sie sind es nicht:
-
-                       * Das **PDF** ist der ZUGFeRD-Hybrid. `lib/pdf-generator.ts`
-                         ruft `embedFacturX` mit `Flavor.ZUGFERD` auf und legt
-                         die Rechnungsdaten als XML in das PDF hinein — ein
-                         Dokument, das ein Mensch ansehen und eine Software
-                         auslesen kann.
-                       * Die **XML-Datei** ist die XRechnung
-                         (`lib/zugferd-generator.ts`, CustomizationID
-                         `…kosit:xrechnung_3.0`): reines XML ohne Ansicht, das
-                         Format, das öffentliche Auftraggeber verlangen.
-
-                      Warum die Formatnamen auf die Knöpfe und der Rat
-                      darunter: Auf einem Knopf von rund 196 px stehen nach
-                      Innenabstand und Zeichen noch etwa 140 px für Text, also
-                      knapp zwanzig Zeichen — „PDF (ZUGFeRD)" und
-                      „XML (XRechnung)" passen, der Satz, der sagt *wann man
-                      welche nimmt*, in keiner Kürzung. Der gehört deshalb in
-                      eine gemeinsame Zeile unter das Paar, wo er beide Knöpfe
-                      zugleich erklärt und nicht zweimal halb dasteht. */}
-                  {hatDateien && (
-                    <div>
-                      <div className="flex gap-2">
-                        {hatPdf && (
-                          <Button
-                            variant="outline"
-                            className="min-w-0 flex-1"
-                            onClick={handleDownloadPdf}
-                            disabled={isDownloadingPdf}
-                            aria-label="Rechnung als PDF mit eingebetteter ZUGFeRD-Datei herunterladen"
-                            title="Rechnung als PDF mit eingebetteter ZUGFeRD-Datei herunterladen"
-                          >
-                            <FileText className="h-4 w-4 mr-2 shrink-0" />
-                            <span className="truncate">
-                              {isDownloadingPdf ? 'Lädt...' : 'PDF (ZUGFeRD)'}
-                            </span>
-                          </Button>
-                        )}
-                        {hatXml && (
-                          <Button
-                            variant="outline"
-                            className="min-w-0 flex-1"
-                            onClick={handleDownloadXml}
-                            disabled={isDownloadingXml}
-                            aria-label="Rechnung als XRechnung im XML-Format herunterladen"
-                            title="Rechnung als XRechnung im XML-Format herunterladen"
-                          >
-                            <FileCode className="h-4 w-4 mr-2 shrink-0" />
-                            <span className="truncate">
-                              {isDownloadingXml ? 'Lädt...' : 'XML (XRechnung)'}
-                            </span>
-                          </Button>
-                        )}
-                      </div>
-
-                      {/* Satzweise an die vorhandenen Dateien geknüpft: Fehlt
-                          eine der beiden, wäre der Satz über sie eine Auskunft
-                          über etwas, das hier gar nicht angeboten wird. */}
-                      <p className="mt-1.5 text-xs text-zinc-400 dark:text-zinc-500">
-                        {hatPdf &&
-                          'Das PDF trägt die ZUGFeRD-Daten in sich und lässt sich lesen wie auslesen — damit kommen die meisten Empfänger aus. '}
-                        {hatXml &&
-                          'Die XML-Datei ist die XRechnung; sie verlangen vor allem Behörden und öffentliche Auftraggeber.'}
-                      </p>
-                    </div>
-                  )}
 
                   {betonung !== 'mahnung' && mahnblock}
                   {betonung !== 'email' && hatDateien && versandKnopf}

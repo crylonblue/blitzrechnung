@@ -39,6 +39,14 @@ export interface DunningVerlaufEintrag {
   status: string
   due_date: string
   total_amount: number
+  /** Gesetzt heisst: durch eine neuere Fassung abgelöst, zählt nicht mehr. */
+  superseded_by: string | null
+  /**
+   * Das Mahnschreiben als Datei. Bislang immer `null` — die Erzeugung kommt
+   * erst noch. Die Dokumentenliste bietet den Knopf genau dann an, wenn hier
+   * etwas steht; mehr ist später nicht zu tun.
+   */
+  pdf_url: string | null
 }
 
 export interface DunningStatus {

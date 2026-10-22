@@ -6,6 +6,30 @@ import { XIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * Die Ebenen dieser Anwendung — hier festgehalten, weil sie sich nur im
+ * Zusammenspiel verstehen lassen:
+ *
+ *   50  Schublade (`sheet.tsx`): Abdunklung und Inhalt.
+ *   60  Dialog: Abdunklung und Inhalt — **über** der Schublade.
+ *   70  Popover und Auswahlmenü (`popover.tsx`, `select.tsx`) — über beidem.
+ *
+ * Warum der Dialog über die Schublade muss: Ein Dialog ist modal, er beansprucht
+ * die ganze Aufmerksamkeit. Lag er auf derselben Ebene wie die Schublade, aus der
+ * er geöffnet wurde (beides war `z-50`), entschied die Reihenfolge im DOM — und
+ * die fiel zugunsten der Schublade aus: Ihre Knöpfe standen neben der Abdunklung
+ * in voller Helligkeit und sahen aus, als gehörten sie zum Dialog.
+ *
+ * Warum Popover und Auswahlmenü darüber liegen müssen: Beide werden *innerhalb*
+ * eines Dialogs geöffnet (im Mahn-Dialog etwa das Datumsfeld und die
+ * Stufenauswahl). Ein Menü, das hinter dem Dialog verschwindet, aus dem es kommt,
+ * ist unbedienbar. Sie liegen damit auch über der Schublade — dort werden sie
+ * ebenso benutzt, und die Reihenfolge stimmt in diesem Fall genauso.
+ *
+ * Die drei Ebenen reichen aus, weil Dialoge sich nicht stapeln und ein Popover
+ * nichts trägt, worauf wieder ein Dialog aufginge.
+ */
+
 function Dialog({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Root>) {
@@ -38,7 +62,7 @@ function DialogOverlay({
     <DialogPrimitive.Overlay
       data-slot="dialog-overlay"
       className={cn(
-        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-black/50",
+        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-60 bg-black/50",
         className
       )}
       {...props}
@@ -62,7 +86,7 @@ function DialogContent({
         className={cn(
           "bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-50 border-zinc-200 dark:border-zinc-800",
           "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
-          "fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border p-6 shadow-lg duration-200 outline-none sm:max-w-lg",
+          "fixed top-[50%] left-[50%] z-60 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border p-6 shadow-lg duration-200 outline-none sm:max-w-lg",
           className
         )}
         {...props}
