@@ -25,6 +25,7 @@ export default function ContactForm({ companyId, onSave, onCancel }: ContactForm
     name: '',
     street: '',
     streetnumber: '',
+    addressline2: '',
     city: '',
     zip: '',
     country: 'DE',
@@ -72,6 +73,7 @@ export default function ContactForm({ companyId, onSave, onCancel }: ContactForm
           address: {
             street: contact.street,
             streetnumber: contact.streetnumber,
+            addressline2: contact.addressline2 || undefined,
             city: contact.city,
             zip: contact.zip,
             country: contact.country,
@@ -98,6 +100,7 @@ export default function ContactForm({ companyId, onSave, onCancel }: ContactForm
         address: {
           street: contact.street,
           streetnumber: contact.streetnumber,
+          addressline2: contact.addressline2 || undefined,
           city: contact.city,
           zip: contact.zip,
           country: contact.country,
@@ -177,6 +180,22 @@ export default function ContactForm({ companyId, onSave, onCancel }: ContactForm
                 autoComplete="off"
               />
             </div>
+          </div>
+
+          {/* Der Adresszusatz steht hier, weil er auch auf dem Brief hier
+              steht: zwischen Straße und Ort. Dieses Formular hatte ihn als
+              einziges nicht — wer einen Kontakt aus dem Rechnungseditor heraus
+              anlegte, konnte ihn erst später nachtragen. */}
+          <div>
+            <Label htmlFor="contact_addressline2">Adresszusatz</Label>
+            <Input
+              id="contact_addressline2"
+              value={contact.addressline2}
+              onChange={(e) => setContact({ ...contact, addressline2: e.target.value })}
+              placeholder="Abteilung, Gebäude, c/o …"
+              className="mt-1.5"
+              autoComplete="off"
+            />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
