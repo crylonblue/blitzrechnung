@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceRoleClient } from '@/lib/supabase/server'
 import { getBillingState } from '@/lib/billing'
+import { loadInvoiceScope, readableDepartmentIds, writableDepartmentIds, type InvoiceScope } from '@/lib/access'
 
 export interface ApiAuth {
   companyId: string
@@ -9,6 +10,12 @@ export interface ApiAuth {
   entitled: boolean
   /** API access is a Pro feature; trials count as Pro. */
   isPro: boolean
+  /**
+   * Rolle und Abteilungen des Nutzers, dem der Schlüssel gehört. Die API
+   * arbeitet mit dem Dienstschlüssel und umgeht RLS; ein Schlüssel darf also
+   * nicht mehr sehen als sein Besitzer in der Oberfläche.
+   */
+  scope: InvoiceScope
 }
 
 /**
@@ -48,6 +55,13 @@ export async function validateApiKey(request: NextRequest): Promise<ApiAuth | nu
     return null
   }
 
+  // Ein Schlüssel überlebt seinen Besitzer nicht: Wer aus der Firma entfernt
+  // wurde, hat auch über die API keinen Zugang mehr.
+  const scope = await loadInvoiceScope(supabase, apiKeyRecord.user_id, apiKeyRecord.company_id)
+  if (!scope) {
+    return null
+  }
+
   // Update last_used_at
   await supabase
     .from('api_keys')
@@ -63,7 +77,39 @@ export async function validateApiKey(request: NextRequest): Promise<ApiAuth | nu
     userId: apiKeyRecord.user_id,
     entitled: billing.entitled,
     isPro: billing.isPro,
+    scope,
   }
+}
+
+const KEINE_ABTEILUNG = '00000000-0000-0000-0000-000000000000'
+
+/**
+ * Begrenzt eine Rechnungsabfrage auf die Abteilungen, die der Schlüsselbesitzer
+ * sehen darf. Für Lesen und, nach `requireInvoiceWrite`, auch für Schreiben:
+ * wer schreiben darf, sieht dieselben Abteilungen.
+ */
+export function scopeInvoices<Q>(query: Q, auth: ApiAuth): Q {
+  const ids = readableDepartmentIds(auth.scope)
+  if (ids === null) return query
+  // Eine leere Liste in `.in()` ergäbe ungültiges Filter-Syntax.
+  // Der Builder von PostgREST ist so tief verschachtelt, dass ein strukturell
+  // getypter `.in` den Compiler ausbremst; der Rückgabetyp bleibt der des Aufrufers.
+  return (query as unknown as { in: (c: string, v: string[]) => Q }).in(
+    'department_id',
+    ids.length > 0 ? ids : [KEINE_ABTEILUNG]
+  )
+}
+
+/** 403 für Schlüssel, deren Besitzer keine Rechnungen ändern darf (Buchhaltung). */
+export function requireInvoiceWrite(auth: ApiAuth): NextResponse | null {
+  const ids = writableDepartmentIds(auth.scope)
+  if (ids !== null && ids.length === 0) {
+    return NextResponse.json(
+      { error: 'The key owner may not modify invoices', code: 'FORBIDDEN' },
+      { status: 403 }
+    )
+  }
+  return null
 }
 
 /**

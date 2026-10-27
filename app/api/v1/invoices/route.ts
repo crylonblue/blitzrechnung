@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { createServiceRoleClient } from '@/lib/supabase/server'
-import { validateApiKey, requireApiAccess, unauthorized, serverError, json } from '../_lib/auth'
+import { validateApiKey, requireApiAccess, unauthorized, serverError, json, scopeInvoices } from '../_lib/auth'
 
 /**
  * GET /api/v1/invoices
@@ -18,9 +18,7 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const status = searchParams.get('status')
 
-  let query = supabase
-    .from('invoices')
-    .select('*')
+  let query = scopeInvoices(supabase.from('invoices').select('*'), auth)
     .eq('company_id', auth.companyId)
     .neq('status', 'draft')
     .order('created_at', { ascending: false })

@@ -9,6 +9,7 @@ import { sendEmail, getDefaultFromEmail } from './email'
 import { textToHtml, generateEmailSubject, generateEmailBody } from './email-templates'
 import { getBillingState, TRIAL_EXPIRED_MESSAGE, TRIAL_EXPIRED_DETAILS } from './billing'
 import { resolveInvoiceTexts } from './invoice-texts'
+import { userCanAccessInvoice } from './access'
 import { getAdditionalContacts, resolveSellerContact, resolveReplyTo } from './contact-persons'
 
 /**
@@ -58,6 +59,18 @@ export async function assertCompanyMembership(supabase: Db, userId: string, comp
     .eq('company_id', companyId)
     .single()
   if (!data) throw new InvoiceServiceError(403, 'FORBIDDEN', 'Kein Zugriff auf diese Firma')
+}
+
+/**
+ * Schreibrecht auf die Rechnung (Rolle + Abteilung). Muss vor der Vergabe einer
+ * Nummer und vor jedem Versand laufen: Scheiterte erst das abschließende UPDATE
+ * an der RLS-Policy, wäre die Nummer schon verbraucht. Die öffentliche API
+ * umgeht RLS ohnehin, dort ist das die einzige Prüfung.
+ */
+async function assertInvoiceWriteAccess(supabase: Db, ctx: ServiceCtx, invoice: { company_id: string; department_id?: string | null }): Promise<void> {
+  if (!(await userCanAccessInvoice(supabase, ctx.userId, invoice, 'write'))) {
+    throw new InvoiceServiceError(403, 'FORBIDDEN', 'Keine Berechtigung für Rechnungen dieser Abteilung')
+  }
 }
 
 function buildSellerSnapshot(dbInvoice: DBInvoice, company: any): PartySnapshot {
@@ -136,6 +149,7 @@ export async function finalizeInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: 
     .in('status', ['draft', 'created']) // allow retry of a partially-finalized invoice
     .single()
   if (error || !invoice) throw new InvoiceServiceError(404, 'NOT_FOUND', 'Rechnung nicht gefunden')
+  await assertInvoiceWriteAccess(supabase, ctx, invoice as DBInvoice)
 
   const dbInvoice = invoice as DBInvoice
   const buyerSnapshot = dbInvoice.buyer_snapshot as PartySnapshot | null
@@ -272,6 +286,7 @@ export async function cancelInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: st
     .eq('company_id', ctx.companyId)
     .single()
   if (error || !original) throw new InvoiceServiceError(404, 'NOT_FOUND', 'Rechnung nicht gefunden')
+  await assertInvoiceWriteAccess(supabase, ctx, original as DBInvoice)
 
   const dbInvoice = original as DBInvoice
   if (dbInvoice.status === 'draft') throw new InvoiceServiceError(400, 'VALIDATION_ERROR', 'Entwürfe können nicht storniert werden.')
@@ -316,6 +331,9 @@ export async function cancelInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: st
 
   const cancellationData = {
     company_id: dbInvoice.company_id,
+    // Die Stornorechnung bleibt in der Abteilung des Originals; sonst landete sie
+    // in der Standardabteilung, und ein Abteilungs-Mitglied sähe sie nicht.
+    department_id: dbInvoice.department_id,
     status: 'created' as const,
     invoice_type: 'cancellation',
     invoice_number: cancellationNumber,
@@ -437,6 +455,7 @@ export function nextStatusAfterSend(currentStatus: string): 'sent' | null {
 export async function sendInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: string, opts: SendOptions = {}): Promise<{ recipientEmail: string }> {
   const { data: invoice, error } = await supabase.from('invoices').select('*').eq('id', invoiceId).eq('company_id', ctx.companyId).single()
   if (error || !invoice) throw new InvoiceServiceError(404, 'NOT_FOUND', 'Rechnung nicht gefunden')
+  await assertInvoiceWriteAccess(supabase, ctx, invoice as DBInvoice)
 
   if (invoice.status === 'draft') {
     throw new InvoiceServiceError(400, 'VALIDATION_ERROR', 'Entwürfe können nicht versendet werden. Bitte finalisieren Sie die Rechnung zuerst.')

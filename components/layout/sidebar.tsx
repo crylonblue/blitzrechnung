@@ -3,7 +3,9 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { LayoutDashboard, FileEdit, FileText, Users, Settings, Plus, Building2 } from 'lucide-react'
+import { LayoutDashboard, FileEdit, FileText, Users, UsersRound, Settings, Plus, Building2 } from 'lucide-react'
+import { useAccess } from '@/contexts/access-context'
+import { canManageTeam } from '@/lib/access'
 import { useDraftDrawer } from '@/contexts/draft-drawer-context'
 
 interface SidebarProps {
@@ -55,6 +57,16 @@ export default function Sidebar({ companyName, userEmail, userName }: SidebarPro
   const router = useRouter()
   const supabase = createClient()
   const { openDrawer } = useDraftDrawer()
+  const { role, departments, canWriteInvoices } = useAccess()
+  // Das Team sehen Owner und Admins sowie alle, die eine Abteilung leiten.
+  const showTeam = canManageTeam(role) || departments.some((d) => d.managed)
+  const sections = showTeam
+    ? navigation.map((section) =>
+        section.title === 'Einstellungen'
+          ? { ...section, items: [{ name: 'Team', href: '/team', icon: UsersRound }, ...section.items] }
+          : section
+      )
+    : navigation
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -90,6 +102,7 @@ export default function Sidebar({ companyName, userEmail, userName }: SidebarPro
 
         {/* Middle Section: New Invoice Button & Navigation */}
         <div className="flex-1 overflow-y-auto px-8 py-6">
+          {canWriteInvoices && (
           <button
             onClick={handleNewInvoice}
             className="mb-8 flex w-full items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all duration-200 hover:opacity-90"
@@ -102,9 +115,10 @@ export default function Sidebar({ companyName, userEmail, userName }: SidebarPro
             <Plus className="h-4 w-4 transition-colors duration-200" />
             Neue Rechnung
           </button>
+          )}
 
           <nav className="space-y-6">
-            {navigation.map((section, sectionIdx) => (
+            {sections.map((section, sectionIdx) => (
               <div key={sectionIdx}>
                 {section.title && (
                   <h3 className="mb-2 px-3 text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-meta)' }}>

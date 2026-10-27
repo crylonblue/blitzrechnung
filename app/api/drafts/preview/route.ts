@@ -146,6 +146,7 @@ export async function POST(request: NextRequest) {
     const mockInvoice: DBInvoice = {
       id: 'preview',
       company_id: companyId,
+      department_id: '',
       status: 'draft',
       invoice_type: 'invoice',
       invoice_number: 'VORSCHAU', // Preview indicator

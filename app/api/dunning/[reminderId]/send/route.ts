@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { userCanAccessInvoice } from '@/lib/access'
 import { assertCompanyMembership, InvoiceServiceError } from '@/lib/invoice-service'
 import { meldeFehler } from '@/lib/observability'
 import { DunningServiceError, versendeMahnung } from '@/lib/dunning-service'
@@ -37,11 +38,15 @@ export async function POST(
     // statt einer leeren Antwort.
     const { data: zeile } = await supabase
       .from('payment_reminders')
-      .select('company_id')
+      .select('company_id, invoice_id')
       .eq('id', reminderId)
       .single()
     if (!zeile) return NextResponse.json({ error: 'Mahnung nicht gefunden' }, { status: 404 })
     await assertCompanyMembership(supabase, user.id, zeile.company_id)
+    const { data: rechnung } = await supabase.from('invoices').select('company_id, department_id').eq('id', zeile.invoice_id).single()
+    if (!rechnung || !(await userCanAccessInvoice(supabase, user.id, rechnung, 'write'))) {
+      return NextResponse.json({ error: 'Keine Berechtigung für Rechnungen dieser Abteilung' }, { status: 403 })
+    }
 
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
 

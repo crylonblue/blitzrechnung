@@ -191,21 +191,21 @@ export interface Database {
           id: string
           user_id: string
           company_id: string
-          role: 'owner' | 'member'
+          role: 'owner' | 'admin' | 'accountant' | 'member'
           created_at: string
         }
         Insert: {
           id?: string
           user_id: string
           company_id: string
-          role?: 'owner' | 'member'
+          role?: 'owner' | 'admin' | 'accountant' | 'member'
           created_at?: string
         }
         Update: {
           id?: string
           user_id?: string
           company_id?: string
-          role?: 'owner' | 'member'
+          role?: 'owner' | 'admin' | 'accountant' | 'member'
           created_at?: string
         }
       }
@@ -285,6 +285,7 @@ export interface Database {
         Row: {
           id: string
           company_id: string
+          department_id: string
           status: 'draft' | 'created' | 'sent' | 'reminded' | 'paid' | 'cancelled' | 'uneinbringlich'
           invoice_type: 'invoice' | 'cancellation'
           invoice_number: string | null
@@ -318,6 +319,8 @@ export interface Database {
         Insert: {
           id?: string
           company_id: string
+          /** Fehlt sie, setzt die Datenbank die Standardabteilung der Firma. */
+          department_id?: string
           status?: 'draft' | 'created' | 'sent' | 'reminded' | 'paid' | 'cancelled' | 'uneinbringlich'
           invoice_type?: 'invoice' | 'cancellation'
           invoice_number?: string | null
@@ -351,6 +354,7 @@ export interface Database {
         Update: {
           id?: string
           company_id?: string
+          department_id?: string
           status?: 'draft' | 'created' | 'sent' | 'reminded' | 'paid' | 'cancelled' | 'uneinbringlich'
           invoice_type?: 'invoice' | 'cancellation'
           invoice_number?: string | null

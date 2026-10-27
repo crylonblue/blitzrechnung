@@ -80,6 +80,7 @@ export default function DraftDrawer() {
       const tempDraft: Invoice = {
         id: '', // Will be set when saved
         company_id: companyId,
+        department_id: '', // Wird beim Speichern gesetzt
         status: 'draft',
         invoice_type: 'invoice',
         line_items: [],

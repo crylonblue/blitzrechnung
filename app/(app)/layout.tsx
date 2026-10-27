@@ -21,6 +21,8 @@ export default async function Layout({ children }: { children: React.ReactNode }
       inTrial={billing.inTrial}
       entitled={billing.entitled}
       trialDaysLeft={billing.trialDaysLeft}
+      role={session.role}
+      departments={session.departments}
     >
       {children}
     </AppLayout>

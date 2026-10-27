@@ -1,6 +1,9 @@
 'use client'
 
 import Sidebar from './sidebar'
+import { AccessProvider } from '@/contexts/access-context'
+import type { CompanyRole } from '@/lib/access'
+import type { SessionDepartment } from '@/lib/app-session'
 import { DraftDrawerProvider } from '@/contexts/draft-drawer-context'
 import { ContactDrawerProvider } from '@/contexts/contact-drawer-context'
 import { ContactEditDrawerProvider } from '@/contexts/contact-edit-drawer-context'
@@ -21,10 +24,13 @@ interface AppLayoutProps {
   inTrial: boolean
   entitled: boolean
   trialDaysLeft: number
+  role: CompanyRole
+  departments: SessionDepartment[]
 }
 
-export default function AppLayout({ children, companyName, userEmail, userName, companyId, inTrial, entitled, trialDaysLeft }: AppLayoutProps) {
+export default function AppLayout({ children, companyName, userEmail, userName, companyId, inTrial, entitled, trialDaysLeft, role, departments }: AppLayoutProps) {
   return (
+    <AccessProvider role={role} departments={departments}>
     <DraftDrawerProvider>
       <ContactDrawerProvider>
         <ContactEditDrawerProvider>
@@ -55,5 +61,6 @@ export default function AppLayout({ children, companyName, userEmail, userName, 
         </ContactEditDrawerProvider>
       </ContactDrawerProvider>
     </DraftDrawerProvider>
+    </AccessProvider>
   )
 }

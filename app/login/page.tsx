@@ -15,6 +15,10 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // „code“: Anmeldung per Link oder 6-stelligem Code aus der Mail, ohne Passwort.
+  const [mode, setMode] = useState<'password' | 'code'>('password')
+  const [codeSent, setCodeSent] = useState(false)
+  const [code, setCode] = useState('')
   const router = useRouter()
   const supabase = createClient()
 
@@ -35,6 +39,49 @@ export default function LoginPage() {
       router.push('/')
       router.refresh()
     }
+  }
+
+  const handleRequestCode = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsLoading(true)
+    setError(null)
+
+    // Die Antwort ist immer „gesendet“, auch für unbekannte Adressen (siehe /auth/request-login).
+    const res = await fetch('/auth/request-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    })
+    setIsLoading(false)
+    if (!res.ok) {
+      setError('Bitte eine gültige E-Mail-Adresse angeben')
+      return
+    }
+    setCodeSent(true)
+  }
+
+  const handleVerifyCode = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsLoading(true)
+    setError(null)
+
+    const { error } = await supabase.auth.verifyOtp({ email, token: code.trim(), type: 'email' })
+    if (error) {
+      setError('Der Code ist falsch oder abgelaufen.')
+      setIsLoading(false)
+      return
+    }
+    // Nimmt „eingeladen“ vom Konto; ein Fehlschlag hält die Anmeldung nicht auf.
+    await fetch('/api/team/joined', { method: 'POST' }).catch(() => undefined)
+    router.push('/')
+    router.refresh()
+  }
+
+  const switchMode = (next: 'password' | 'code') => {
+    setMode(next)
+    setCodeSent(false)
+    setCode('')
+    setError(null)
   }
 
   const handleGoogleLogin = async () => {
@@ -152,45 +199,109 @@ export default function LoginPage() {
             </div>
           </div>
 
-          <form onSubmit={handleEmailLogin} className="space-y-4">
-            <div>
-              <Label htmlFor="email">
-                E-Mail
-              </Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="name@firma.de"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                className="mt-1.5 h-11"
-              />
-            </div>
+          {mode === 'code' && (
+            <>
+              <form onSubmit={codeSent ? handleVerifyCode : handleRequestCode} className="space-y-4">
+                <div>
+                  <Label htmlFor="email">
+                    E-Mail
+                  </Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="name@firma.de"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    disabled={codeSent}
+                    className="mt-1.5 h-11"
+                  />
+                </div>
 
-            <div>
-              <Label htmlFor="password">
-                Passwort
-              </Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="Dein Passwort"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                className="mt-1.5 h-11"
-              />
-            </div>
+                {codeSent && (
+                  <div>
+                    <p className="mb-3 text-sm" style={{ color: 'var(--text-secondary)' }}>
+                      Falls es ein Konto zu dieser Adresse gibt, haben wir Link und Code gesendet.
+                      Öffnen Sie den Link oder geben Sie den Code ein.
+                    </p>
+                    <Label htmlFor="code">
+                      Code
+                    </Label>
+                    <Input
+                      id="code"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      placeholder="123456"
+                      value={code}
+                      onChange={(e) => setCode(e.target.value)}
+                      required
+                      className="mt-1.5 h-11"
+                    />
+                  </div>
+                )}
 
-            <Button
-              type="submit"
-              disabled={isLoading}
-              className="w-full h-11"
-            >
-              {isLoading ? 'Wird angemeldet...' : 'Anmelden'}
-            </Button>
-          </form>
+                <Button type="submit" disabled={isLoading} className="w-full h-11">
+                  {codeSent ? (isLoading ? 'Wird angemeldet...' : 'Anmelden') : (isLoading ? 'Wird gesendet...' : 'Link und Code senden')}
+                </Button>
+              </form>
+
+              <p className="text-center text-sm">
+                <button type="button" onClick={() => switchMode('password')} className="font-medium hover:underline" style={{ color: 'var(--accent)' }}>
+                  Stattdessen mit Passwort anmelden
+                </button>
+              </p>
+            </>
+          )}
+
+          {mode === 'password' && (
+            <>
+              <form onSubmit={handleEmailLogin} className="space-y-4">
+                <div>
+                  <Label htmlFor="email">
+                    E-Mail
+                  </Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="name@firma.de"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    className="mt-1.5 h-11"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="password">
+                    Passwort
+                  </Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    placeholder="Dein Passwort"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    className="mt-1.5 h-11"
+                  />
+                </div>
+
+                <Button
+                  type="submit"
+                  disabled={isLoading}
+                  className="w-full h-11"
+                >
+                  {isLoading ? 'Wird angemeldet...' : 'Anmelden'}
+                </Button>
+              </form>
+
+              <p className="text-center text-sm">
+                <button type="button" onClick={() => switchMode('code')} className="font-medium hover:underline" style={{ color: 'var(--accent)' }}>
+                  Mit Link oder Code anmelden
+                </button>
+              </p>
+            </>
+          )}
 
           <p className="text-center text-sm" style={{ color: 'var(--text-meta)' }}>
             Noch kein Konto?{' '}

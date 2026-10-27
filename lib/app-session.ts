@@ -1,6 +1,7 @@
 import { cache } from 'react'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { isCompanyRole, writableDepartmentIds, type CompanyRole, type InvoiceScope } from '@/lib/access'
 
 /**
  * Löst angemeldeten Nutzer und Firmenzugehörigkeit genau einmal pro Request auf.
@@ -18,6 +19,16 @@ import { createClient } from '@/lib/supabase/server'
  * würde aber einem Cookie vertrauen, das der Client selbst schreiben kann — das
  * wäre eine Sicherheitslücke, kein Performance-Gewinn.
  */
+export interface SessionDepartment {
+  id: string
+  name: string
+  isDefault: boolean
+  /** Der Nutzer darf hier Rechnungen anlegen und ändern. */
+  writable: boolean
+  /** Der Nutzer leitet die Abteilung (oder ist Admin/Owner). */
+  managed: boolean
+}
+
 export interface AppSession {
   userId: string
   email: string
@@ -33,6 +44,14 @@ export interface AppSession {
   companyIds: string[]
   /** Firmen-ID → Name, wie die Listen es zur Anzeige brauchen. */
   companyNames: Record<string, string>
+  /** Rolle des Nutzers in der primären Firma. */
+  role: CompanyRole
+  /**
+   * Abteilungen der primären Firma. Jedes Mitglied sieht alle Namen; ob es dort
+   * auch Rechnungen sehen darf, steht in `writable` und ergibt sich sonst aus
+   * der RLS. Die Oberfläche blendet damit nur aus, durchgesetzt wird in der Datenbank.
+   */
+  departments: SessionDepartment[]
 }
 
 export const getAppSession = cache(async (): Promise<AppSession> => {
@@ -51,7 +70,7 @@ export const getAppSession = cache(async (): Promise<AppSession> => {
   // Profil direkt einzubetten.
   const { data: memberships } = await supabase
     .from('company_users')
-    .select('company_id, companies(name), user_profiles(name, email)')
+    .select('company_id, role, companies(name), user_profiles(name, email)')
     .eq('user_id', user.id)
 
   if (!memberships || memberships.length === 0) {
@@ -60,6 +79,7 @@ export const getAppSession = cache(async (): Promise<AppSession> => {
 
   const primary = memberships[0] as {
     company_id: string
+    role: string
     companies: { name: string | null } | { name: string | null }[] | null
     user_profiles: { name: string | null; email: string | null } | { name: string | null; email: string | null }[] | null
   }
@@ -79,6 +99,36 @@ export const getAppSession = cache(async (): Promise<AppSession> => {
     if (name) companyNames[row.company_id] = name
   }
 
+  const role: CompanyRole = isCompanyRole(primary.role) ? primary.role : 'member'
+
+  const [{ data: departmentRows }, { data: memberRows }] = await Promise.all([
+    supabase
+      .from('departments')
+      .select('id, name, is_default')
+      .eq('company_id', primary.company_id)
+      .order('name'),
+    supabase
+      .from('department_members')
+      .select('department_id, role')
+      .eq('user_id', user.id),
+  ])
+
+  const memberOf = new Map((memberRows ?? []).map((r) => [r.department_id as string, r.role as string]))
+  const scope: InvoiceScope = {
+    role,
+    departmentIds: (departmentRows ?? []).map((d) => d.id as string).filter((id) => memberOf.has(id)),
+    managedDepartmentIds: (departmentRows ?? []).map((d) => d.id as string).filter((id) => memberOf.get(id) === 'manager'),
+  }
+  const writable = writableDepartmentIds(scope)
+  const admin = role === 'owner' || role === 'admin'
+  const departments: SessionDepartment[] = (departmentRows ?? []).map((d) => ({
+    id: d.id as string,
+    name: d.name as string,
+    isDefault: !!d.is_default,
+    writable: writable === null || writable.includes(d.id as string),
+    managed: admin || scope.managedDepartmentIds.includes(d.id as string),
+  }))
+
   return {
     userId: user.id,
     email: profile?.email || user.email || '',
@@ -87,5 +137,7 @@ export const getAppSession = cache(async (): Promise<AppSession> => {
     companyName: company?.name || 'Mein Unternehmen',
     companyIds: memberships.map((m) => (m as { company_id: string }).company_id),
     companyNames,
+    role,
+    departments,
   }
 })
