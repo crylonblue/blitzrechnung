@@ -466,11 +466,26 @@ test("englische Mahnung trägt englische Beschriftungen", async () => {
     assert.ok(enthaelt(koerper, label), `„${label}" fehlt`);
   }
 
-  // Der Stufenname ist die Angabe des Nutzers und wird nicht übersetzt.
-  assert.ok(enthaelt(koerper, "Letzte Mahnung"));
+  // Der Standardname der Stufe erscheint übersetzt — ein „Letzte Mahnung"
+  // mitten im englischen Schreiben war der Fehler aus der Kundenrückmeldung.
+  assert.ok(enthaelt(koerper, "Final reminder"), "übersetzter Stufenname fehlt");
+  assert.equal(enthaelt(koerper, "Letzte Mahnung"), false);
+  // Ohne gespeicherten Text kommt der Brief in der Sprache der Mahnung.
+  assert.equal(enthaelt(koerper, "Sehr geehrte"), false);
   // Englische Zahlen- und Datumsschreibweise.
   assert.ok(enthaelt(koerper, "€1,190.00"), "englische Betragsschreibweise fehlt");
   assert.ok(enthaelt(koerper, "06/08/2026"), "englische Datumsschreibweise fehlt");
+});
+
+test("ein selbstgewählter Stufenname bleibt auch im englischen Schreiben stehen", async () => {
+  const { bytes, koerper } = await zeichne({
+    ...FAELLE.englisch,
+    mahnung: { ...FAELLE.englisch.mahnung, stage_name: "Freundliche Erinnerung (Stufe A)" },
+  });
+
+  assert.ok(enthaelt(koerper, "Freundliche Erinnerung (Stufe A)"));
+  const doc = await PDFDocument.load(bytes);
+  assert.equal(doc.getTitle(), "Freundliche Erinnerung (Stufe A) - invoice RE-2026-001");
 });
 
 // ---------------------------------------------------------------------------

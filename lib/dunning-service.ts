@@ -4,6 +4,7 @@ import type { DunningStageDefinition } from './dunning-stages'
 import { istMahnbarerStatus, type Forderung } from './dunning-claim'
 import { resolveReplyTo, resolveSellerContact } from './contact-persons'
 import { generateReminderPDF, type MahnschreibenInput } from './reminder-pdf'
+import { stufennameFuer } from './reminder-text'
 import { downloadFromS3, uploadToS3 } from './s3'
 import { getDefaultFromEmail, sendEmail, type SendEmailOptions } from './email'
 import { textToHtml } from './email-templates'
@@ -889,13 +890,14 @@ export function baueMahnungsMail(
   const nummer = invoiceNumber || (sprache === 'en' ? 'without number' : 'ohne Nummer')
   const betrag = formatCurrencyForLanguage(mahnung.total_amount, sprache)
   const frist = formatDateForLanguage(mahnung.due_date, sprache)
+  const stufe = stufennameFuer(mahnung.stage_name, sprache)
 
   if (sprache === 'en') {
     return {
-      betreff: `${mahnung.stage_name} – invoice ${nummer}`,
+      betreff: `${stufe} – invoice ${nummer}`,
       text: [
         'Dear Sir or Madam,',
-        `please find attached our ${mahnung.stage_name.toLowerCase()} regarding invoice ${nummer}.`,
+        `please find attached our ${stufe.toLowerCase()} regarding invoice ${nummer}.`,
         `The outstanding amount of ${betrag} is payable by ${frist}.`,
         `Kind regards\n${absenderName}`,
       ].join('\n\n'),
@@ -903,10 +905,10 @@ export function baueMahnungsMail(
   }
 
   return {
-    betreff: `${mahnung.stage_name} – Rechnung ${nummer}`,
+    betreff: `${stufe} – Rechnung ${nummer}`,
     text: [
       'Sehr geehrte Damen und Herren,',
-      `im Anhang finden Sie unsere ${mahnung.stage_name} zur Rechnung ${nummer}.`,
+      `im Anhang finden Sie unsere ${stufe} zur Rechnung ${nummer}.`,
       `Wir bitten Sie, den offenen Betrag von ${betrag} bis zum ${frist} zu überweisen.`,
       `Mit freundlichen Grüßen\n${absenderName}`,
     ].join('\n\n'),
@@ -1084,7 +1086,10 @@ export async function versendeMahnung(
       replyTo: resolveReplyTo(invoice, emailSettings),
       attachments: [
         {
-          name: anhangname(mahnung.stage_name, invoice.invoice_number),
+          name: anhangname(
+            stufennameFuer(mahnung.stage_name, mahnung.language === 'en' ? 'en' : 'de'),
+            invoice.invoice_number
+          ),
           content: anhang.toString('base64'),
           contentType: 'application/pdf',
         },
