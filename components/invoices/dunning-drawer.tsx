@@ -21,6 +21,7 @@ import {
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrencyForLanguage, formatDateForLanguage } from '@/lib/invoice-translations'
 import type { InterestResult } from '@/lib/dunning-interest'
+import { baueMahnschreiben } from '@/lib/reminder-text'
 import type { Invoice } from '@/types'
 import {
   istUnveraendert,
@@ -154,101 +155,48 @@ interface SchreibenInput {
 }
 
 /**
- * Das vorbereitete Schreiben.
+ * Das vorbereitete Schreiben — in der Sprache der Rechnung.
  *
- * Die Stufe bestimmt den Ton, nicht der Nutzer: Eine Zahlungserinnerung
- * unterstellt ein Versehen, eine Mahnung stellt den Verzug fest, die letzte
- * nennt die Folge. Wer es anders haben will, schreibt im Textfeld darüber —
- * deshalb ist es ein Textfeld und keine Vorschau.
+ * Der Wortlaut kommt aus `baueMahnschreiben` (`lib/reminder-text.ts`), also
+ * aus derselben Quelle wie der Standardtext im PDF. Hier stand bisher eine
+ * zweite, nur deutsche Fassung; weil das Textfeld immer mitgeschickt wird,
+ * trug jede englische Mahnung einen deutschen Brief.
+ *
+ * Die Stufe bestimmt den Ton, nicht der Nutzer. Wer es anders haben will,
+ * schreibt im Textfeld darüber — deshalb ist es ein Textfeld und keine
+ * Vorschau. Die Beträge stehen nicht im Text: Sobald es mehr als die
+ * Hauptforderung gibt, druckt das PDF sie als eigene Aufstellung.
  */
 function baueSchreiben({ invoice, absender, status }: SchreibenInput): string {
   const forderung = status.forderung
   if (!forderung || !status.stufe) return ''
 
-  const nummer = invoice.invoice_number || 'ohne Nummer'
-  const rechnungsdatum = invoice.invoice_date ? TAG(invoice.invoice_date) : null
-  const vom = rechnungsdatum ? ` vom ${rechnungsdatum}` : ''
-  const position = status.stufe.position
-
-  // Allgemeine Anrede: Der Empfänger-Snapshot trägt einen Firmennamen, keine
-  // Ansprechperson — „Sehr geehrte Muster GmbH" wäre falsch.
-  const anrede = 'Sehr geehrte Damen und Herren,'
-
+  const language = invoice.language === 'en' ? 'en' : 'de'
+  const heute = new Date().toISOString().split('T')[0]
   const nochNichtFaellig = faelligkeitNochVoraus(invoice, status.verzugsbeginn)
 
-  /**
-   * Vor Fälligkeit **ein** Text, unabhängig von der Stufe.
-   *
-   * Die Stufen drücken eine Eskalation aus, und eine Eskalation setzt voraus,
-   * dass etwas ausgeblieben ist. Vor dem Fälligkeitstag ist nichts
-   * ausgeblieben: Der Empfänger darf bis dahin zahlen und hat dieses Recht
-   * nicht dadurch verwirkt, dass wir ihn früh anschreiben. Jeder der drei
-   * bisherigen Einstiege wäre hier unwahr — „ist fällig und noch nicht
-   * eingegangen" ebenso wie „Sie befinden sich in Verzug". Deshalb tritt vor
-   * Fälligkeit eine einzige, freundliche Formulierung an ihre Stelle: Sie
-   * erinnert an den bevorstehenden Termin und stellt nichts fest.
-   *
-   * Die Texte **nach** Fälligkeit bleiben Wort für Wort, wie sie waren.
-   */
-  const einstieg = nochNichtFaellig
-    ? `unsere Rechnung ${nummer}${vom} über ${EUR(forderung.offenerBetrag)} wird am ${TAG(nochNichtFaellig)} fällig. Mit diesem Schreiben möchten wir Sie vorab freundlich daran erinnern.`
-    : position === 1
-      // Faellig ist die Rechnung an ihrem eigenen Termin, nicht am
-      // Verzugsbeginn. Die beiden fallen auseinander, sobald der
-      // 30-Tage-Boden aus § 286 Abs. 3 BGB greift — bei einem verkuerzten
-      // Zahlungsziel liegt der Verzugsbeginn Wochen nach der Faelligkeit.
-      // Hier stand bisher der Verzugsbeginn, das Schreiben nannte dem
-      // Empfaenger also ein Datum, an dem seine Rechnung nicht faellig war.
-      // Stufe 2 und 3 unten benutzen den Verzugsbeginn dagegen richtig:
-      // dort geht es um Verzug, nicht um Faelligkeit.
-      ? `unsere Rechnung ${nummer}${vom} über ${EUR(forderung.offenerBetrag)} war am ${TAG(invoice.due_date ?? status.verzugsbeginn)} zur Zahlung fällig und ist bei uns noch nicht eingegangen. Vermutlich ist sie in Ihrem Haus untergegangen.`
-      : position === 2
-        ? `trotz unserer Zahlungserinnerung ist unsere Rechnung ${nummer}${vom} über ${EUR(forderung.offenerBetrag)} bis heute nicht ausgeglichen. Sie befinden sich seit dem ${TAG(status.verzugsbeginn)} in Verzug.`
-        : `auf unsere bisherigen Schreiben haben Sie nicht reagiert. Unsere Rechnung ${nummer}${vom} über ${EUR(forderung.offenerBetrag)} ist weiterhin offen; Sie befinden sich seit dem ${TAG(status.verzugsbeginn)} in Verzug.`
-
-  // Die Aufstellung nur dann, wenn mehr als die Hauptforderung im Spiel ist —
-  // bei einer reinen Zahlungserinnerung wäre eine zweizeilige Tabelle mit
-  // identischen Beträgen eine Behauptung von Komplexität.
-  const posten: string[] = []
-  if (forderung.zinsen > 0 || forderung.gebuehr > 0 || forderung.pauschale > 0) {
-    posten.push(`Offener Betrag: ${EUR(forderung.offenerBetrag)}`)
-    if (forderung.zinsen > 0) posten.push(`Verzugszinsen: ${EUR(forderung.zinsen)}`)
-    if (forderung.gebuehr > 0) posten.push(`Mahnkosten: ${EUR(forderung.gebuehr)}`)
-    if (forderung.pauschale > 0)
-      posten.push(`Pauschale nach § 288 Abs. 5 BGB: ${EUR(forderung.pauschale)}`)
-    posten.push(`Gesamtforderung: ${EUR(forderung.summe)}`)
-  }
-
-  const bitte = `Wir bitten Sie, ${
-    posten.length > 0 ? 'den Gesamtbetrag' : `den Betrag von ${EUR(forderung.summe)}`
-  } bis zum ${TAG(zahlungsfrist(forderung.neueFrist, nochNichtFaellig))} auf das unten genannte Konto zu überweisen.`
-
-  // Die Ankündigung des gerichtlichen Schritts setzt voraus, dass die Zahlung
-  // überhaupt schon geschuldet ist. Vor Fälligkeit ist sie gegenstandslos —
-  // und als Drohung gegenüber jemandem, der noch gar nicht zahlen muss, das
-  // Gegenteil der freundlichen Erinnerung, als die dieses Schreiben gedacht
-  // ist.
-  const folge =
-    position >= 3 && !nochNichtFaellig
-      ? 'Geht die Zahlung bis dahin nicht ein, geben wir die Forderung ohne weitere Ankündigung zur gerichtlichen Geltendmachung ab.'
-      : null
-
-  // Die Überschneidungsklausel bleibt auf jeder Stufe stehen: Sie kostet eine
-  // Zeile und erspart dem Empfänger, der gestern überwiesen hat, den Anruf.
-  const ueberschneidung =
-    'Sollte sich Ihre Zahlung mit diesem Schreiben überschnitten haben, betrachten Sie es bitte als gegenstandslos.'
-
-  const absaetze = [
-    anrede,
-    einstieg,
-    posten.length > 0 ? posten.join('\n') : null,
-    bitte,
-    folge,
-    ueberschneidung,
-    `Mit freundlichen Grüßen\n${absender}`,
-  ].filter(Boolean)
-
-  return absaetze.join('\n\n')
+  return baueMahnschreiben({
+    stagePosition: status.stufe.position,
+    rechnungsnummer: invoice.invoice_number || (language === 'en' ? 'without number' : 'ohne Nummer'),
+    // Derselbe Ersatz wie beim Ablegen des Schreibens (`legeSchreibenAb`).
+    rechnungsdatum: invoice.invoice_date ?? heute,
+    // `baueMahnschreiben` erkennt die Vorab-Erinnerung an „Fälligkeit nach
+    // Schreibdatum". Diese Schublade zieht die Grenze strenger (siehe
+    // `faelligkeitNochVoraus`: hat der Verzug schon begonnen, ist es keine
+    // Vorab-Erinnerung mehr). Deshalb geht eine künftige Fälligkeit nur
+    // hinein, wenn auch die Schublade sie als bevorstehend wertet — sonst
+    // nennt der Text den Verzugsbeginn.
+    rechnungsFaelligkeit:
+      nochNichtFaellig ?? (invoice.due_date && invoice.due_date <= heute ? invoice.due_date : null),
+    verzugSeit: status.verzugsbeginn,
+    reminderDate: heute,
+    zahlbarBis: zahlungsfrist(forderung.neueFrist, nochNichtFaellig),
+    offenerBetrag: forderung.offenerBetrag,
+    summe: forderung.summe,
+    hatZusaetze: forderung.zinsen > 0 || forderung.gebuehr > 0 || forderung.pauschale > 0,
+    absender,
+    language,
+  })
 }
 
 /**

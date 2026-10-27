@@ -13,10 +13,9 @@ import {
  *    Positionen, Steuersätze und Summenblöcke — nichts davon kommt hier vor,
  *    und das soll auch so bleiben (siehe Kopfkommentar von
  *    `lib/reminder-pdf.ts`).
- *  * Diese Datei zieht bewusst **kein** pdf-lib herein. Der Mahnen-Dialog
- *    (`components/invoices/dunning-dialog.tsx`) baut denselben Brieftext heute
- *    noch selbst zusammen; er kann ihn später von hier beziehen, ohne dass
- *    eine Client-Komponente den PDF-Erzeuger mitlädt.
+ *  * Diese Datei zieht bewusst **kein** pdf-lib herein. Die Mahnen-Schublade
+ *    (`components/invoices/dunning-drawer.tsx`) bezieht ihren Brieftext von
+ *    hier, ohne dass eine Client-Komponente den PDF-Erzeuger mitlädt.
  *
  * Alles hier ist reine Textbildung: keine Datenbank, kein „heute". Jede Angabe
  * kommt aus dem eingefrorenen Mahnungsdatensatz, damit dieselbe Mahnung in
@@ -157,6 +156,29 @@ const englisch: MahnTexte = {
 
 export function getMahnTexte(language: InvoiceLanguage): MahnTexte {
   return language === "en" ? englisch : deutsch;
+}
+
+/**
+ * Die drei Standardstufen (`DEFAULT_DUNNING_STAGES`) auf Englisch.
+ *
+ * Nach dem Namen, nicht nach der Position: Ein selbstgewählter Name ist die
+ * Angabe des Nutzers und bleibt, wie er ist — eine erfundene Übersetzung wäre
+ * schlechter als die Bezeichnung selbst. Die Standardnamen dagegen hat niemand
+ * gewählt; ein „Zahlungserinnerung" mitten in einer englischen Mahnung ist
+ * schlicht ein Fehler.
+ */
+const STANDARD_STUFEN_EN: Record<string, string> = {
+  Zahlungserinnerung: "Payment reminder",
+  "1. Mahnung": "First reminder",
+  "Letzte Mahnung": "Final reminder",
+};
+
+/**
+ * Der Stufenname in der Sprache des Schreibens. Übersetzt wird beim Ausgeben,
+ * nicht beim Einfrieren — so werden auch bereits angelegte Mahnungen richtig.
+ */
+export function stufennameFuer(stageName: string, language: InvoiceLanguage): string {
+  return language === "en" ? STANDARD_STUFEN_EN[stageName] ?? stageName : stageName;
 }
 
 // ---------------------------------------------------------------------------

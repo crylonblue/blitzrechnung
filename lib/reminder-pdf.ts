@@ -26,6 +26,7 @@ import {
   baueMahnschreiben,
   formatPercentForLanguage,
   getMahnTexte,
+  stufennameFuer,
 } from "./reminder-text";
 
 /**
@@ -267,11 +268,9 @@ export async function generateReminderPDF(input: MahnschreibenInput): Promise<Ui
   // ===========================================
 
   // `stage_name` und nicht die heutige Konfiguration: Wird die Stufe später
-  // umbenannt, bleibt dieses Schreiben, was es war. Der Name ist die Angabe
-  // des Nutzers und wird auch im englischen Schreiben nicht übersetzt — eine
-  // erfundene Übersetzung einer selbstgewählten Bezeichnung wäre schlechter
-  // als die Bezeichnung selbst.
-  const titel = mahnung.stage_name;
+  // umbenannt, bleibt dieses Schreiben, was es war. Übersetzt werden nur die
+  // Standardnamen; ein selbstgewählter bleibt die Angabe des Nutzers.
+  const titel = stufennameFuer(mahnung.stage_name, language);
   drawText(titel, MARGIN_LEFT, bogen.y, { font: bold, size: 14 });
   bogen.y -= 30;
 

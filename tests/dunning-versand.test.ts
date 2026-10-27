@@ -549,6 +549,28 @@ test("eine englische Mahnung bekommt eine englische Begleit-E-Mail", () => {
   assert.equal(text.includes("Sehr geehrte"), false);
 });
 
+test("eine englische Mahnung nennt die Standardstufe englisch — in Betreff und Text", () => {
+  const { betreff, text } = baueMahnungsMail(
+    { stage_name: "Zahlungserinnerung", due_date: "2025-04-14", total_amount: 1234.5, language: "en" },
+    "INV-0011",
+    "Blitz Handwerk"
+  );
+
+  assert.equal(betreff, "Payment reminder – invoice INV-0011");
+  assert.ok(text.includes("please find attached our payment reminder regarding invoice INV-0011."));
+  // So kam es bei der Kundin an: englische Mail, deutsches Wort darin.
+  assert.equal(`${betreff}\n${text}`.toLowerCase().includes("zahlungserinnerung"), false);
+});
+
+test("eine deutsche Mahnung behält den Stufennamen unverändert", () => {
+  const { betreff } = baueMahnungsMail(
+    { stage_name: "Zahlungserinnerung", due_date: "2025-04-14", total_amount: 1234.5, language: "de" },
+    "INV-0011",
+    "Blitz Handwerk"
+  );
+  assert.equal(betreff, "Zahlungserinnerung – Rechnung INV-0011");
+});
+
 test("der Anhangname ist lesbar und enthält nichts, was Dateinamen bricht", () => {
   assert.equal(anhangname("1. Mahnung", "INV-0007"), "1. Mahnung INV-0007.pdf");
   // Ein selbstgewählter Stufenname darf alles enthalten; der Dateiname nicht.
