@@ -101,7 +101,10 @@ export async function uploadToS3(
 
   const s3Client = new S3Client(s3ClientConfig)
 
-  const key = buildKey(`invoices/${userId}/${invoiceId}/${fileName}`, config)
+  // Rechnungsnummern können Schrägstriche enthalten ("2026/10/120"); als Dateiname
+  // würden sie den Key in Pfadsegmente zerlegen.
+  const safeFileName = fileName.replace(/[\\/]+/g, '-')
+  const key = buildKey(`invoices/${userId}/${invoiceId}/${safeFileName}`, config)
   
   const command = new PutObjectCommand({
     Bucket: config.bucketName,
@@ -260,8 +263,10 @@ function extractKeyFromUrl(fileUrl: string, bucketName: string): string {
     const url = new URL(fileUrl)
     const publicUrl = process.env.S3_PUBLIC_URL
     
-    // Remove leading slash and get path parts
-    const pathParts = url.pathname.split('/').filter(Boolean)
+    // Leere Segmente dürfen nicht verworfen werden: Rechnungsnummern wie
+    // "2026//10//120" landen als leere Segmente im Key, und ein anderer Key
+    // als beim Hochladen liefert "The specified key does not exist".
+    const pathParts = url.pathname.replace(/^\//, '').split('/').map(decodeURIComponent)
     
     // If using public CDN URL, the path is the key directly (includes path prefix if any)
     if (publicUrl) {
