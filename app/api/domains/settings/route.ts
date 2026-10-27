@@ -1,3 +1,4 @@
+import { canManageTeam, type CompanyRole } from '@/lib/access'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { EmailSettings } from '@/types'
@@ -27,9 +28,9 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: 'No company found' }, { status: 404 })
   }
 
-  // Only owners can manage email settings
-  if (companyUser.role !== 'owner') {
-    return NextResponse.json({ error: 'Only owners can manage email settings' }, { status: 403 })
+  // Only owners and admins can manage email settings
+  if (!canManageTeam(companyUser.role as CompanyRole)) {
+    return NextResponse.json({ error: 'Only owners and admins can manage email settings' }, { status: 403 })
   }
 
   const body = await request.json()

@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { LayoutDashboard, FileEdit, FileText, Users, UsersRound, Settings, Plus, Building2 } from 'lucide-react'
 import { useAccess } from '@/contexts/access-context'
-import { canManageTeam, isOwner } from '@/lib/access'
+import { canManageTeam } from '@/lib/access'
 import { useDraftDrawer } from '@/contexts/draft-drawer-context'
 
 interface SidebarProps {
@@ -60,8 +60,8 @@ export default function Sidebar({ companyName, userEmail, userName }: SidebarPro
   const { role, departments, canWriteInvoices } = useAccess()
   // Das Team sehen Owner und Admins sowie alle, die eine Abteilung leiten.
   const showTeam = canManageTeam(role) || departments.some((d) => d.managed)
-  // Die Einstellungen (Firmendaten, Abrechnung) öffnet die Seite nur für Owner.
-  const showSettings = isOwner(role)
+  // Die Einstellungen öffnet die Seite nur für Owner und Admins.
+  const showSettings = canManageTeam(role)
   const sections = navigation
     .map((section) => {
       if (section.title !== 'Einstellungen') return section

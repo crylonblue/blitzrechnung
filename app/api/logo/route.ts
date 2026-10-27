@@ -19,12 +19,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Get user's company (owner only)
+    // Get user's company (owner or admin)
     const { data: companyUser } = await supabase
       .from('company_users')
       .select('company_id, role')
       .eq('user_id', user.id)
-      .eq('role', 'owner')
+      .in('role', ['owner', 'admin'])
       .limit(1)
       .single()
 
@@ -114,12 +114,12 @@ export async function DELETE() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Get user's company (owner only)
+    // Get user's company (owner or admin)
     const { data: companyUser } = await supabase
       .from('company_users')
       .select('company_id, role')
       .eq('user_id', user.id)
-      .eq('role', 'owner')
+      .in('role', ['owner', 'admin'])
       .limit(1)
       .single()
 

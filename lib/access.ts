@@ -43,7 +43,7 @@ export function canManageTeam(role: CompanyRole): boolean {
   return role === 'owner' || role === 'admin'
 }
 
-/** Abrechnung, Firmendaten und Zugangsdaten bleiben beim Eigentümer. */
+/** Der Tarif (Abrechnung) bleibt beim Eigentümer; Firmeneinstellungen dürfen auch Admins. */
 export function isOwner(role: CompanyRole): boolean {
   return role === 'owner'
 }

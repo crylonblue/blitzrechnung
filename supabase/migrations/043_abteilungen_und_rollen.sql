@@ -559,3 +559,11 @@ $$;
 
 GRANT EXECUTE ON FUNCTION get_next_invoice_number(TEXT, UUID, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION get_next_cancellation_invoice_number(TEXT, UUID, TEXT) TO authenticated;
+
+-- Firmeneinstellungen: Owner und Admin duerfen die Firma aendern (bisher nur
+-- Owner). Der Tarif bleibt beim Owner, das erzwingen die Billing-Routen.
+DROP POLICY IF EXISTS "Users can update their companies" ON companies;
+CREATE POLICY "Owners and admins can update their companies"
+  ON companies FOR UPDATE
+  USING (is_company_admin(id))
+  WITH CHECK (is_company_admin(id));
