@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { LayoutDashboard, FileEdit, FileText, Users, UsersRound, Settings, Plus, Building2 } from 'lucide-react'
 import { useAccess } from '@/contexts/access-context'
-import { canManageTeam } from '@/lib/access'
+import { canManageTeam, isOwner } from '@/lib/access'
 import { useDraftDrawer } from '@/contexts/draft-drawer-context'
 
 interface SidebarProps {
@@ -60,13 +60,18 @@ export default function Sidebar({ companyName, userEmail, userName }: SidebarPro
   const { role, departments, canWriteInvoices } = useAccess()
   // Das Team sehen Owner und Admins sowie alle, die eine Abteilung leiten.
   const showTeam = canManageTeam(role) || departments.some((d) => d.managed)
-  const sections = showTeam
-    ? navigation.map((section) =>
-        section.title === 'Einstellungen'
-          ? { ...section, items: [{ name: 'Team', href: '/team', icon: UsersRound }, ...section.items] }
-          : section
-      )
-    : navigation
+  // Die Einstellungen (Firmendaten, Abrechnung) öffnet die Seite nur für Owner.
+  const showSettings = isOwner(role)
+  const sections = navigation
+    .map((section) => {
+      if (section.title !== 'Einstellungen') return section
+      const items = [
+        ...(showTeam ? [{ name: 'Team', href: '/team', icon: UsersRound }] : []),
+        ...section.items.filter((item) => item.href !== '/settings' || showSettings),
+      ]
+      return { ...section, items }
+    })
+    .filter((section) => section.items.length > 0)
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
