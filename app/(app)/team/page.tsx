@@ -61,9 +61,9 @@ export default async function TeamPage() {
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-12">
-      <div className="mb-12">
+      <div className="mb-8">
         <h1 className="text-headline">Team</h1>
-        <p className="mt-2 text-meta">Mitglieder, Rollen und Abteilungen. Rechnungen sind nur für die Abteilung sichtbar, der sie angehören.</p>
+        <p className="mt-2 text-meta">Wer im Team ist, welche Rolle die Person hat und in welchen Abteilungen sie Rechnungen sieht.</p>
       </div>
       <TeamManager
         currentUserId={session.userId}

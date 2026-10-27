@@ -41,7 +41,7 @@ export default function AppLayout({ children, companyName, userEmail, userName, 
                 <Sidebar companyName={companyName} userEmail={userEmail} userName={userName} />
 
                 {/* Main Content */}
-                <main className="flex-1 pl-80">
+                <main className="min-w-0 flex-1 pl-80">
                   <TrialBanner inTrial={inTrial} entitled={entitled} trialDaysLeft={trialDaysLeft} />
                   {children}
                 </main>
