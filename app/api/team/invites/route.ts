@@ -22,7 +22,11 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => null)
     const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : ''
     const role = body?.role
-    const departmentIds: string[] = Array.isArray(body?.departmentIds) ? body.departmentIds : []
+    if (body?.departmentIds !== undefined && (!Array.isArray(body.departmentIds) || !body.departmentIds.every((id: unknown) => typeof id === 'string'))) {
+      throw new TeamError(400, 'Ungültige Abteilungen')
+    }
+    // Doppelte Ids würden den Primärschlüssel von department_members verletzen.
+    const departmentIds: string[] = [...new Set<string>(body?.departmentIds ?? [])]
 
     if (!isEmail(email)) throw new TeamError(400, 'Bitte eine gültige E-Mail-Adresse angeben')
     if (!['admin', 'accountant', 'member'].includes(role)) throw new TeamError(400, 'Ungültige Rolle')
@@ -41,7 +45,7 @@ export async function POST(request: NextRequest) {
         .select('id')
         .eq('company_id', ctx.companyId)
         .in('id', departmentIds)
-      if ((valid?.length ?? 0) !== new Set(departmentIds).size) {
+      if ((valid?.length ?? 0) !== departmentIds.length) {
         throw new TeamError(400, 'Unbekannte Abteilung')
       }
     }
@@ -93,7 +97,7 @@ export async function POST(request: NextRequest) {
         ctx.db.from('companies').select('name').eq('id', ctx.companyId).single(),
         ctx.db.from('user_profiles').select('name').eq('id', ctx.userId).single(),
       ])
-      const token = await createLoginToken(ctx.db, email, request.nextUrl.origin)
+      const token = await createLoginToken(ctx.db, email)
       await sendInviteMail(email, token, {
         companyName: company?.name ?? 'einem Unternehmen',
         inviterName: inviter?.name ?? null,

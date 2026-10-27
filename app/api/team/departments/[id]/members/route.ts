@@ -47,7 +47,8 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     await assertManager(ctx, id)
     const userId = request.nextUrl.searchParams.get('userId')
     if (!userId) throw new TeamError(400, 'userId fehlt')
-    await ctx.db.from('department_members').delete().eq('department_id', id).eq('user_id', userId)
+    const { error } = await ctx.db.from('department_members').delete().eq('department_id', id).eq('user_id', userId)
+    if (error) throw new TeamError(500, 'Entfernen fehlgeschlagen')
     return NextResponse.json({ success: true })
   } catch (err) {
     return teamErrorResponse(err)

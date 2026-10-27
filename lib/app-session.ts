@@ -1,7 +1,7 @@
 import { cache } from 'react'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { isCompanyRole, writableDepartmentIds, type CompanyRole, type InvoiceScope } from '@/lib/access'
+import { canManageTeam, isCompanyRole, writableDepartmentIds, type CompanyRole, type InvoiceScope } from '@/lib/access'
 
 /**
  * Löst angemeldeten Nutzer und Firmenzugehörigkeit genau einmal pro Request auf.
@@ -113,14 +113,17 @@ export const getAppSession = cache(async (): Promise<AppSession> => {
       .eq('user_id', user.id),
   ])
 
+  // Nur Abteilungen dieser Firma zählen; die Mitgliedszeilen sind nutzerweit.
+  const scope: InvoiceScope = { role, departmentIds: [], managedDepartmentIds: [] }
   const memberOf = new Map((memberRows ?? []).map((r) => [r.department_id as string, r.role as string]))
-  const scope: InvoiceScope = {
-    role,
-    departmentIds: (departmentRows ?? []).map((d) => d.id as string).filter((id) => memberOf.has(id)),
-    managedDepartmentIds: (departmentRows ?? []).map((d) => d.id as string).filter((id) => memberOf.get(id) === 'manager'),
+  for (const d of departmentRows ?? []) {
+    const memberRole = memberOf.get(d.id as string)
+    if (!memberRole) continue
+    scope.departmentIds.push(d.id as string)
+    if (memberRole === 'manager') scope.managedDepartmentIds.push(d.id as string)
   }
   const writable = writableDepartmentIds(scope)
-  const admin = role === 'owner' || role === 'admin'
+  const admin = canManageTeam(role)
   const departments: SessionDepartment[] = (departmentRows ?? []).map((d) => ({
     id: d.id as string,
     name: d.name as string,

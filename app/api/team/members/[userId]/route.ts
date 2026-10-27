@@ -45,7 +45,12 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       throw new TeamError(409, 'Es muss mindestens ein Eigentümer bleiben')
     }
 
-    await ctx.db.from('company_users').update({ role }).eq('company_id', ctx.companyId).eq('user_id', userId)
+    const { error } = await ctx.db
+      .from('company_users')
+      .update({ role })
+      .eq('company_id', ctx.companyId)
+      .eq('user_id', userId)
+    if (error) throw new TeamError(500, 'Rolle konnte nicht geändert werden')
     return NextResponse.json({ success: true })
   } catch (err) {
     return teamErrorResponse(err)
@@ -69,15 +74,24 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
     const { data: departments } = await ctx.db.from('departments').select('id').eq('company_id', ctx.companyId)
     const departmentIds = (departments ?? []).map((d) => d.id as string)
     if (departmentIds.length > 0) {
-      await ctx.db.from('department_members').delete().eq('user_id', userId).in('department_id', departmentIds)
+      const { error } = await ctx.db.from('department_members').delete().eq('user_id', userId).in('department_id', departmentIds)
+      if (error) throw new TeamError(500, 'Entfernen fehlgeschlagen')
     }
     // API-Schlüssel gehören dem Nutzer; ohne ihn sind sie nur ein offenes Tor.
-    await ctx.db.from('api_keys').delete().eq('user_id', userId).eq('company_id', ctx.companyId)
-    await ctx.db.from('company_users').delete().eq('user_id', userId).eq('company_id', ctx.companyId)
+    const { error: keyError } = await ctx.db.from('api_keys').delete().eq('user_id', userId).eq('company_id', ctx.companyId)
+    if (keyError) throw new TeamError(500, 'Entfernen fehlgeschlagen')
+    const { error: memberError } = await ctx.db.from('company_users').delete().eq('user_id', userId).eq('company_id', ctx.companyId)
+    if (memberError) throw new TeamError(500, 'Entfernen fehlgeschlagen')
+
     // Eine nie angemeldete, nur für diese Einladung angelegte Person lässt kein
-    // Konto ohne Zweck zurück.
+    // Konto ohne Zweck zurück. `invite_pending` allein genügt nicht: Wer sich
+    // per Google oder Passwort-Reset angemeldet hat, ist ein echter Nutzer,
+    // auch wenn das Flag noch steht. Gelöscht wird nur ohne jede Anmeldung.
     if (target.invite_pending) {
-      await ctx.db.auth.admin.deleteUser(userId)
+      const { data: auth } = await ctx.db.auth.admin.getUserById(userId)
+      if (auth?.user && !auth.user.last_sign_in_at) {
+        await ctx.db.auth.admin.deleteUser(userId)
+      }
     }
     return NextResponse.json({ success: true })
   } catch (err) {

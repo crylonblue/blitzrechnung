@@ -27,7 +27,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       ctx.db.from('companies').select('name').eq('id', ctx.companyId).single(),
       ctx.db.from('user_profiles').select('name').eq('id', ctx.userId).single(),
     ])
-    const token = await createLoginToken(ctx.db, email, request.nextUrl.origin)
+    const token = await createLoginToken(ctx.db, email)
     await sendInviteMail(email, token, { companyName: company?.name ?? 'einem Unternehmen', inviterName: inviter?.name ?? null })
     return NextResponse.json({ success: true })
   } catch (err) {

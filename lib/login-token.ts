@@ -20,17 +20,26 @@ export interface LoginToken {
   code: string
 }
 
+/**
+ * Basis-URL der Links in unseren Mails. Sie kommt aus der Konfiguration, nie aus
+ * dem Request: Den Host-Header kann ein Aufrufer setzen, und /auth/request-login
+ * ist ohne Anmeldung erreichbar. Sonst ließe sich eine echte Mail mit einem Link
+ * auf eine fremde Domain auslösen, die den Token abgreift.
+ */
+export function siteUrl(): string {
+  const configured = process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL
+  if (configured) return configured.replace(/\/+$/, '')
+  if (process.env.NODE_ENV !== 'production') return 'http://localhost:3000'
+  throw new Error('NEXT_PUBLIC_SITE_URL ist nicht gesetzt')
+}
+
 /** Erzeugt Link und Code für ein bestehendes Konto. Legt nie ein Konto an. */
-export async function createLoginToken(
-  db: SupabaseClient,
-  email: string,
-  origin: string
-): Promise<LoginToken> {
+export async function createLoginToken(db: SupabaseClient, email: string): Promise<LoginToken> {
   const { data, error } = await db.auth.admin.generateLink({ type: 'magiclink', email })
   if (error || !data?.properties) throw new Error(error?.message ?? 'Anmelde-Token konnte nicht erzeugt werden')
   const { hashed_token, email_otp } = data.properties
   return {
-    link: `${origin}/auth/token?token_hash=${encodeURIComponent(hashed_token)}`,
+    link: `${siteUrl()}/auth/token?token_hash=${encodeURIComponent(hashed_token)}`,
     code: email_otp,
   }
 }

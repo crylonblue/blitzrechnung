@@ -225,10 +225,14 @@ CREATE TRIGGER companies_create_default_department
 -- Bestand: alle Rechnungen in die Standardabteilung, alle bisherigen
 -- Mitglieder dort aufnehmen — sonst saehen sie nach dieser Migration nichts
 -- mehr. Eigentuemer sehen ohnehin alles.
+-- updated_at bleibt unberuehrt: Die Zuordnung aendert nichts am Inhalt, und bei
+-- festgeschriebenen Rechnungen soll der echte Aenderungszeitpunkt erhalten bleiben.
+ALTER TABLE invoices DISABLE TRIGGER update_invoices_updated_at;
 UPDATE invoices i
 SET department_id = d.id
 FROM departments d
 WHERE d.company_id = i.company_id AND d.is_default;
+ALTER TABLE invoices ENABLE TRIGGER update_invoices_updated_at;
 
 INSERT INTO department_members (department_id, user_id, role)
 SELECT d.id, cu.user_id, 'member'
@@ -359,3 +363,199 @@ CREATE POLICY "Managers can remove department members"
     is_department_manager(department_id)
     OR is_company_admin((SELECT d.company_id FROM departments d WHERE d.id = department_id))
   );
+
+
+-- Nummernkreis: Die RPCs sind SECURITY DEFINER und fuer `authenticated`
+-- freigegeben. Bisher genuegte die Firmenzugehoerigkeit; ein Accountant oder
+-- ein Mitglied ohne Abteilung konnte so ueber PostgREST Nummern verbrauchen und
+-- Luecken im Nummernkreis reissen. Wer keine Rechnung schreiben darf, darf auch
+-- keine Nummer ziehen. (Die Abteilung der Rechnung kennt die Funktion nicht;
+-- die genaue Pruefung macht lib/invoice-service.ts vor dem Aufruf.)
+CREATE OR REPLACE FUNCTION can_issue_invoice_numbers(p_company_id UUID)
+RETURNS BOOLEAN AS $$
+DECLARE
+  v_role TEXT := company_role(p_company_id);
+BEGIN
+  IF v_role IN ('owner', 'admin') THEN
+    RETURN true;
+  END IF;
+  IF v_role <> 'member' THEN
+    RETURN false;
+  END IF;
+  RETURN EXISTS (
+    SELECT 1
+    FROM department_members dm
+    JOIN departments d ON d.id = dm.department_id
+    WHERE dm.user_id = auth.uid() AND d.company_id = p_company_id
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE SET search_path = public;
+
+-- Neufassung der Nummernfunktionen aus 039; einzige Aenderung ist die Pruefung.
+CREATE OR REPLACE FUNCTION get_next_invoice_number(
+  p_seller_type TEXT,  -- 'company' oder 'contact'
+  p_seller_id UUID,
+  p_prefix TEXT DEFAULT NULL
+)
+RETURNS TABLE (
+  next_number INTEGER,
+  formatted_number TEXT
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_counter INTEGER;
+  v_prefix TEXT;
+  v_company_id UUID;
+BEGIN
+  -- Zuerst die Firma bestimmen, zu der die Nummer gehoert.
+  IF p_seller_type = 'company' THEN
+    v_company_id := p_seller_id;
+
+  ELSIF p_seller_type = 'contact' THEN
+    SELECT c.company_id INTO v_company_id
+    FROM contacts c
+    WHERE c.id = p_seller_id;
+
+    IF v_company_id IS NULL THEN
+      RAISE EXCEPTION 'Contact not found: %', p_seller_id;
+    END IF;
+
+  ELSE
+    RAISE EXCEPTION 'Invalid seller_type: %. Must be "company" or "contact"', p_seller_type;
+  END IF;
+
+  -- Ohne Nutzerkontext (Dienstschluessel der oeffentlichen API) entfaellt die
+  -- Pruefung hier; dort traegt der API-Schluessel die Autorisierung.
+  IF auth.uid() IS NOT NULL AND NOT can_issue_invoice_numbers(v_company_id) THEN
+    RAISE EXCEPTION 'Kein Zugriff auf die Firma %', v_company_id
+      USING ERRCODE = '42501';
+  END IF;
+
+  IF p_seller_type = 'company' THEN
+    UPDATE companies
+    SET invoice_number_counter = invoice_number_counter + 1
+    WHERE id = p_seller_id
+    RETURNING invoice_number_counter, invoice_number_prefix
+    INTO v_counter, v_prefix;
+
+    IF v_counter IS NULL THEN
+      RAISE EXCEPTION 'Company not found: %', p_seller_id;
+    END IF;
+
+  ELSE
+    UPDATE contacts
+    SET invoice_number_counter = invoice_number_counter + 1
+    WHERE id = p_seller_id
+    RETURNING invoice_number_counter, invoice_number_prefix
+    INTO v_counter, v_prefix;
+
+    IF v_counter IS NULL THEN
+      RAISE EXCEPTION 'Contact not found: %', p_seller_id;
+    END IF;
+  END IF;
+
+  -- Ein ausdruecklich uebergebenes Praefix gewinnt, sonst gilt das hinterlegte.
+  -- Der Leerstring ist hier eine gueltige Angabe und bedeutet "kein Praefix";
+  -- deshalb wird auf IS NOT NULL geprueft, nicht auf Wahrheitswert.
+  IF p_prefix IS NOT NULL THEN
+    v_prefix := p_prefix;
+  END IF;
+
+  next_number := v_counter;
+
+  -- Kein Praefix, kein Trenner.
+  IF v_prefix IS NULL OR btrim(v_prefix) = '' THEN
+    formatted_number := LPAD(v_counter::TEXT, 4, '0');
+  ELSE
+    formatted_number := btrim(v_prefix) || '-' || LPAD(v_counter::TEXT, 4, '0');
+  END IF;
+
+  RETURN NEXT;
+END;
+$$;
+
+-- Dieselbe Behandlung fuer Stornorechnungen, damit beide Nummernkreise sich
+-- gleich verhalten.
+CREATE OR REPLACE FUNCTION get_next_cancellation_invoice_number(
+  p_seller_type TEXT,
+  p_seller_id UUID,
+  p_prefix TEXT DEFAULT NULL
+)
+RETURNS TABLE (
+  next_number INTEGER,
+  formatted_number TEXT
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_counter INTEGER;
+  v_prefix TEXT;
+  v_company_id UUID;
+BEGIN
+  IF p_seller_type = 'company' THEN
+    v_company_id := p_seller_id;
+
+  ELSIF p_seller_type = 'contact' THEN
+    SELECT c.company_id INTO v_company_id
+    FROM contacts c
+    WHERE c.id = p_seller_id;
+
+    IF v_company_id IS NULL THEN
+      RAISE EXCEPTION 'Contact not found: %', p_seller_id;
+    END IF;
+
+  ELSE
+    RAISE EXCEPTION 'Invalid seller_type: %. Must be "company" or "contact"', p_seller_type;
+  END IF;
+
+  IF auth.uid() IS NOT NULL AND NOT can_issue_invoice_numbers(v_company_id) THEN
+    RAISE EXCEPTION 'Kein Zugriff auf die Firma %', v_company_id
+      USING ERRCODE = '42501';
+  END IF;
+
+  IF p_seller_type = 'company' THEN
+    UPDATE companies
+    SET cancellation_number_counter = COALESCE(cancellation_number_counter, 0) + 1
+    WHERE id = p_seller_id
+    RETURNING cancellation_number_counter, cancellation_number_prefix
+    INTO v_counter, v_prefix;
+
+    IF v_counter IS NULL THEN
+      RAISE EXCEPTION 'Company not found: %', p_seller_id;
+    END IF;
+
+  ELSE
+    UPDATE contacts
+    SET cancellation_number_counter = COALESCE(cancellation_number_counter, 0) + 1
+    WHERE id = p_seller_id
+    RETURNING cancellation_number_counter, cancellation_number_prefix
+    INTO v_counter, v_prefix;
+
+    IF v_counter IS NULL THEN
+      RAISE EXCEPTION 'Contact not found: %', p_seller_id;
+    END IF;
+  END IF;
+
+  IF p_prefix IS NOT NULL THEN
+    v_prefix := p_prefix;
+  END IF;
+
+  next_number := v_counter;
+
+  IF v_prefix IS NULL OR btrim(v_prefix) = '' THEN
+    formatted_number := LPAD(v_counter::TEXT, 4, '0');
+  ELSE
+    formatted_number := btrim(v_prefix) || '-' || LPAD(v_counter::TEXT, 4, '0');
+  END IF;
+
+  RETURN NEXT;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION get_next_invoice_number(TEXT, UUID, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION get_next_cancellation_invoice_number(TEXT, UUID, TEXT) TO authenticated;

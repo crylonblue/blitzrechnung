@@ -50,7 +50,11 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
     const { count } = await ctx.db.from('invoices').select('id', { count: 'exact', head: true }).eq('department_id', id)
     if ((count ?? 0) > 0) throw new TeamError(409, 'Die Abteilung enthält noch Rechnungen oder Entwürfe')
 
-    await ctx.db.from('departments').delete().eq('id', id).eq('company_id', ctx.companyId)
+    const { error } = await ctx.db.from('departments').delete().eq('id', id).eq('company_id', ctx.companyId)
+    if (error) {
+      // Zwischen Zählung und Löschen kann eine Rechnung dazugekommen sein (ON DELETE RESTRICT).
+      throw new TeamError(error.code === '23503' ? 409 : 500, error.code === '23503' ? 'Die Abteilung enthält noch Rechnungen oder Entwürfe' : 'Löschen fehlgeschlagen')
+    }
     return NextResponse.json({ success: true })
   } catch (err) {
     return teamErrorResponse(err)
