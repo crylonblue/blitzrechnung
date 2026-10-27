@@ -258,7 +258,7 @@ export async function deleteLogoFromS3(companyId: string): Promise<void> {
  * Extracts the S3 key from a file URL
  * Handles both S3 endpoint URLs and public CDN URLs
  */
-function extractKeyFromUrl(fileUrl: string, bucketName: string): string {
+export function extractKeyFromUrl(fileUrl: string, bucketName: string): string {
   try {
     const url = new URL(fileUrl)
     const publicUrl = process.env.S3_PUBLIC_URL
@@ -272,7 +272,11 @@ function extractKeyFromUrl(fileUrl: string, bucketName: string): string {
     if (publicUrl) {
       const publicUrlParsed = new URL(publicUrl)
       if (url.host === publicUrlParsed.host) {
-        return pathParts.join('/')
+        // Eine öffentliche URL mit eigenem Pfad (lokal: .../storage/v1/object/public/<bucket>)
+        // gehört nicht zum Key — `buildPublicUrl` hängt den Key erst dahinter.
+        const basisPfad = publicUrlParsed.pathname.split('/').filter(Boolean)
+        const gehoertDazu = basisPfad.every((teil, i) => pathParts[i] === teil)
+        return (gehoertDazu ? pathParts.slice(basisPfad.length) : pathParts).join('/')
       }
     }
     

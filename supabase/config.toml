@@ -2,12 +2,18 @@
 # https://supabase.com/docs/guides/local-development/cli/config
 # A string used to distinguish different Supabase projects on the same host. Defaults to the
 # working directory name when running `supabase init`.
-project_id = "flixy"
+#
+# Eigene ID und eigene Ports (55xxx statt der Standard-Reihe 54xxx): Auf der Entwicklungs-
+# maschine laufen daneben andere Supabase-Projekte, die auf 54321/54322/... lauschen. Mit den
+# Standardwerten blockiert das eine Projekt das andere, und `supabase start` bricht mit
+# "port is already allocated" ab. Die Reihe hier ist 55320-55329; wer eine davon belegt hat,
+# ändert sie hier — und `NEXT_PUBLIC_SUPABASE_URL` in `.env.local` gleich mit.
+project_id = "blitzrechnung"
 
 [api]
 enabled = true
 # Port to use for the API URL.
-port = 54321
+port = 55321
 # Schemas to expose in your API. Tables, views and stored procedures in this schema will get API
 # endpoints. `public` and `graphql_public` schemas are included by default.
 schemas = ["public", "graphql_public"]
@@ -26,9 +32,9 @@ enabled = false
 
 [db]
 # Port to use for the local database URL.
-port = 54322
+port = 55322
 # Port used by db diff command to initialize the shadow database.
-shadow_port = 54320
+shadow_port = 55320
 # The database major version to use. This has to be the same as your remote database's. Run `SHOW
 # server_version;` on the remote database to check.
 major_version = 17
@@ -36,7 +42,7 @@ major_version = 17
 [db.pooler]
 enabled = false
 # Port to use for the local connection pooler.
-port = 54329
+port = 55329
 # Specifies when a server connection can be reused by other clients.
 # Configure one of the supported pooler modes: `transaction`, `session`.
 pool_mode = "transaction"
@@ -73,7 +79,8 @@ allowed_cidrs = ["0.0.0.0/0"]
 allowed_cidrs_v6 = ["::/0"]
 
 [realtime]
-enabled = true
+# Aus: Die App nutzt kein Realtime. Spart einen Container.
+enabled = false
 # Bind realtime via either IPv4 or IPv6. (default: IPv4)
 # ip_version = "IPv6"
 # The maximum length in bytes of HTTP request headers. (default: 4096)
@@ -82,7 +89,7 @@ enabled = true
 [studio]
 enabled = true
 # Port to use for Supabase Studio.
-port = 54323
+port = 55323
 # External URL of the API server that frontend connects to.
 api_url = "http://127.0.0.1"
 # OpenAI API Key to use for Supabase AI in the Supabase Studio.
@@ -93,7 +100,7 @@ openai_api_key = "env(OPENAI_API_KEY)"
 [inbucket]
 enabled = true
 # Port to use for the email testing server web interface.
-port = 54324
+port = 55324
 # Uncomment to expose additional ports for testing user applications that send emails.
 # smtp_port = 54325
 # pop3_port = 54326
@@ -101,16 +108,18 @@ port = 54324
 # sender_name = "Admin"
 
 [storage]
+# An: Die App legt PDF, XML und Logos über einen S3-Client ab (lib/s3.ts) — in Produktion bei
+# Cloudflare R2. Lokal übernimmt die S3-Schnittstelle von Supabase Storage (siehe
+# [storage.s3_protocol] unten), damit Finalisieren und Logo-Upload ohne Zugangsdaten gehen.
 enabled = true
 # The maximum file size allowed (e.g. "5MB", "500KB").
 file_size_limit = "50MiB"
 
-# Uncomment to configure local storage buckets
-# [storage.buckets.images]
-# public = false
-# file_size_limit = "50MiB"
-# allowed_mime_types = ["image/png", "image/jpeg"]
-# objects_path = "./images"
+# Der Bucket, den `S3_BUCKET_NAME` in .env.local.example meint. Öffentlich, weil das Logo im
+# Browser per <img> geladen wird; lokal liegen darin nur Testdaten.
+[storage.buckets.blitzrechnung]
+public = true
+file_size_limit = "50MiB"
 
 # Allow connections via S3 compatible clients
 [storage.s3_protocol]
@@ -349,7 +358,8 @@ authorization_url_path = "/oauth/consent"
 allow_dynamic_registration = false
 
 [edge_runtime]
-enabled = true
+# Aus: Die App hat keine Edge Functions. Spart einen Container (und den festen Port 8083).
+enabled = false
 # Supported request policies: `oneshot`, `per_worker`.
 # `per_worker` (default) — enables hot reload during local development.
 # `oneshot` — fallback mode if hot reload causes issues (e.g. in large repos or with symlinks).
@@ -363,8 +373,9 @@ deno_version = 2
 # secret_key = "env(SECRET_VALUE)"
 
 [analytics]
-enabled = true
-port = 54327
+# Aus: Nur für das Log-Dashboard im Studio. Spart zwei Container (Logflare, Vector).
+enabled = false
+port = 55327
 # Configure one of the supported backends: `postgres`, `bigquery`.
 backend = "postgres"
 

@@ -3,13 +3,14 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { SendHorizontal, Ban, LoaderCircle } from 'lucide-react'
+import { SendHorizontal, Ban, Copy, LoaderCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import type { Invoice } from '@/types'
 import SendInvoiceModal from './send-invoice-modal'
+import { useDuplicateInvoice } from './use-duplicate-invoice'
 
 // Primary post-finalize actions for the invoice detail page — the same Send /
-// Storno actions the invoice drawer offers, so both surfaces behave the same.
+// Duplicate / Storno actions the invoice drawer offers, so both surfaces behave the same.
 export default function InvoiceActions({
   invoice,
   hasCancellation,
@@ -20,9 +21,11 @@ export default function InvoiceActions({
   const router = useRouter()
   const [showSend, setShowSend] = useState(false)
   const [isCancelling, setIsCancelling] = useState(false)
+  const { duplicate, duplicatingId } = useDuplicateInvoice()
 
   const isCancellation = (invoice as { invoice_type?: string }).invoice_type === 'cancellation'
   const canBeSent = invoice.status !== 'cancelled' && !isCancellation
+  const canBeDuplicated = !isCancellation
   const canBeCancelled =
     invoice.status !== 'draft' &&
     invoice.status !== 'cancelled' &&
@@ -48,7 +51,7 @@ export default function InvoiceActions({
     }
   }
 
-  if (!canBeSent && !canBeCancelled) return null
+  if (!canBeSent && !canBeDuplicated && !canBeCancelled) return null
 
   return (
     <div className="flex flex-wrap gap-3">
@@ -56,6 +59,20 @@ export default function InvoiceActions({
         <Button onClick={() => setShowSend(true)}>
           <SendHorizontal className="h-4 w-4 mr-2" />
           Per E-Mail versenden
+        </Button>
+      )}
+      {canBeDuplicated && (
+        <Button
+          variant="outline"
+          onClick={() => duplicate(invoice.id)}
+          disabled={duplicatingId === invoice.id}
+        >
+          {duplicatingId === invoice.id ? (
+            <LoaderCircle className="h-4 w-4 mr-2 animate-spin" />
+          ) : (
+            <Copy className="h-4 w-4 mr-2" />
+          )}
+          Duplizieren
         </Button>
       )}
       {canBeCancelled && (

@@ -24,34 +24,62 @@ Einfache, sichere und ruhige Rechnungserstellung für kleine bis mittelgroße Un
 
 ## Setup
 
-### 1. Supabase Projekt erstellen
+### Lokal entwickeln (empfohlen)
 
-1. Erstelle ein neues Projekt auf [supabase.com](https://supabase.com)
-2. Gehe zu SQL Editor und führe die Migration aus: `supabase/migrations/001_initial_schema.sql`
-3. Aktiviere Google OAuth in den Authentication Settings (optional)
-
-### 2. Umgebungsvariablen
-
-Erstelle eine `.env.local` Datei im Root-Verzeichnis:
-
-```env
-NEXT_PUBLIC_SUPABASE_URL=deine_supabase_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=dein_supabase_anon_key
-```
-
-### 3. Dependencies installieren
+Voraussetzungen: Docker, [Supabase CLI](https://supabase.com/docs/guides/local-development/cli/getting-started), pnpm.
 
 ```bash
 pnpm install
-```
-
-### 4. Development Server starten
-
-```bash
+pnpm db:start                         # Postgres, Auth, REST, Storage, Studio, Mailpit in Docker
+pnpm db:env                           # schreibt .env.local mit den Schlüsseln der lokalen Instanz
 pnpm dev
 ```
 
-Die App läuft dann auf [http://localhost:3000](http://localhost:3000)
+Die App läuft auf [http://localhost:3000](http://localhost:3000). Anmelden mit dem Seed-Konto
+`hello@till.email` / `Email123!` — es hat Firma, Kontakte und Beispielrechnungen
+(`supabase/seed.sql`).
+
+**Ports.** Die lokale Instanz belegt bewusst **55320–55329** statt der Supabase-Standardreihe
+54321–54329, damit sie neben anderen Supabase-Projekten laufen kann (siehe `supabase/config.toml`):
+
+| Dienst        | Port  |
+| ------------- | ----- |
+| API           | 55321 |
+| Postgres      | 55322 |
+| Studio        | 55323 |
+| Mailpit (Web) | 55324 |
+
+Direktzugriff auf die Datenbank: `postgresql://postgres:postgres@127.0.0.1:55322/postgres`.
+Ist einer der Ports bei dir belegt, ändere ihn in `supabase/config.toml` und passe
+`NEXT_PUBLIC_SUPABASE_URL` in `.env.local` an.
+
+Nützlich:
+
+```bash
+pnpm db:reset   # Datenbank neu aufbauen: alle Migrationen, dann der Seed
+pnpm db:stop    # Container anhalten (Daten bleiben erhalten)
+```
+
+Mehrere Worktrees desselben Repos teilen sich diese eine Instanz — `pnpm db:start` meldet in
+einem zweiten Worktree, dass sie schon läuft. Das ist gewollt, heißt aber: Ein `db:reset` wirkt
+auf alle.
+
+Dateien (PDF, XML, Logo) landen lokal im Bucket `blitzrechnung` von Supabase Storage, den die App
+über dieselbe S3-Schnittstelle anspricht wie in Produktion Cloudflare R2. Die Werte stehen schon in
+`.env.local.example`; die Schlüssel setzt `pnpm db:env` aus der laufenden Instanz ein — sie stehen
+bewusst nicht im Repo. Nur der E-Mail-Versand braucht echte Zugangsdaten (`AHASEND_*`).
+
+**Orca.** `orca.yaml` lässt jeden neuen Workspace `scripts/orca-setup.sh` ausführen: Es übernimmt
+die `.env.local` aus dem Primary-Checkout (sonst die Vorlage) und installiert die Abhängigkeiten
+mit pnpm 10, passend zu Lockfile und CI. Wer pnpm 11 global hat, braucht nichts zu tun. Einmalig im
+Primary-Checkout: `pnpm db:env` (und dort ergänzen, was nur dir gehört, etwa `AHASEND_*`). Die Datenbank startet das Skript nicht; es weist nur darauf hin, wenn sie nicht läuft.
+
+### Mit einem Supabase-Projekt in der Cloud
+
+1. Erstelle ein neues Projekt auf [supabase.com](https://supabase.com)
+2. Wende die Migrationen aus `supabase/migrations/` an (`supabase link` und `supabase db push`)
+3. Aktiviere Google OAuth in den Authentication Settings (optional)
+4. Lege `.env.local` mit `NEXT_PUBLIC_SUPABASE_URL` und `NEXT_PUBLIC_SUPABASE_ANON_KEY` des Projekts an
 
 ## Architektur
 

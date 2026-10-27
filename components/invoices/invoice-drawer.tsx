@@ -16,9 +16,11 @@ import {
   Ban,
   ExternalLink,
   LoaderCircle,
+  Copy,
 } from 'lucide-react'
 import SendInvoiceModal from './send-invoice-modal'
 import DunningAxis from './dunning-axis'
+import { useDuplicateInvoice } from './use-duplicate-invoice'
 import { useMahnstatus } from './use-dunning-status'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -50,6 +52,7 @@ const AVAILABLE_STATUSES: InvoiceStatus[] = ['created', 'sent', 'reminded', 'pai
 
 export default function InvoiceDrawer() {
   const { isOpen, invoiceId, closeDrawer } = useInvoiceDrawer()
+  const { duplicate, duplicatingId } = useDuplicateInvoice()
   const router = useRouter()
   const supabase = createClient()
   const [invoice, setInvoice] = useState<Invoice | null>(null)
@@ -305,6 +308,10 @@ const handleDownloadPdf = async () => {
   const hatXml = Boolean(invoice?.xml_url)
   const hatDateien = hatPdf || hatXml
 
+  // Alles außer der Stornorechnung — die hat negierte Positionen und gehört zu
+  // genau einer Rechnung. Der Server prüft dasselbe noch einmal.
+  const kannDuplizieren = Boolean(invoice && !isCancellationInvoice)
+
   /**
    * Wird der Versand der **Rechnung** betont?
    *
@@ -357,6 +364,27 @@ const handleDownloadPdf = async () => {
     loadInvoice(invoice.id)
     router.refresh()
   }
+
+  /**
+   * Duplizieren: aus dieser Rechnung einen neuen Entwurf machen. Gleiches
+   * Gewicht wie der Versand, aber nie betont — es ist nie der nächste Schritt
+   * dieser Rechnung, sondern der Anfang der nächsten.
+   */
+  const duplizierenKnopf = invoice && (
+    <Button
+      variant="outline"
+      className="w-full"
+      onClick={() => duplicate(invoice.id)}
+      disabled={duplicatingId === invoice.id}
+    >
+      {duplicatingId === invoice.id ? (
+        <LoaderCircle className="h-4 w-4 mr-2 animate-spin" />
+      ) : (
+        <Copy className="h-4 w-4 mr-2" />
+      )}
+      Duplizieren
+    </Button>
+  )
 
   /** Der Versandknopf, einmal betont und einmal gewöhnlich. */
   const versandKnopf = (
@@ -573,9 +601,10 @@ const handleDownloadPdf = async () => {
                   `empty:hidden` fängt den Randfall ab, dass es weder Datei
                   noch Storno gibt — dann bliebe sonst eine Trennlinie ohne
                   Inhalt stehen. */}
-              {hatDateien && (
+              {(hatDateien || kannDuplizieren) && (
                 <div className="mt-6 space-y-2 border-t border-zinc-200 pt-4 empty:hidden dark:border-zinc-700">
-                  {versandKnopf}
+                  {hatDateien && versandKnopf}
+                  {kannDuplizieren && duplizierenKnopf}
 
                   {/* Storno: selten gebraucht, folgenreich, nicht rückgängig zu
                       machen — und deshalb kein Kasten im Gewicht eines
