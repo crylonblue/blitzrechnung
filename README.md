@@ -69,6 +69,11 @@ Dateien (PDF, XML, Logo) landen lokal im Bucket `blitzrechnung` von Supabase Sto
 `.env.local.example`; die Schlüssel setzt `pnpm db:env` aus der laufenden Instanz ein — sie stehen
 bewusst nicht im Repo. Nur der E-Mail-Versand braucht echte Zugangsdaten (`AHASEND_*`).
 
+**Orca.** `orca.yaml` lässt jeden neuen Workspace `scripts/orca-setup.sh` ausführen: Es übernimmt
+die `.env.local` aus dem Primary-Checkout (sonst die Vorlage) und installiert die Abhängigkeiten
+mit pnpm 10, passend zu Lockfile und CI. Wer pnpm 11 global hat, braucht nichts zu tun. Einmalig im
+Primary-Checkout: `pnpm db:env` (und dort ergänzen, was nur dir gehört, etwa `AHASEND_*`). Die Datenbank startet das Skript nicht; es weist nur darauf hin, wenn sie nicht läuft.
+
 ### Mit einem Supabase-Projekt in der Cloud
 
 1. Erstelle ein neues Projekt auf [supabase.com](https://supabase.com)
