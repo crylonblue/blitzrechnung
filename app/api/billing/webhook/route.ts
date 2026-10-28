@@ -3,6 +3,7 @@ import type Stripe from 'stripe'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createServiceRoleClient } from '@/lib/supabase/server'
 import { getStripe, planForPriceId } from '@/lib/stripe'
+import { syncSeatsSafe } from '@/lib/seats'
 import { meldeFehler, meldeWarnung } from '@/lib/observability'
 
 /**
@@ -50,6 +51,8 @@ export async function POST(request: NextRequest) {
           typeof session.subscription === 'string' ? session.subscription : session.subscription.id
         const subscription = await stripe.subscriptions.retrieve(subscriptionId)
         await syncSubscription(service, subscription, session.client_reference_id ?? undefined)
+        // Das Team kann sich zwischen Checkout-Start und Abschluss geändert haben.
+        if (session.client_reference_id) await syncSeatsSafe(service, session.client_reference_id)
         break
       }
       case 'customer.subscription.created':
