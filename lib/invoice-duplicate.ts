@@ -113,6 +113,9 @@ export function buildDuplicateDraft(original: Invoice, ctx: DuplicateContext): I
 
   return {
     company_id: original.company_id,
+    // Die Kopie bleibt in der Abteilung der Vorlage; sonst landete sie über den
+    // Standard-Trigger in „Allgemein“, wo ein Mitglied evtl. gar nicht schreiben darf.
+    department_id: original.department_id,
     status: 'draft',
     invoice_type: 'invoice',
     invoice_number: null,

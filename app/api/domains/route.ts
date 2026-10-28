@@ -1,3 +1,4 @@
+import { canManageTeam, type CompanyRole } from '@/lib/access'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createDomain, deleteDomain } from '@/lib/email'
@@ -35,9 +36,9 @@ async function requireOwner(
     return { error: NextResponse.json({ error: 'No company found' }, { status: 404 }) }
   }
 
-  if (companyUser.role !== 'owner') {
+  if (!canManageTeam(companyUser.role as CompanyRole)) {
     return {
-      error: NextResponse.json({ error: 'Only owners can manage email settings' }, { status: 403 }),
+      error: NextResponse.json({ error: 'Only owners and admins can manage email settings' }, { status: 403 }),
     }
   }
 

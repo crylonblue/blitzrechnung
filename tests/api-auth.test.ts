@@ -59,6 +59,7 @@ const auth = (over: Partial<ApiAuth> = {}): ApiAuth => ({
   userId: "u1",
   entitled: true,
   isPro: true,
+  scope: { role: "owner", departmentIds: [], managedDepartmentIds: [] },
   ...over,
 });
 

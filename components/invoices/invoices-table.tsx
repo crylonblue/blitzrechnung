@@ -28,7 +28,7 @@ interface InvoicesTableProps {
 export default function InvoicesTable({ invoices, companyNames = {} }: InvoicesTableProps) {
   const router = useRouter()
   const { openDrawer } = useInvoiceDrawer()
-  const { duplicate, duplicatingId } = useDuplicateInvoice()
+  const { duplicate, duplicatingId, canDuplicate } = useDuplicateInvoice()
   const [sendModalInvoice, setSendModalInvoice] = useState<Invoice | null>(null)
   const [filteredInvoices, setFilteredInvoices] = useState<Invoice[]>(invoices)
 
@@ -122,7 +122,7 @@ export default function InvoicesTable({ invoices, companyNames = {} }: InvoicesT
                   <InvoiceRowMenu
                     onSend={() => setSendModalInvoice(invoice)}
                     // Eine Stornorechnung ist keine Vorlage — dort entfällt der Eintrag.
-                    onDuplicate={invoice.invoice_type === 'cancellation' ? undefined : () => duplicate(invoice.id)}
+                    onDuplicate={invoice.invoice_type === 'cancellation' || !canDuplicate ? undefined : () => duplicate(invoice.id)}
                     isDuplicating={duplicatingId === invoice.id}
                   />
                 </TableCell>

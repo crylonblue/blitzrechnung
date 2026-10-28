@@ -21,7 +21,7 @@ export default function InvoiceActions({
   const router = useRouter()
   const [showSend, setShowSend] = useState(false)
   const [isCancelling, setIsCancelling] = useState(false)
-  const { duplicate, duplicatingId } = useDuplicateInvoice()
+  const { duplicate, duplicatingId, canDuplicate } = useDuplicateInvoice()
 
   const isCancellation = (invoice as { invoice_type?: string }).invoice_type === 'cancellation'
   const canBeSent = invoice.status !== 'cancelled' && !isCancellation
@@ -61,7 +61,7 @@ export default function InvoiceActions({
           Per E-Mail versenden
         </Button>
       )}
-      {canBeDuplicated && (
+      {canBeDuplicated && canDuplicate && (
         <Button
           variant="outline"
           onClick={() => duplicate(invoice.id)}

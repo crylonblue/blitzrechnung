@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { userCanAccessInvoice } from '@/lib/access'
 import { assertCompanyMembership, InvoiceServiceError } from '@/lib/invoice-service'
 import { meldeFehler } from '@/lib/observability'
 import {
@@ -510,11 +511,17 @@ async function bewerte(
 async function ladeUndPruefe(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
-  invoiceId: string
+  invoiceId: string,
+  action: 'read' | 'write'
 ): Promise<Invoice> {
   const { data: invoice } = await supabase.from('invoices').select('*').eq('id', invoiceId).single()
   if (!invoice) throw new InvoiceServiceError(404, 'NOT_FOUND', 'Rechnung nicht gefunden')
   await assertCompanyMembership(supabase, userId, (invoice as Invoice).company_id)
+  // Lesen schränkt die RLS auf die eigenen Abteilungen ein (dann kommt oben 404);
+  // Schreiben darf zusätzlich weder der Buchhaltung noch Fremden offenstehen.
+  if (!(await userCanAccessInvoice(supabase, userId, invoice as Invoice, action))) {
+    throw new InvoiceServiceError(403, 'FORBIDDEN', 'Keine Berechtigung für Rechnungen dieser Abteilung')
+  }
   return invoice as Invoice
 }
 
@@ -542,7 +549,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const invoice = await ladeUndPruefe(supabase, user.id, id)
+    const invoice = await ladeUndPruefe(supabase, user.id, id, 'read')
     const { lage } = await bewerte(supabase, invoice, ausQuery(request))
     return NextResponse.json(lage)
   } catch (err) {
@@ -563,7 +570,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const invoice = await ladeUndPruefe(supabase, user.id, id)
+    const invoice = await ladeUndPruefe(supabase, user.id, id, 'write')
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
     const anpassungen = ausBody(body)
     // Zwei Texte, zwei Felder:

@@ -9,14 +9,14 @@ export default async function SettingsPage() {
   // Nutzer kommt aus dem pro Request gecachten Resolver. Die Rollenprüfung
   // unten bleibt eine eigene Abfrage: Sie filtert gezielt auf 'owner' und ist
   // damit etwas anderes als die reine Firmenzugehörigkeit.
-  const { userId } = await getAppSession()
+  const { userId, role } = await getAppSession()
   const supabase = await createClient()
 
   const { data: companyUsers } = await supabase
     .from('company_users')
     .select('company_id, role')
     .eq('user_id', userId)
-    .eq('role', 'owner')
+    .in('role', ['owner', 'admin'])
     .limit(1)
     .single()
 
@@ -56,7 +56,8 @@ export default async function SettingsPage() {
       <CompanySettings
         company={company}
         billing={
-          <BillingSection billing={billing} pricing={pricing} />
+          // Den Tarif ändert nur der Owner (die Billing-Routen erzwingen das).
+          role === 'owner' ? <BillingSection billing={billing} pricing={pricing} /> : undefined
         }
       />
     </div>

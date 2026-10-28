@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { useDraftDrawer } from '@/contexts/draft-drawer-context'
 import { useInvoiceDrawer } from '@/contexts/invoice-drawer-context'
+import { useAccess } from '@/contexts/access-context'
 
 /**
  * Rechnung duplizieren — für alle Stellen, an denen es einen Knopf dafür gibt.
@@ -18,6 +19,8 @@ export function useDuplicateInvoice() {
   const router = useRouter()
   const { openDrawer: openDraft } = useDraftDrawer()
   const { closeDrawer: closeInvoice } = useInvoiceDrawer()
+  // Die Buchhaltung darf nichts anlegen; für sie gibt es den Knopf nicht.
+  const { canWriteInvoices: canDuplicate } = useAccess()
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null)
 
   const duplicate = async (invoiceId: string) => {
@@ -40,5 +43,5 @@ export function useDuplicateInvoice() {
     }
   }
 
-  return { duplicate, duplicatingId }
+  return { duplicate, duplicatingId, canDuplicate }
 }

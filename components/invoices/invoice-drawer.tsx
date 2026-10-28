@@ -52,7 +52,7 @@ const AVAILABLE_STATUSES: InvoiceStatus[] = ['created', 'sent', 'reminded', 'pai
 
 export default function InvoiceDrawer() {
   const { isOpen, invoiceId, closeDrawer } = useInvoiceDrawer()
-  const { duplicate, duplicatingId } = useDuplicateInvoice()
+  const { duplicate, duplicatingId, canDuplicate } = useDuplicateInvoice()
   const router = useRouter()
   const supabase = createClient()
   const [invoice, setInvoice] = useState<Invoice | null>(null)
@@ -370,7 +370,7 @@ const handleDownloadPdf = async () => {
    * Gewicht wie der Versand, aber nie betont — es ist nie der nächste Schritt
    * dieser Rechnung, sondern der Anfang der nächsten.
    */
-  const duplizierenKnopf = invoice && (
+  const duplizierenKnopf = invoice && canDuplicate && (
     <Button
       variant="outline"
       className="w-full"

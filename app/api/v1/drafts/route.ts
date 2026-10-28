@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { createServiceRoleClient } from '@/lib/supabase/server'
-import { validateApiKey, requireApiAccess, unauthorized, badRequest, serverError, json } from '../_lib/auth'
+import { writableDepartmentIds } from '@/lib/access'
+import { validateApiKey, requireApiAccess, unauthorized, badRequest, serverError, json, forbidden, scopeInvoices, requireInvoiceWrite } from '../_lib/auth'
 import { computeInvoiceTotals, round2 } from '@/lib/invoice-totals'
 
 /**
@@ -15,9 +16,7 @@ export async function GET(request: NextRequest) {
 
   const supabase = createServiceRoleClient()
 
-  const { data, error } = await supabase
-    .from('invoices')
-    .select('*')
+  const { data, error } = await scopeInvoices(supabase.from('invoices').select('*'), auth)
     .eq('company_id', auth.companyId)
     .eq('status', 'draft')
     .order('created_at', { ascending: false })
@@ -40,6 +39,8 @@ export async function POST(request: NextRequest) {
   if (!auth) return unauthorized()
   const denied = requireApiAccess(auth)
   if (denied) return denied
+  const readOnly = requireInvoiceWrite(auth)
+  if (readOnly) return readOnly
 
   let body: any
   try {
@@ -60,9 +61,34 @@ export async function POST(request: NextRequest) {
     due_date,
     service_date,
     invoice_number, // For external sellers
+    department_id: requestedDepartmentId,
   } = body
 
   const supabase = createServiceRoleClient()
+
+  // Abteilung: ausdrücklich angegeben, sonst die einzige des Schlüsselbesitzers.
+  // Owner und Admin ohne Angabe: die Datenbank setzt die Standardabteilung.
+  let departmentId: string | undefined
+  const writable = writableDepartmentIds(auth.scope)
+  if (requestedDepartmentId !== undefined && requestedDepartmentId !== null) {
+    if (typeof requestedDepartmentId !== 'string') return badRequest('department_id must be a string')
+    if (writable !== null && !writable.includes(requestedDepartmentId)) {
+      return forbidden()
+    }
+    const { data: department } = await supabase
+      .from('departments')
+      .select('id')
+      .eq('id', requestedDepartmentId)
+      .eq('company_id', auth.companyId)
+      .maybeSingle()
+    if (!department) return badRequest('Unknown department_id')
+    departmentId = department.id
+  } else if (writable !== null) {
+    if (writable.length > 1) {
+      return badRequest('department_id is required: the key owner belongs to several departments')
+    }
+    departmentId = writable[0]
+  }
 
   // Fetch company data (needed for "self" snapshots)
   const { data: company, error: companyError } = await supabase
@@ -206,6 +232,7 @@ export async function POST(request: NextRequest) {
     .from('invoices')
     .insert({
       company_id: auth.companyId,
+      department_id: departmentId,
       status: 'draft',
       seller_is_self,
       seller_contact_id: seller_is_self ? null : seller_contact_id,

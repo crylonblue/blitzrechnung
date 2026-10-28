@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { createServiceRoleClient } from '@/lib/supabase/server'
-import { validateApiKey, requireApiAccess, unauthorized, notFound, badRequest, serverError, json } from '../../_lib/auth'
+import { validateApiKey, requireApiAccess, unauthorized, notFound, badRequest, serverError, json, scopeInvoices, requireInvoiceWrite } from '../../_lib/auth'
 import { computeInvoiceTotals, round2 } from '@/lib/invoice-totals'
 
 /**
@@ -19,9 +19,7 @@ export async function GET(
   const { id } = await params
   const supabase = createServiceRoleClient()
 
-  const { data, error } = await supabase
-    .from('invoices')
-    .select('*')
+  const { data, error } = await scopeInvoices(supabase.from('invoices').select('*'), auth)
     .eq('id', id)
     .eq('company_id', auth.companyId)
     .eq('status', 'draft')
@@ -46,6 +44,8 @@ export async function PATCH(
   if (!auth) return unauthorized()
   const denied = requireApiAccess(auth)
   if (denied) return denied
+  const readOnly = requireInvoiceWrite(auth)
+  if (readOnly) return readOnly
 
   const { id } = await params
 
@@ -59,9 +59,7 @@ export async function PATCH(
   const supabase = createServiceRoleClient()
 
   // First check if draft exists and belongs to company
-  const { data: existing } = await supabase
-    .from('invoices')
-    .select('*')
+  const { data: existing } = await scopeInvoices(supabase.from('invoices').select('*'), auth)
     .eq('id', id)
     .eq('company_id', auth.companyId)
     .eq('status', 'draft')
@@ -243,9 +241,7 @@ export async function PATCH(
     return badRequest('No fields to update')
   }
 
-  const { data, error } = await supabase
-    .from('invoices')
-    .update(updates)
+  const { data, error } = await scopeInvoices(supabase.from('invoices').update(updates), auth)
     .eq('id', id)
     .eq('company_id', auth.companyId)
     .eq('status', 'draft')
@@ -271,14 +267,14 @@ export async function DELETE(
   if (!auth) return unauthorized()
   const denied = requireApiAccess(auth)
   if (denied) return denied
+  const readOnly = requireInvoiceWrite(auth)
+  if (readOnly) return readOnly
 
   const { id } = await params
   const supabase = createServiceRoleClient()
 
   // First check if draft exists and belongs to company
-  const { data: existing } = await supabase
-    .from('invoices')
-    .select('id')
+  const { data: existing } = await scopeInvoices(supabase.from('invoices').select('id'), auth)
     .eq('id', id)
     .eq('company_id', auth.companyId)
     .eq('status', 'draft')
@@ -288,9 +284,7 @@ export async function DELETE(
     return notFound('Draft')
   }
 
-  const { error } = await supabase
-    .from('invoices')
-    .delete()
+  const { error } = await scopeInvoices(supabase.from('invoices').delete(), auth)
     .eq('id', id)
     .eq('company_id', auth.companyId)
     .eq('status', 'draft')

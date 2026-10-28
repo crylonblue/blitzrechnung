@@ -18,7 +18,9 @@ interface Aufruf {
 }
 
 /** Minimaler Query-Builder: merkt sich Filter und Insert, liefert konfigurierte Zeilen. */
-function stub(tabellen: Record<string, Row | null>) {
+function stub(eingabe: Record<string, Row | null>) {
+  // Der Nutzer ist standardmäßig Owner der Firma; die Rechteprüfung liest company_users.
+  const tabellen: Record<string, Row | null> = { company_users: { role: "owner" }, ...eingabe };
   const aufrufe: Aufruf[] = [];
   const client = {
     from(table: string) {
@@ -44,6 +46,7 @@ function stub(tabellen: Record<string, Row | null>) {
 const vorlage = {
   id: "alt",
   company_id: "firma-1",
+  department_id: "abt-1",
   status: "sent",
   invoice_type: "invoice",
   invoice_number: "RE-1",
@@ -79,7 +82,8 @@ test("legt einen Entwurf an und liefert Nummer der Vorlage zurück", async () =>
 test("Vorlage und Kontakt werden nur innerhalb der eigenen Firma gelesen", async () => {
   const { client, aufrufe } = stub({ invoices: vorlage, contacts: null });
   await duplicateInvoice(client, ctx, "alt");
-  for (const a of aufrufe.filter((x) => !x.insert)) {
+  // Die Rechteprüfung (company_users, department_members) filtert über Nutzer und Abteilung.
+  for (const a of aufrufe.filter((x) => !x.insert && ["invoices", "contacts"].includes(x.table))) {
     assert.deepEqual(a.filters.find(([k]) => k === "company_id"), ["company_id", "firma-1"], `${a.table} ohne Firmenfilter`);
   }
 });
@@ -104,4 +108,19 @@ test("eigene Firma als Empfänger: der Empfänger wird nicht als Kontakt nachges
   await duplicateInvoice(client, ctx, "alt");
   const kontaktIds = aufrufe.filter((a) => a.table === "contacts").flatMap((a) => a.filters.filter(([k]) => k === "id").map(([, v]) => v));
   assert.deepEqual(kontaktIds, ["kontakt-9"]);
+});
+
+test("legt die Kopie in der Abteilung der Vorlage an", async () => {
+  const { client, aufrufe } = stub({ invoices: vorlage, contacts: null });
+  await duplicateInvoice(client, ctx, "alt");
+  assert.equal(aufrufe.find((a) => a.insert)?.insert?.department_id, "abt-1");
+});
+
+test("die Buchhaltung darf nicht duplizieren", async () => {
+  const { client, aufrufe } = stub({ invoices: vorlage, contacts: null, company_users: { role: "accountant" } });
+  await assert.rejects(
+    () => duplicateInvoice(client, ctx, "alt"),
+    (err) => err instanceof InvoiceServiceError && err.status === 403
+  );
+  assert.equal(aufrufe.some((a) => a.insert), false);
 });

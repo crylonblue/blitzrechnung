@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { createServiceRoleClient } from '@/lib/supabase/server'
-import { validateApiKey, requireApiAccess, unauthorized, notFound, badRequest, serverError, json } from '../../_lib/auth'
+import { validateApiKey, requireApiAccess, unauthorized, notFound, badRequest, serverError, json, scopeInvoices, requireInvoiceWrite } from '../../_lib/auth'
 
 const VALID_STATUSES = ['created', 'sent', 'reminded', 'paid', 'cancelled']
 
@@ -20,9 +20,7 @@ export async function GET(
   const { id } = await params
   const supabase = createServiceRoleClient()
 
-  const { data, error } = await supabase
-    .from('invoices')
-    .select('*')
+  const { data, error } = await scopeInvoices(supabase.from('invoices').select('*'), auth)
     .eq('id', id)
     .eq('company_id', auth.companyId)
     .neq('status', 'draft')
@@ -47,6 +45,8 @@ export async function PATCH(
   if (!auth) return unauthorized()
   const denied = requireApiAccess(auth)
   if (denied) return denied
+  const readOnly = requireInvoiceWrite(auth)
+  if (readOnly) return readOnly
 
   const { id } = await params
 
@@ -70,9 +70,7 @@ export async function PATCH(
   const supabase = createServiceRoleClient()
 
   // First check if invoice exists and belongs to company
-  const { data: existing } = await supabase
-    .from('invoices')
-    .select('id, status')
+  const { data: existing } = await scopeInvoices(supabase.from('invoices').select('id, status'), auth)
     .eq('id', id)
     .eq('company_id', auth.companyId)
     .neq('status', 'draft')
@@ -87,9 +85,7 @@ export async function PATCH(
     return badRequest('Cancelled invoices cannot be modified')
   }
 
-  const { data, error } = await supabase
-    .from('invoices')
-    .update({ status })
+  const { data, error } = await scopeInvoices(supabase.from('invoices').update({ status }), auth)
     .eq('id', id)
     .eq('company_id', auth.companyId)
     .neq('status', 'draft')

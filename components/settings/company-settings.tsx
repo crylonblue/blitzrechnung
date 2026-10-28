@@ -60,7 +60,9 @@ export default function CompanySettings({ company: initialCompany, billing }: Co
   // Lets other screens deep-link to a tab, e.g. /settings?tab=tarif from the
   // dashboard conversion banner.
   const requestedTab = useSearchParams().get('tab')
-  const initialTab = SETTINGS_TABS.includes(requestedTab as (typeof SETTINGS_TABS)[number])
+  // Ohne `billing` (Admins) gibt es den Tarif-Tab nicht.
+  const initialTab = SETTINGS_TABS.includes(requestedTab as (typeof SETTINGS_TABS)[number]) &&
+    (requestedTab !== 'tarif' || billing)
     ? (requestedTab as string)
     : 'company'
   const supabase = createClient()
@@ -430,13 +432,15 @@ export default function CompanySettings({ company: initialCompany, billing }: Co
           >
             Buchhaltung
           </TabsTrigger>
-          <TabsTrigger
-            value="tarif"
-            className="bg-transparent border-0 border-b-2 border-transparent rounded-none px-0 pb-3.5 text-sm font-medium transition-colors duration-150 hover:text-zinc-900 hover:border-zinc-300 data-[state=active]:border-zinc-900 data-[state=active]:text-zinc-900 data-[state=active]:font-semibold data-[state=active]:shadow-none"
-            style={{ color: 'var(--text-secondary)', borderTop: 'none', borderLeft: 'none', borderRight: 'none' }}
-          >
-            Tarif
-          </TabsTrigger>
+          {billing && (
+            <TabsTrigger
+              value="tarif"
+              className="bg-transparent border-0 border-b-2 border-transparent rounded-none px-0 pb-3.5 text-sm font-medium transition-colors duration-150 hover:text-zinc-900 hover:border-zinc-300 data-[state=active]:border-zinc-900 data-[state=active]:text-zinc-900 data-[state=active]:font-semibold data-[state=active]:shadow-none"
+              style={{ color: 'var(--text-secondary)', borderTop: 'none', borderLeft: 'none', borderRight: 'none' }}
+            >
+              Tarif
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <Card className="bg-white mt-6">
@@ -1373,9 +1377,11 @@ export default function CompanySettings({ company: initialCompany, billing }: Co
             </TabsContent>
 
             {/* Tarif Tab */}
-            <TabsContent value="tarif" className="space-y-6 mt-0">
-              {billing}
-            </TabsContent>
+            {billing && (
+              <TabsContent value="tarif" className="space-y-6 mt-0">
+                {billing}
+              </TabsContent>
+            )}
 
             <div className="flex justify-end border-t pt-6 mt-8" style={{ borderColor: 'var(--border-default)' }}>
               <Button

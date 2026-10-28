@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { LoaderCircle, Trash2, Check, Eye, ChevronRight } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { useAccess } from '@/contexts/access-context'
 import { useDraftDrawer } from '@/contexts/draft-drawer-context'
 import { ContactDrawerProvider } from '@/contexts/contact-drawer-context'
 import {
@@ -58,6 +59,15 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
   const { closeDrawer } = useDraftDrawer()
   const supabase = createClient()
   const [draft, setDraft] = useState(initialDraft)
+  const { departments } = useAccess()
+  const writableDepartments = departments.filter((d) => d.writable)
+  // Bestehender Entwurf: seine Abteilung. Neuer Entwurf: die einzige beschreibbare,
+  // sonst die Standardabteilung, falls dort schreibbar, sonst die erste.
+  const [departmentId, setDepartmentId] = useState<string>(
+    draft.department_id ||
+      (writableDepartments.find((d) => d.isDefault) ?? writableDepartments[0])?.id ||
+      ''
+  )
   const [isSaving, setIsSaving] = useState(false)
   const [isFinalizing, setIsFinalizing] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -267,6 +277,7 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
       const { data, error } = await supabase
         .from('invoices')
         .update({
+          department_id: departmentId,
           line_items: lineItems,
           seller_is_self: sellerIsSelf,
           seller_contact_id: sellerIsSelf ? null : sellerSnapshot?.id || null,
@@ -302,6 +313,7 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
         .insert({
           company_id: draft.company_id,
           status: 'draft',
+          department_id: departmentId,
           line_items: lineItems,
           seller_is_self: sellerIsSelf,
           seller_contact_id: sellerIsSelf ? null : sellerSnapshot?.id || null,
@@ -453,6 +465,7 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
           .from('invoices')
           .update({
             status: 'draft', // Keep as draft until upload succeeds
+            department_id: departmentId,
             invoice_number: draft.invoice_number || null,
             invoice_date: draft.invoice_date,
             due_date: draft.due_date,
@@ -489,6 +502,7 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
           .from('invoices')
           .insert({
             company_id: draft.company_id,
+            department_id: departmentId,
             status: 'draft', // Keep as draft until upload succeeds
             invoice_number: draft.invoice_number || null,
             invoice_date: draft.invoice_date,
@@ -779,6 +793,23 @@ export default function DraftEditor({ draft: initialDraft }: DraftEditorProps) {
                 </div>
               </div>
             </div>
+
+            {/* Abteilung - nur wenn es etwas zu wählen gibt */}
+            {writableDepartments.length > 1 && (
+              <div>
+                <h2 className="mb-4 text-xs font-medium uppercase tracking-wide" style={{ color: 'var(--text-primary)' }}>Abteilung</h2>
+                <Select value={departmentId} onValueChange={setDepartmentId}>
+                  <SelectTrigger id="department" className="mt-1.5">
+                    <SelectValue placeholder="Abteilung auswählen" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {writableDepartments.map((d) => (
+                      <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             {/* Language Selector - Only show if English invoices are enabled */}
             {company?.enable_english_invoices && (
