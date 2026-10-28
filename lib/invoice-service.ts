@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { Invoice as DBInvoice, PartySnapshot, LineItem, EmailSettings, CustomerSnapshot } from '@/types'
+import type { Invoice as DBInvoice, PartySnapshot, LineItem, EmailSettings, CustomerSnapshot, Contact } from '@/types'
 import { generateInvoicePDF } from './pdf-generator'
 import { generateXRechnungXML } from './zugferd-generator'
 import { uploadToS3, downloadFromS3 } from './s3'
@@ -11,6 +11,7 @@ import { getBillingState, TRIAL_EXPIRED_MESSAGE, TRIAL_EXPIRED_DETAILS } from '.
 import { resolveInvoiceTexts } from './invoice-texts'
 import { userCanAccessInvoice } from './access'
 import { getAdditionalContacts, resolveSellerContact, resolveReplyTo } from './contact-persons'
+import { buildDuplicateDraft, DuplicateNotAllowedError } from './invoice-duplicate'
 
 /**
  * Shared invoice business logic, used by both the session API (app/api/*) and
@@ -531,4 +532,61 @@ export async function sendInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: stri
   await supabase.from('invoices').update(sendUpdate).eq('id', invoiceId)
 
   return { recipientEmail }
+}
+
+export interface DuplicateResult {
+  draft: DBInvoice
+  /** Nummer der Vorlage, für die Rückmeldung an den Nutzer. */
+  sourceNumber: string | null
+}
+
+/** Heute als ISO-Tag in Deutschland — der Server läuft in UTC und läge zwischen 0 und 2 Uhr einen Tag zurück. */
+function heuteInBerlin(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Berlin' }).format(new Date())
+}
+
+/**
+ * Legt aus einer bestehenden Rechnung einen neuen Entwurf an. Die Vorlage bleibt
+ * unberührt; was kopiert wird und was nicht, steht in `lib/invoice-duplicate.ts`.
+ *
+ * Kein Paywall-Check: Entwürfe bleiben frei, bezahlt wird erst beim Finalisieren.
+ */
+export async function duplicateInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: string): Promise<DuplicateResult> {
+  const { data: original, error } = await supabase
+    .from('invoices')
+    .select('*')
+    .eq('id', invoiceId)
+    .eq('company_id', ctx.companyId)
+    .single()
+  if (error || !original) throw new InvoiceServiceError(404, 'NOT_FOUND', 'Rechnung nicht gefunden')
+
+  const source = original as DBInvoice
+  // Die Kopie entsteht in der Abteilung der Vorlage: Dort muss der Nutzer schreiben dürfen.
+  await assertInvoiceWriteAccess(supabase, ctx, source)
+
+  // Die Kontakte frisch laden: Der Snapshot an der Vorlage ist der Stand vom
+  // Finalisieren, und eine inzwischen geänderte Adresse soll nicht in den neuen
+  // Beleg wandern. Ist der Kontakt gelöscht, bleibt der alte Snapshot stehen.
+  const loadContact = async (id: string | null) => {
+    if (!id) return null
+    const { data } = await supabase.from('contacts').select('*').eq('id', id).eq('company_id', ctx.companyId).maybeSingle()
+    return (data as Contact | null) ?? null
+  }
+  const [buyerContact, sellerContact] = await Promise.all([
+    source.buyer_is_self ? null : loadContact(source.buyer_contact_id),
+    source.seller_is_self ? null : loadContact(source.seller_contact_id),
+  ])
+
+  let insert
+  try {
+    insert = buildDuplicateDraft(source, { today: heuteInBerlin(), buyerContact, sellerContact })
+  } catch (err) {
+    if (err instanceof DuplicateNotAllowedError) throw new InvoiceServiceError(400, 'VALIDATION_ERROR', err.message)
+    throw err
+  }
+
+  const { data: draft, error: insErr } = await supabase.from('invoices').insert(insert).select().single()
+  if (insErr || !draft) throw new InvoiceServiceError(500, 'SERVER_ERROR', 'Entwurf konnte nicht angelegt werden')
+
+  return { draft: draft as DBInvoice, sourceNumber: source.invoice_number }
 }

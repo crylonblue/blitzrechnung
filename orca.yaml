@@ -1,0 +1,7 @@
+# Orca-Konfiguration: https://orca.build
+#
+# `setup` läuft einmal in jedem neuen Workspace (Worktree). Was es tut und warum, steht in
+# scripts/orca-setup.sh. Die Datei wirkt erst, wenn sie auf dem Hauptzweig liegt: Neue
+# Workspaces entstehen aus dem Stand dort.
+scripts:
+  setup: bash scripts/orca-setup.sh

@@ -41,6 +41,9 @@ export default function AppLayout({ children, companyName, userEmail, userName, 
                 <Sidebar companyName={companyName} userEmail={userEmail} userName={userName} />
 
                 {/* Main Content */}
+                {/* min-w-0: Ein Flex-Kind wächst sonst auf die Mindestbreite seines Inhalts
+                    und schiebt die ganze Seite auseinander, statt dass eine breite Tabelle
+                    in ihrem eigenen Container scrollt. */}
                 <main className="min-w-0 flex-1 pl-80">
                   <TrialBanner inTrial={inTrial} entitled={entitled} trialDaysLeft={trialDaysLeft} />
                   {children}

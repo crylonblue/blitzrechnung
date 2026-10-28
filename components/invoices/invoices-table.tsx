@@ -7,9 +7,9 @@ import { useRouter } from 'next/navigation'
 import { Invoice } from '@/types'
 import { useInvoiceDrawer } from '@/contexts/invoice-drawer-context'
 import { isOverdue, getStatusLabel, getStatusClass } from '@/lib/invoice-utils'
-import { Button } from '@/components/ui/button'
-import { SendHorizontal } from 'lucide-react'
 import SendInvoiceModal from './send-invoice-modal'
+import InvoiceRowMenu from './invoice-row-menu'
+import { useDuplicateInvoice } from './use-duplicate-invoice'
 import { InvoiceFiltersToolbar } from './invoice-filters'
 import {
   Table,
@@ -28,17 +28,13 @@ interface InvoicesTableProps {
 export default function InvoicesTable({ invoices, companyNames = {} }: InvoicesTableProps) {
   const router = useRouter()
   const { openDrawer } = useInvoiceDrawer()
+  const { duplicate, duplicatingId, canDuplicate } = useDuplicateInvoice()
   const [sendModalInvoice, setSendModalInvoice] = useState<Invoice | null>(null)
   const [filteredInvoices, setFilteredInvoices] = useState<Invoice[]>(invoices)
 
   const handleFilteredInvoicesChange = useCallback((filtered: Invoice[]) => {
     setFilteredInvoices(filtered)
   }, [])
-
-  const handleSendClick = (e: React.MouseEvent, invoice: Invoice) => {
-    e.stopPropagation()
-    setSendModalInvoice(invoice)
-  }
 
   const handleSent = () => {
     setSendModalInvoice(null)
@@ -59,7 +55,10 @@ export default function InvoicesTable({ invoices, companyNames = {} }: InvoicesT
           <p className="text-meta mt-1">Versuchen Sie, die Filter anzupassen.</p>
         </div>
       ) : (
-        <Table>
+        // Mindestbreite, damit die Tabelle bei schmalem Fenster seitlich scrollt
+        // (der Container in `ui/table.tsx` scrollt schon) statt die Spalten
+        // zusammenzuquetschen.
+        <Table className="min-w-[56rem]">
           <TableHeader>
             <TableRow>
               <TableHead>Rechnungsnummer</TableHead>
@@ -119,16 +118,13 @@ export default function InvoicesTable({ invoices, companyNames = {} }: InvoicesT
                     )}
                   </div>
                 </TableCell>
-                <TableCell>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 w-8 p-0"
-                    onClick={(e) => handleSendClick(e, invoice)}
-                    title="Per E-Mail versenden"
-                  >
-                    <SendHorizontal className="h-4 w-4" />
-                  </Button>
+                <TableCell className="text-right">
+                  <InvoiceRowMenu
+                    onSend={() => setSendModalInvoice(invoice)}
+                    // Eine Stornorechnung ist keine Vorlage — dort entfällt der Eintrag.
+                    onDuplicate={invoice.invoice_type === 'cancellation' || !canDuplicate ? undefined : () => duplicate(invoice.id)}
+                    isDuplicating={duplicatingId === invoice.id}
+                  />
                 </TableCell>
               </TableRow>
             )
