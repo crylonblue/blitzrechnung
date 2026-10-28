@@ -71,7 +71,7 @@ bewusst nicht im Repo. Nur der E-Mail-Versand braucht echte Zugangsdaten (`AHASE
 
 **Orca.** `orca.yaml` lässt jeden neuen Workspace `scripts/orca-setup.sh` ausführen: Es übernimmt
 die `.env.local` aus dem Primary-Checkout (sonst die Vorlage) und installiert die Abhängigkeiten
-mit pnpm 10, passend zu Lockfile und CI. Wer pnpm 11 global hat, braucht nichts zu tun. Einmalig im
+mit der pnpm-Version aus `packageManager` in der package.json — dieselbe wie in CI und auf Vercel. Einmalig im
 Primary-Checkout: `pnpm db:env` (und dort ergänzen, was nur dir gehört, etwa `AHASEND_*`). Die Datenbank startet das Skript nicht; es weist nur darauf hin, wenn sie nicht läuft.
 
 ### Mit einem Supabase-Projekt in der Cloud
