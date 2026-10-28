@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
-import { ChevronRight, LoaderCircle, Plus, Search } from 'lucide-react'
+import { ChevronRight, LoaderCircle, Pencil, Plus, Search, X } from 'lucide-react'
 
 export interface TeamMember {
   userId: string
@@ -137,19 +137,30 @@ export default function TeamManager({ currentUserId, isAdmin, isOwner, members, 
   return (
     <div>
       <Tabs defaultValue="members">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <TabsList>
-            <TabsTrigger value="members">Mitglieder · {members.length}</TabsTrigger>
-            <TabsTrigger value="departments">Abteilungen · {departments.length}</TabsTrigger>
+        <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3 border-b" style={{ borderColor: 'var(--border-default)' }}>
+          <TabsList className="h-auto w-auto justify-start gap-8 rounded-none bg-transparent p-0">
+            {([['members', 'Mitglieder', members.length], ['departments', 'Abteilungen', departments.length]] as const).map(([value, label, count]) => (
+              <TabsTrigger
+                key={value}
+                value={value}
+                className="rounded-none border-0 border-b-2 border-transparent bg-transparent px-0 pb-3 text-sm font-medium shadow-none transition-colors duration-150 hover:border-zinc-300 hover:text-zinc-900 data-[state=active]:border-zinc-900 data-[state=active]:bg-transparent data-[state=active]:font-semibold data-[state=active]:text-zinc-900 data-[state=active]:shadow-none"
+                style={{ color: 'var(--text-secondary)' }}
+              >
+                {label}
+                <span className="ml-2 rounded-full px-1.5 py-0.5 text-xs font-normal" style={{ background: 'rgba(45, 45, 45, 0.06)', color: 'var(--text-meta)' }}>
+                  {count}
+                </span>
+              </TabsTrigger>
+            ))}
           </TabsList>
-          <Button onClick={() => setInviteOpen(true)}>
+          <Button size="sm" className="mb-2" onClick={() => setInviteOpen(true)}>
             <Plus className="mr-1.5 h-4 w-4" />
             Person einladen
           </Button>
         </div>
 
         {/* Mitglieder */}
-        <TabsContent value="members" className="mt-5 space-y-3">
+        <TabsContent value="members" className="mt-6 space-y-3">
           {members.length > 6 && (
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2" style={{ color: 'var(--text-meta)' }} />
@@ -162,7 +173,7 @@ export default function TeamManager({ currentUserId, isAdmin, isOwner, members, 
               />
             </div>
           )}
-          <div className="card divide-y" style={{ borderColor: 'var(--border-default)' }}>
+          <div className="divide-y divide-zinc-200 overflow-hidden rounded-lg border border-zinc-200 bg-white">
             {visibleMembers.length === 0 && <div className="px-5 py-8 text-center text-meta">Niemand gefunden.</div>}
             {visibleMembers.map((m) => {
               const self = m.userId === currentUserId
@@ -217,8 +228,8 @@ export default function TeamManager({ currentUserId, isAdmin, isOwner, members, 
         </TabsContent>
 
         {/* Abteilungen */}
-        <TabsContent value="departments" className="mt-5 space-y-3">
-          <div className="card divide-y" style={{ borderColor: 'var(--border-default)' }}>
+        <TabsContent value="departments" className="mt-6 space-y-3">
+          <div className="divide-y divide-zinc-200 overflow-hidden rounded-lg border border-zinc-200 bg-white">
             {departments.map((d) => {
               const inDepartment = members.filter((m) => m.departments.some((x) => x.id === d.id))
               const leads = inDepartment.filter((m) => m.departments.find((x) => x.id === d.id)?.role === 'manager')
@@ -622,7 +633,7 @@ function MemberSheet({
                 <p className="text-meta">Diese Rolle sieht alle Rechnungen der Firma.</p>
               ) : (
                 <>
-                  <ul className="card divide-y" style={{ borderColor: 'var(--border-default)' }}>
+                  <ul className="divide-y divide-zinc-200 overflow-hidden rounded-lg border border-zinc-200 bg-white">
                     {departments.map((d) => {
                       const link = member.departments.find((x) => x.id === d.id)
                       return (
@@ -718,82 +729,119 @@ function DepartmentSheet({
   run: (fn: () => Promise<boolean>) => Promise<boolean>
 }) {
   const [name, setName] = useState('')
+  const [renaming, setRenaming] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
-  // Beim Wechsel der Abteilung den Namen neu vorbelegen.
+  // Beim Wechsel der Abteilung Namen und Bearbeitungsmodus zurücksetzen.
   if (department && editingId !== department.id) {
     setEditingId(department.id)
     setName(department.name)
+    setRenaming(false)
   }
   if (!department && editingId !== null) setEditingId(null)
 
   const inDepartment = department ? members.filter((m) => m.departments.some((x) => x.id === department.id)) : []
   const candidates = department ? members.filter((m) => !SEES_ALL.includes(m.role) && !m.departments.some((x) => x.id === department.id)) : []
 
+  const saveName = async () => {
+    if (!department || !name.trim() || name.trim() === department.name) return setRenaming(false)
+    const ok = await run(async () => (await call(`/api/team/departments/${department.id}`, 'PATCH', { name })).ok)
+    if (ok) setRenaming(false)
+  }
+
   return (
     <Sheet open={!!department} onOpenChange={(open) => !open && onClose()}>
-      <SheetContent className="w-full overflow-y-auto p-6 sm:max-w-md">
+      <SheetContent className="w-full gap-6 overflow-y-auto p-6 sm:max-w-md">
         {department && (
           <>
-            <SheetHeader className="p-0 pr-10">
-              <SheetTitle className="text-base">{department.name}</SheetTitle>
+            <SheetHeader className="space-y-2 p-0 pr-12">
+              {renaming ? (
+                <form
+                  className="flex items-center gap-2"
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    saveName()
+                  }}
+                >
+                  <Input autoFocus aria-label="Name der Abteilung" value={name} onChange={(e) => setName(e.target.value)} />
+                  <Button type="submit" size="sm" disabled={busy || !name.trim()}>
+                    Speichern
+                  </Button>
+                  <Button type="button" size="sm" variant="ghost" onClick={() => { setName(department.name); setRenaming(false) }}>
+                    Abbrechen
+                  </Button>
+                </form>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <SheetTitle className="truncate text-lg">{department.name}</SheetTitle>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      aria-label="Abteilung umbenennen"
+                      onClick={() => setRenaming(true)}
+                      className="rounded p-1 hover:bg-black/5"
+                      style={{ color: 'var(--text-meta)' }}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              )}
+              <div className="flex flex-wrap items-center gap-1.5">
+                {department.isDefault && <Chip muted>Standard</Chip>}
+                <Chip muted>{inDepartment.length} {inDepartment.length === 1 ? 'Mitglied' : 'Mitglieder'}</Chip>
+              </div>
               <SheetDescription>
-                {department.isDefault ? 'Standardabteilung: neue Rechnungen landen hier, wenn nichts anderes gewählt ist.' : 'Rechnungen dieser Abteilung sehen nur ihre Mitglieder sowie Admins und Buchhaltung.'}
+                {department.isDefault
+                  ? 'Hier landen neue Rechnungen, wenn nichts anderes gewählt ist.'
+                  : 'Die Rechnungen sehen die Mitglieder sowie Admins und Buchhaltung.'}
               </SheetDescription>
             </SheetHeader>
 
-            {isAdmin && (
-              <form
-                className="flex items-end gap-2"
-                onSubmit={(e) => {
-                  e.preventDefault()
-                  if (name.trim() && name.trim() !== department.name) {
-                    run(async () => (await call(`/api/team/departments/${department.id}`, 'PATCH', { name })).ok)
-                  }
-                }}
-              >
-                <div className="flex-1">
-                  <Label htmlFor="rename-department">Name</Label>
-                  <Input id="rename-department" className="mt-1.5" value={name} onChange={(e) => setName(e.target.value)} />
-                </div>
-                <Button type="submit" variant="outline" disabled={busy || !name.trim() || name.trim() === department.name}>
-                  Umbenennen
-                </Button>
-              </form>
-            )}
-
-            <section className="space-y-2">
-              <h3 className="text-xs font-medium uppercase tracking-wide">Mitglieder · {inDepartment.length}</h3>
+            <section className="space-y-3">
+              <h3 className="text-xs font-medium uppercase tracking-wide">Mitglieder</h3>
               {inDepartment.length === 0 ? (
-                <p className="text-meta">Noch keine Mitglieder.</p>
+                <div className="rounded-lg border border-dashed border-zinc-300 px-4 py-6 text-center text-meta">
+                  Noch niemand in dieser Abteilung.
+                </div>
               ) : (
-                <ul className="card divide-y" style={{ borderColor: 'var(--border-default)' }}>
+                <ul className="divide-y divide-zinc-200 overflow-hidden rounded-lg border border-zinc-200 bg-white">
                   {inDepartment.map((m) => {
                     const link = m.departments.find((x) => x.id === department.id)!
+                    const lead = link.role === 'manager'
                     return (
-                      <li key={m.userId} className="flex items-center justify-between gap-3 px-4 py-2.5">
-                        <span className="truncate text-sm">{displayName(m)}</span>
-                        <span className="flex items-center gap-1">
-                          <Select
-                            value={link.role}
-                            disabled={busy}
-                            onValueChange={(value) => run(async () => (await call(`/api/team/departments/${department.id}/members`, 'PUT', { userId: m.userId, role: value })).ok)}
-                          >
-                            <SelectTrigger className="h-8 w-28"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="member">Mitglied</SelectItem>
-                              <SelectItem value="manager">Leitung</SelectItem>
-                            </SelectContent>
-                          </Select>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            disabled={busy}
-                            aria-label={`${displayName(m)} aus der Abteilung entfernen`}
-                            onClick={() => run(async () => (await call(`/api/team/departments/${department.id}/members?userId=${m.userId}`, 'DELETE')).ok)}
-                          >
-                            Entfernen
-                          </Button>
-                        </span>
+                      <li key={m.userId} className="flex items-center gap-3 px-4 py-3">
+                        <Avatar member={m} />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-medium">{displayName(m)}</div>
+                          {displayName(m) !== m.email && <div className="truncate text-meta">{m.email}</div>}
+                        </div>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          aria-pressed={lead}
+                          title={lead ? 'Leitung entziehen' : 'Zur Leitung machen'}
+                          onClick={() =>
+                            run(async () => (await call(`/api/team/departments/${department.id}/members`, 'PUT', { userId: m.userId, role: lead ? 'member' : 'manager' })).ok)
+                          }
+                          className="rounded-md border px-2.5 py-1 text-xs transition-colors"
+                          style={{
+                            borderColor: lead ? 'var(--text-primary)' : 'var(--border-default)',
+                            background: lead ? 'rgba(45, 45, 45, 0.08)' : 'transparent',
+                            color: lead ? 'var(--text-primary)' : 'var(--text-secondary)',
+                          }}
+                        >
+                          Leitung
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          aria-label={`${displayName(m)} aus der Abteilung entfernen`}
+                          onClick={() => run(async () => (await call(`/api/team/departments/${department.id}/members?userId=${m.userId}`, 'DELETE')).ok)}
+                          className="rounded p-1.5 hover:bg-black/5"
+                          style={{ color: 'var(--text-meta)' }}
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
                       </li>
                     )
                   })}
@@ -805,7 +853,7 @@ function DepartmentSheet({
                   disabled={busy}
                   onValueChange={(userId) => run(async () => (await call(`/api/team/departments/${department.id}/members`, 'PUT', { userId, role: 'member' })).ok)}
                 >
-                  <SelectTrigger className="w-full"><SelectValue placeholder="Mitglied hinzufügen …" /></SelectTrigger>
+                  <SelectTrigger className="w-full"><SelectValue placeholder="+ Mitglied hinzufügen" /></SelectTrigger>
                   <SelectContent>
                     {candidates.map((m) => (
                       <SelectItem key={m.userId} value={m.userId}>{displayName(m)}</SelectItem>
@@ -816,7 +864,7 @@ function DepartmentSheet({
             </section>
 
             {isAdmin && !department.isDefault && (
-              <section className="mt-auto border-t pt-5" style={{ borderColor: 'var(--border-default)' }}>
+              <section className="mt-auto space-y-2 border-t border-zinc-200 pt-5">
                 <ConfirmButton
                   label="Abteilung löschen"
                   confirmLabel="Ja, löschen"
@@ -826,7 +874,7 @@ function DepartmentSheet({
                     if (ok) onClose()
                   }}
                 />
-                <p className="mt-2 text-meta">Nur möglich, solange keine Rechnungen oder Entwürfe in der Abteilung liegen.</p>
+                <p className="text-meta">Nur möglich, solange keine Rechnungen oder Entwürfe in der Abteilung liegen.</p>
               </section>
             )}
           </>
