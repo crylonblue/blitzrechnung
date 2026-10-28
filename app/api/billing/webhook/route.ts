@@ -116,6 +116,7 @@ async function syncSubscription(
     stripe_subscription_id: subscription.id,
     status: subscription.status,
     price_id: priceId,
+    quantity: Math.max(item?.quantity ?? 1, 1),
     // An unrecognised price grants nothing rather than guessing a tier.
     plan: subscription.status === 'canceled' ? 'none' : plan ?? 'none',
     current_period_end: periodEnd ? new Date(periodEnd * 1000).toISOString() : null,

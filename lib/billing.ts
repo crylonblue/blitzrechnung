@@ -35,6 +35,8 @@ export interface BillingState {
   cancelAtPeriodEnd: boolean
   currentPeriodEnd: string | null
   stripeCustomerId: string | null
+  /** Abgerechnete Plätze (Preis × Plätze). */
+  seats: number
 }
 
 export async function getBillingState(supabase: Db, companyId: string): Promise<BillingState> {
@@ -59,6 +61,7 @@ export async function getBillingState(supabase: Db, companyId: string): Promise<
       cancelAtPeriodEnd: false,
       currentPeriodEnd: null,
       stripeCustomerId: null,
+      seats: 1,
     }
   }
 
@@ -83,6 +86,7 @@ export async function getBillingState(supabase: Db, companyId: string): Promise<
     cancelAtPeriodEnd: sub?.cancel_at_period_end ?? false,
     currentPeriodEnd: sub?.current_period_end ?? null,
     stripeCustomerId: sub?.stripe_customer_id ?? null,
+    seats: sub?.quantity ?? 1,
   }
 }
 

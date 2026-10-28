@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { canManageDepartmentMembers, canManageTeam } from '@/lib/access'
+import { syncSeatsSafe } from '@/lib/seats'
 import { createLoginToken, sendInviteMail } from '@/lib/login-token'
 import { getTeamContext, teamErrorResponse, TeamError, isEmail } from '@/lib/team'
 
@@ -87,6 +88,7 @@ export async function POST(request: NextRequest) {
       }
     }
     createdUserId = null // ab hier bleibt das Konto bestehen
+    await syncSeatsSafe(ctx.db, ctx.companyId)
 
     // Scheitert die Mail, bleibt die Person eingeladen und die Oberfläche bietet
     // „Erneut senden“ an. Der Link wird bewusst nie an den Einladenden zurückgegeben:

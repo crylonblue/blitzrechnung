@@ -15,6 +15,8 @@ import type { BillingState } from '@/lib/billing'
 interface BillingSectionProps {
   billing: BillingState
   pricing: PlanPricing
+  /** Aktuelle Zahl der Mitglieder — so viele Plätze berechnet der Checkout. */
+  teamSize: number
 }
 
 const PLAN_LABELS: Record<string, string> = { basis: 'Basis', pro: 'Pro' }
@@ -43,7 +45,7 @@ function formatDate(value: string | null): string | null {
   return format(new Date(value), 'd. MMMM yyyy', { locale: de })
 }
 
-export default function BillingSection({ billing, pricing }: BillingSectionProps) {
+export default function BillingSection({ billing, pricing, teamSize }: BillingSectionProps) {
   const [interval, setInterval] = useState<Interval>('month')
   const [pendingPlan, setPendingPlan] = useState<Plan | null>(null)
   const [openingPortal, setOpeningPortal] = useState(false)
@@ -99,7 +101,8 @@ export default function BillingSection({ billing, pricing }: BillingSectionProps
             Tarif
           </CardTitle>
           <CardDescription className="text-sm">
-            {PLAN_LABELS[billing.plan]} · {STATUS_LABELS[billing.status] ?? billing.status}
+            {PLAN_LABELS[billing.plan]} · {STATUS_LABELS[billing.status] ?? billing.status} ·{' '}
+            {billing.seats} {billing.seats === 1 ? 'Platz' : 'Plätze'}
           </CardDescription>
         </CardHeader>
         <div className="space-y-4">
@@ -110,6 +113,10 @@ export default function BillingSection({ billing, pricing }: BillingSectionProps
                 : `Nächste Abrechnung am ${periodEnd}.`}
             </p>
           )}
+          <p className="text-sm text-muted-foreground">
+            Abgerechnet wird pro Nutzer. Die Zahl der Plätze folgt automatisch dem Team:
+            Wer dazukommt, wird anteilig berechnet, wer geht, wird gutgeschrieben.
+          </p>
           {billing.status === 'past_due' && (
             <div className="message-info">
               Die letzte Zahlung ist fehlgeschlagen. Bitte aktualisieren Sie Ihre Zahlungsdaten,
@@ -170,8 +177,8 @@ export default function BillingSection({ billing, pricing }: BillingSectionProps
           <PlanCard
             title="Basis"
             price={formatNet(basisPrice)}
-            suffix={suffixFor(basisPrice)}
-            features={['Unbegrenzt viele Rechnungen', 'ZUGFeRD 2.3 & XRechnung', '1 Nutzer']}
+            suffix={`pro Nutzer ${suffixFor(basisPrice)}`}
+            features={['Unbegrenzt viele Rechnungen', 'ZUGFeRD 2.3 & XRechnung']}
             loading={pendingPlan === 'basis'}
             disabled={pendingPlan !== null || !basisPrice}
             onSelect={() => startCheckout('basis')}
@@ -180,8 +187,8 @@ export default function BillingSection({ billing, pricing }: BillingSectionProps
             title="Pro"
             badge="Empfohlen"
             price={formatNet(proPrice)}
-            suffix={suffixFor(proPrice)}
-            features={['Alles aus Basis', 'API-Zugriff für alle Funktionen', 'Bis zu 5 Nutzer']}
+            suffix={`pro Nutzer ${suffixFor(proPrice)}`}
+            features={['Alles aus Basis', 'API-Zugriff für alle Funktionen']}
             loading={pendingPlan === 'pro'}
             disabled={pendingPlan !== null || !proPrice}
             onSelect={() => startCheckout('pro')}
@@ -189,7 +196,8 @@ export default function BillingSection({ billing, pricing }: BillingSectionProps
         </div>
 
         <p className="text-[13px] text-muted-foreground">
-          Alle Preise sind Endpreise. Jederzeit kündbar.
+          Alle Preise sind Endpreise pro Nutzer. Aktuell {teamSize} im Team,
+          neue Nutzer werden anteilig berechnet. Jederzeit kündbar.
         </p>
       </div>
     </div>

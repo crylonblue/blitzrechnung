@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server'
 import { getStripe, resolvePriceId, appUrl, type Plan, type Interval } from '@/lib/stripe'
+import { countSeats } from '@/lib/seats'
 
 // Tags these sessions in the Dashboard so checkout flows stay comparable.
 const INTEGRATION_ID = 'blitzrechnung-subscription-kvxmrtwd'
@@ -80,7 +81,8 @@ export async function POST(request: NextRequest) {
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
       customer: customerId,
-      line_items: [{ price: priceId, quantity: 1 }],
+      // Preis pro Platz: Menge = Mitglieder der Firma, bei Monat und Jahr.
+      line_items: [{ price: priceId, quantity: await countSeats(service, companyId) }],
       // Kleinunternehmer nach § 19 UStG: no VAT is charged or shown, so Stripe
       // Tax stays off. Turning it on would need a tax registration, and any
       // VAT shown on an invoice would become genuinely owed under § 14c UStG.

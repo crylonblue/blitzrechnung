@@ -2,6 +2,8 @@ import { createClient } from '@/lib/supabase/server'
 import CompanySettings from '@/components/settings/company-settings'
 import BillingSection from '@/components/settings/billing-section'
 import { getBillingState } from '@/lib/billing'
+import { countSeats, syncSeatsSafe } from '@/lib/seats'
+import { createServiceRoleClient } from '@/lib/supabase/server'
 import { loadPlanPricing } from '@/lib/stripe'
 import { getAppSession } from '@/lib/app-session'
 
@@ -46,9 +48,13 @@ export default async function SettingsPage() {
     )
   }
 
-  const [billing, pricing] = await Promise.all([
+  // Holt eine zuvor gescheiterte Mengenänderung bei Stripe nach.
+  if (role === 'owner') await syncSeatsSafe(createServiceRoleClient(), company.id)
+
+  const [billing, pricing, seats] = await Promise.all([
     getBillingState(supabase, company.id),
     loadPlanPricing(),
+    countSeats(createServiceRoleClient(), company.id),
   ])
 
   return (
@@ -57,7 +63,7 @@ export default async function SettingsPage() {
         company={company}
         billing={
           // Den Tarif ändert nur der Owner (die Billing-Routen erzwingen das).
-          role === 'owner' ? <BillingSection billing={billing} pricing={pricing} /> : undefined
+          role === 'owner' ? <BillingSection billing={billing} pricing={pricing} teamSize={seats} /> : undefined
         }
       />
     </div>
