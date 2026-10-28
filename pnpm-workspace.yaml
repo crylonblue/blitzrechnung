@@ -1,5 +1,15 @@
 packages:
   - .
-ignoredBuiltDependencies:
-  - sharp
-  - unrs-resolver
+
+# Install-Skripte, die nicht laufen müssen (pnpm bricht sonst bei nicht freigegebenen ab):
+# sharp, unrs-resolver und esbuild bringen vorgebaute Binärdateien als optionale Pakete mit,
+# xsd-schema-validator (über node-zugferd) würde ein Java-Programm kompilieren.
+allowBuilds:
+  esbuild: false
+  sharp: false
+  unrs-resolver: false
+  xsd-schema-validator: false
+
+overrides:
+  node-zugferd>fast-xml-parser: ^4.5.4
+  node-zugferd>defu: ^6.1.7

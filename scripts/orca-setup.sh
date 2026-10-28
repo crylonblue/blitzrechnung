@@ -11,7 +11,7 @@
 #      fehlt deshalb in jedem frischen Worktree — ohne sie startet `pnpm dev` mit
 #      "URL and Key are required". Gepflegt wird sie nur an einer Stelle: im Primary.
 #      Fehlt sie dort, wird sie aus der laufenden Datenbank erzeugt (scripts/local-env.sh).
-#   2. Abhängigkeiten installieren — mit pnpm 10, siehe unten.
+#   2. Abhängigkeiten installieren — mit der pnpm-Version aus package.json (packageManager).
 #   3. Hinweis, falls die lokale Datenbank nicht läuft. Gestartet wird sie hier nicht:
 #      Alle Worktrees teilen sich eine Instanz (supabase/config.toml, project_id), und ein
 #      Start gehört nicht in den Hook jedes einzelnen.
@@ -44,18 +44,14 @@ fi
 
 # --- 2. Abhängigkeiten ---------------------------------------------------------------------
 
-# Das Lockfile und die CI (.github/workflows/ci.yml) sind auf pnpm 10 ausgelegt. pnpm 11 liest
-# `pnpm.overrides` aus der package.json nicht mehr; `--frozen-lockfile` bricht damit mit
-# ERR_PNPM_LOCKFILE_CONFIG_MISMATCH ab, ein normaler Install schreibt das Lockfile um. Also
-# pnpm 10 verwenden, egal was global installiert ist.
-PNPM_MAJOR=10
-
-installed_major="$(pnpm --version 2>/dev/null | cut -d. -f1 || true)"
-if [ "$installed_major" = "$PNPM_MAJOR" ]; then
+# Welche pnpm-Version gilt, steht in package.json (`packageManager`); ein global installiertes
+# pnpm wechselt von selbst dorthin. Ohne globales pnpm holt npx genau diese Version.
+if command -v pnpm >/dev/null 2>&1; then
   pnpm install --frozen-lockfile
 else
-  echo "[setup] pnpm ${installed_major:-fehlt} gefunden, benötigt wird pnpm $PNPM_MAJOR — nutze npx."
-  npx --yes "pnpm@$PNPM_MAJOR" install --frozen-lockfile
+  pnpm_version="$(node -p 'require("./package.json").packageManager')"
+  echo "[setup] pnpm fehlt — nutze npx $pnpm_version."
+  npx --yes "$pnpm_version" install --frozen-lockfile
 fi
 
 # --- 3. Datenbank --------------------------------------------------------------------------
