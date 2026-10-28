@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { canManageTeam, isOwner } from '@/lib/access'
+import { syncSeatsSafe } from '@/lib/seats'
 import { getTeamContext, teamErrorResponse, TeamError } from '@/lib/team'
 
 async function loadTarget(ctx: Awaited<ReturnType<typeof getTeamContext>>, userId: string) {
@@ -82,6 +83,8 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
     if (keyError) throw new TeamError(500, 'Entfernen fehlgeschlagen')
     const { error: memberError } = await ctx.db.from('company_users').delete().eq('user_id', userId).eq('company_id', ctx.companyId)
     if (memberError) throw new TeamError(500, 'Entfernen fehlgeschlagen')
+
+    await syncSeatsSafe(ctx.db, ctx.companyId)
 
     // Eine nie angemeldete, nur für diese Einladung angelegte Person lässt kein
     // Konto ohne Zweck zurück. `invite_pending` allein genügt nicht: Wer sich
