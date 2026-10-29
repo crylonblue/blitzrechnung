@@ -1,5 +1,11 @@
-import type { Invoice, PartySnapshot } from '@/types'
-import { getDefaultEmailSubject, getDefaultEmailBody, type InvoiceLanguage } from './invoice-translations'
+import type { EmailSettings, Invoice, PartySnapshot } from '@/types'
+import {
+  getDefaultEmailSubject,
+  getDefaultEmailBody,
+  getDefaultCancellationEmailSubject,
+  getDefaultCancellationEmailBody,
+  type InvoiceLanguage,
+} from './invoice-translations'
 
 /**
  * Default email subject template (German)
@@ -105,6 +111,38 @@ export function generateEmailBody(
   // Use template if provided, otherwise use language-specific default
   const bodyTemplate = template || getDefaultEmailBody(language)
   return replaceEmailPlaceholders(bodyTemplate, invoice, buyer, language)
+}
+
+/**
+ * Betreff und Text der Versand-E-Mail, wie sie vorbelegt werden — im Modal
+ * und beim Versand ohne eigenen Text (API) dieselben.
+ *
+ * Sprache ist die der Rechnung. Eine Stornorechnung bekommt ihren eigenen
+ * Text statt der Rechnungsvorlage der Firma; dafür braucht es die Nummer der
+ * stornierten Rechnung.
+ */
+export function generateInvoiceEmail(
+  invoice: Invoice,
+  buyer: PartySnapshot | null,
+  emailSettings: EmailSettings,
+  originalInvoiceNumber?: string | null
+): { subject: string; body: string } {
+  const language = (invoice.language as InvoiceLanguage) || 'de'
+  if (invoice.invoice_type === 'cancellation') {
+    return {
+      subject: replaceEmailPlaceholders(getDefaultCancellationEmailSubject(language), invoice, buyer, language),
+      body: replaceEmailPlaceholders(
+        getDefaultCancellationEmailBody(language, originalInvoiceNumber || ''),
+        invoice,
+        buyer,
+        language
+      ),
+    }
+  }
+  return {
+    subject: generateEmailSubject(emailSettings.invoice_email_subject, invoice, buyer, language),
+    body: generateEmailBody(emailSettings.invoice_email_body, invoice, buyer, language),
+  }
 }
 
 /**

@@ -6,9 +6,10 @@ import { uploadToS3, downloadFromS3 } from './s3'
 import { mapDBInvoiceToPDFInvoice } from './invoice-mapper'
 import { validateXRechnungInvoice } from './schema'
 import { sendEmail, getDefaultFromEmail } from './email'
-import { textToHtml, generateEmailSubject, generateEmailBody } from './email-templates'
+import { textToHtml, generateInvoiceEmail } from './email-templates'
 import { getBillingState, TRIAL_EXPIRED_MESSAGE, TRIAL_EXPIRED_DETAILS } from './billing'
 import { resolveInvoiceTexts } from './invoice-texts'
+import { getTranslations, formatDateForLanguage } from './invoice-translations'
 import { userCanAccessInvoice } from './access'
 import { getAdditionalContacts, resolveSellerContact, resolveReplyTo } from './contact-persons'
 import { buildDuplicateDraft, DuplicateNotAllowedError } from './invoice-duplicate'
@@ -330,6 +331,15 @@ export async function cancelInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: st
     vat_amount: item.vat_amount ? -Math.abs(item.vat_amount) : undefined,
   }))
 
+  // Einleitung und Schluss der Originalrechnung passen nicht zum Storno —
+  // dort steht typischerweise die Bitte um Zahlung. Die Stornorechnung sagt
+  // stattdessen, welche Rechnung sie aufhebt.
+  const language = (dbInvoice.language as 'de' | 'en') || 'de'
+  const cancellationIntroText = getTranslations(language).cancellationIntroText(
+    dbInvoice.invoice_number || '',
+    dbInvoice.invoice_date ? formatDateForLanguage(dbInvoice.invoice_date, language) : ''
+  )
+
   const cancellationData = {
     company_id: dbInvoice.company_id,
     // Die Stornorechnung bleibt in der Abteilung des Originals; sonst landete sie
@@ -354,8 +364,8 @@ export async function cancelInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: st
     total_amount: -Math.abs(dbInvoice.total_amount),
     recipient_email: dbInvoice.recipient_email,
     language: dbInvoice.language,
-    intro_text: dbInvoice.intro_text,
-    outro_text: dbInvoice.outro_text,
+    intro_text: cancellationIntroText,
+    outro_text: null,
     buyer_reference: (dbInvoice as any).buyer_reference,
     cancelled_invoice_id: invoiceId,
     finalized_at: new Date().toISOString(),
@@ -369,12 +379,11 @@ export async function cancelInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: st
     dbInvoice.seller_snapshot as unknown as PartySnapshot,
     dbInvoice.buyer_snapshot as unknown as PartySnapshot,
     dbInvoice.seller_is_self ? (company as any).logo_url : null,
-    dbInvoice.intro_text,
-    dbInvoice.outro_text,
+    cancellationIntroText,
+    null,
     (dbInvoice as any).buyer_reference,
     { kleinunternehmer: (company as any)?.kleinunternehmer === true }
   )
-  const language = (dbInvoice.language as 'de' | 'en') || 'de'
   const options = { isCancellation: true, originalInvoiceNumber: dbInvoice.invoice_number || undefined }
 
   let pdfBuffer: Uint8Array
@@ -467,19 +476,25 @@ export async function sendInvoice(supabase: Db, ctx: ServiceCtx, invoiceId: stri
 
   const customerSnapshot = invoice.buyer_snapshot as unknown as CustomerSnapshot | null
   const emailSettings = ((company as any).email_settings as EmailSettings) || { mode: 'default' }
-  const language = (invoice.language as 'de' | 'en') || 'de'
 
   const recipientEmail = opts.recipientEmail || invoice.recipient_email || customerSnapshot?.email
   if (!recipientEmail) throw new InvoiceServiceError(400, 'VALIDATION_ERROR', 'Empfänger-E-Mail ist erforderlich')
 
-  const subject =
-    opts.subject ||
-    (customerSnapshot
-      ? generateEmailSubject(emailSettings.invoice_email_subject, invoice as any, customerSnapshot as any, language)
-      : `Rechnung ${invoice.invoice_number || ''}`)
-  const emailBody =
-    opts.body ||
-    (customerSnapshot ? generateEmailBody(emailSettings.invoice_email_body, invoice as any, customerSnapshot as any, language) : '')
+  let originalInvoiceNumber: string | null = null
+  if (invoice.invoice_type === 'cancellation' && invoice.cancelled_invoice_id && !(opts.subject && opts.body)) {
+    const { data: original } = await supabase
+      .from('invoices')
+      .select('invoice_number')
+      .eq('id', invoice.cancelled_invoice_id)
+      .eq('company_id', ctx.companyId)
+      .single()
+    originalInvoiceNumber = original?.invoice_number ?? null
+  }
+  const defaultEmail = customerSnapshot
+    ? generateInvoiceEmail(invoice as any, customerSnapshot as any, emailSettings, originalInvoiceNumber)
+    : null
+  const subject = opts.subject || defaultEmail?.subject || `Rechnung ${invoice.invoice_number || ''}`
+  const emailBody = opts.body || defaultEmail?.body || ''
 
   // From / reply-to / server token (custom domain support).
   const useCustomDomain = emailSettings.mode === 'custom_domain' && emailSettings.domain_verified && !!emailSettings.from_email

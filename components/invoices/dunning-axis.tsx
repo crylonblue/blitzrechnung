@@ -7,6 +7,7 @@ import { FileCode, FileText, LoaderCircle, SendHorizontal } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { baueAchse, zusatzForderungen, type AchsenSchritt } from '@/lib/dunning-axis'
+import { istMahnbarerBeleg } from '@/lib/dunning-claim'
 import { getStatusClass, getStatusLabel } from '@/lib/invoice-utils'
 import type { Invoice } from '@/types'
 import DunningDrawer from './dunning-drawer'
@@ -395,8 +396,55 @@ export default function DunningAxis({
     setSchubladeOffen(true)
   }
 
+  // Die Knöpfe zu PDF und XML der Rechnung. Hängen sonst an der Sprosse der
+  // Rechnung — eine Stornorechnung hat keinen Mahnverlauf und damit keine
+  // Sprosse, ihre Dateien will man trotzdem ansehen können.
+  const dateien = (hatPdf || hatXml) && (
+    <div className="mt-2 flex gap-2">
+      {hatPdf && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="min-w-0 flex-1"
+          onClick={onPdf}
+          disabled={pdfLaedt}
+          title="Rechnung als PDF mit eingebetteter ZUGFeRD-Datei herunterladen"
+        >
+          <FileText className="h-4 w-4 shrink-0" />
+          <span className="truncate">{pdfLaedt ? 'Lädt...' : 'PDF (ZUGFeRD)'}</span>
+        </Button>
+      )}
+      {hatXml && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="min-w-0 flex-1"
+          onClick={onXml}
+          disabled={xmlLaedt}
+          title="Rechnung als XRechnung im XML-Format herunterladen"
+        >
+          <FileCode className="h-4 w-4 shrink-0" />
+          <span className="truncate">{xmlLaedt ? 'Lädt...' : 'XML (XRechnung)'}</span>
+        </Button>
+      )}
+    </div>
+  )
+
   // Ohne Datei und ohne einen einzigen Schritt gäbe es nur eine Überschrift.
   if (schritte.length === 0 && !hatPdf && !hatXml) return null
+
+  // Eine Stornorechnung wird nicht gemahnt: kein Verlauf, nur ihre Dateien.
+  if (!istMahnbarerBeleg(invoice)) {
+    if (!dateien) return null
+    return (
+      <div className="mt-6 border-t border-zinc-200 pt-4 dark:border-zinc-700">
+        <h3 className="mb-1 text-xs font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+          Dokumente
+        </h3>
+        {dateien}
+      </div>
+    )
+  }
 
   return (
     <div className="mt-6 border-t border-zinc-200 pt-4 dark:border-zinc-700">
@@ -421,36 +469,7 @@ export default function DunningAxis({
                   {schritt.tag ? tag(schritt.tag) : 'ohne Datum'} ·{' '}
                   {euro.format(schritt.betrag ?? 0)}
                 </p>
-                {(hatPdf || hatXml) && (
-                  <div className="mt-2 flex gap-2">
-                    {hatPdf && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="min-w-0 flex-1"
-                        onClick={onPdf}
-                        disabled={pdfLaedt}
-                        title="Rechnung als PDF mit eingebetteter ZUGFeRD-Datei herunterladen"
-                      >
-                        <FileText className="h-4 w-4 shrink-0" />
-                        <span className="truncate">{pdfLaedt ? 'Lädt...' : 'PDF (ZUGFeRD)'}</span>
-                      </Button>
-                    )}
-                    {hatXml && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="min-w-0 flex-1"
-                        onClick={onXml}
-                        disabled={xmlLaedt}
-                        title="Rechnung als XRechnung im XML-Format herunterladen"
-                      >
-                        <FileCode className="h-4 w-4 shrink-0" />
-                        <span className="truncate">{xmlLaedt ? 'Lädt...' : 'XML (XRechnung)'}</span>
-                      </Button>
-                    )}
-                  </div>
-                )}
+                {dateien}
                 {!hatPdf && !hatXml && (
                   <p className="mt-1.5 text-xs text-zinc-400 dark:text-zinc-500">
                     Zu dieser Rechnung ist noch keine Datei erzeugt worden.

@@ -53,6 +53,7 @@ interface InvoiceTranslations {
   // Cancellation email templates
   cancellationEmailSubject: (invoiceNumber: string) => string
   cancellationEmailBody: (cancellationNumber: string, originalInvoiceNumber: string) => string
+  cancellationIntroText: (originalInvoiceNumber: string, originalInvoiceDate: string) => string
 }
 
 const germanTranslations: InvoiceTranslations = {
@@ -105,6 +106,8 @@ const germanTranslations: InvoiceTranslations = {
   cancellationEmailSubject: (invoiceNumber: string) => `Stornorechnung ${invoiceNumber}`,
   cancellationEmailBody: (cancellationNumber: string, originalInvoiceNumber: string) => 
     `anbei erhalten Sie die Stornorechnung ${cancellationNumber} zur Stornierung der Rechnung ${originalInvoiceNumber}.`,
+  cancellationIntroText: (originalInvoiceNumber: string, originalInvoiceDate: string) =>
+    `hiermit stornieren wir unsere Rechnung ${originalInvoiceNumber} vom ${originalInvoiceDate} in voller Höhe.`,
 }
 
 const englishTranslations: InvoiceTranslations = {
@@ -157,6 +160,8 @@ const englishTranslations: InvoiceTranslations = {
   cancellationEmailSubject: (invoiceNumber: string) => `Cancellation Invoice ${invoiceNumber}`,
   cancellationEmailBody: (cancellationNumber: string, originalInvoiceNumber: string) => 
     `please find attached the cancellation invoice ${cancellationNumber} for the cancellation of invoice ${originalInvoiceNumber}.`,
+  cancellationIntroText: (originalInvoiceNumber: string, originalInvoiceDate: string) =>
+    `We hereby cancel our invoice ${originalInvoiceNumber} dated ${originalInvoiceDate} in full.`,
 }
 
 /**
@@ -216,6 +221,30 @@ export function getDefaultEmailBody(language: InvoiceLanguage): string {
   return `${t.emailGreeting}
 
 ${t.emailBody('{invoice_number}', '{total_amount}')}
+
+${t.emailQuestionsAvailable}
+
+${t.emailClosing}`
+}
+
+/**
+ * Default email subject for a cancellation invoice (Stornorechnung).
+ * Kein Platzhalter für die Originalnummer — die kennt nur der Aufrufer.
+ */
+export function getDefaultCancellationEmailSubject(language: InvoiceLanguage): string {
+  return getTranslations(language).cancellationEmailSubject('{invoice_number}')
+}
+
+/**
+ * Default email body for a cancellation invoice. Ohne eigene Vorlage: Die
+ * Rechnungsvorlage der Firma kündigt „Rechnung … über {total_amount}" an und
+ * machte aus dem Storno eine Rechnung über einen negativen Betrag.
+ */
+export function getDefaultCancellationEmailBody(language: InvoiceLanguage, originalInvoiceNumber: string): string {
+  const t = getTranslations(language)
+  return `${t.emailGreeting}
+
+${t.cancellationEmailBody('{invoice_number}', originalInvoiceNumber)}
 
 ${t.emailQuestionsAvailable}
 

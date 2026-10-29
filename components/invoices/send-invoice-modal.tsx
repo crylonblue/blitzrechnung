@@ -16,10 +16,7 @@ import {
 } from '@/components/ui/dialog'
 import { LoaderCircle, FileText, FileCode } from 'lucide-react'
 import { toast } from 'sonner'
-import {
-  generateEmailSubject,
-  generateEmailBody,
-} from '@/lib/email-templates'
+import { generateInvoiceEmail } from '@/lib/email-templates'
 import { resolveReplyTo } from '@/lib/contact-persons'
 
 interface SendInvoiceModalProps {
@@ -80,9 +77,21 @@ export default function SendInvoiceModal({
       // Set recipient email from invoice or buyer
       setRecipientEmail(invoice.recipient_email || buyerSnapshot.email || '')
 
-      // Generate subject and body from templates
-      setSubject(generateEmailSubject(emailSettings.invoice_email_subject, invoice, buyerSnapshot))
-      setBody(generateEmailBody(emailSettings.invoice_email_body, invoice, buyerSnapshot))
+      // Eine Stornorechnung nennt in ihrer Mail die stornierte Rechnung.
+      let originalInvoiceNumber: string | null = null
+      if (invoice.invoice_type === 'cancellation' && invoice.cancelled_invoice_id) {
+        const { data: original } = await supabase
+          .from('invoices')
+          .select('invoice_number')
+          .eq('id', invoice.cancelled_invoice_id)
+          .single()
+        originalInvoiceNumber = original?.invoice_number ?? null
+      }
+
+      // Generate subject and body from templates, in the invoice's language
+      const email = generateInvoiceEmail(invoice, buyerSnapshot, emailSettings, originalInvoiceNumber)
+      setSubject(email.subject)
+      setBody(email.body)
     }
 
     setIsLoading(false)
